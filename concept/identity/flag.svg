@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200" width="300" height="200">
+  <title>Reclaimer's Mark — Flag</title>
+
+  <defs>
+    <pattern id="hazard" x="0" y="0" width="20" height="8" patternUnits="userSpaceOnUse" patternTransform="skewX(-30)">
+      <rect x="0" y="0" width="10" height="8" fill="#1a2230"/>
+      <rect x="10" y="0" width="10" height="8" fill="#f0c419"/>
+    </pattern>
+  </defs>
+
+  <!-- Sky / slate band -->
+  <rect x="0" y="0" width="300" height="68" fill="#1a2230"/>
+  <!-- Ground / rust field -->
+  <rect x="0" y="68" width="300" height="132" fill="#8b4a2b"/>
+  <!-- Soil shadow under the horizon -->
+  <rect x="0" y="76" width="300" height="6" fill="#6e3a21" opacity="0.6"/>
+
+  <!-- Hazard horizon stripe -->
+  <rect x="0" y="66" width="300" height="8" fill="url(#hazard)"/>
+
+  <!-- Distant ruin silhouette -->
+  <g fill="#121922" opacity="0.55">
+    <polygon points="0,66 18,46 32,58 48,40 64,52 80,38 96,54 112,44 128,60 144,48 162,58 180,42 196,56 214,46 234,58 252,44 270,56 286,48 300,60 300,66"/>
+  </g>
+
+  <!-- Centered emblem -->
+  <g transform="translate(150 118)">
+    <!-- Broken hex -->
+    <path d="M 30 0 L 15 26 L -15 26 L -30 0 L -15 -26 M 15 -26 L 30 0"
+          stroke="#0f1620" stroke-width="3.5" fill="none"
+          stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Three circuit roots -->
+    <g stroke="#0f1620" stroke-width="2.8" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M -12 -26 L -12 -44 L -22 -44 L -22 -56"/>
+      <path d="M 0 -26 L 0 -62"/>
+      <path d="M 12 -26 L 12 -44 L 22 -44 L 22 -56"/>
+      <path d="M -12 -38 L 12 -38"/>
+    </g>
+
+    <!-- Glowing endpoints -->
+    <g fill="#f0c419">
+      <circle cx="-22" cy="-56" r="3.5"/>
+      <circle cx="0" cy="-62" r="4"/>
+      <circle cx="22" cy="-56" r="3.5"/>
+    </g>
+  </g>
+
+  <!-- Flag border (subtle) -->
+  <rect x="0.5" y="0.5" width="299" height="199" fill="none" stroke="#0a0e15" stroke-width="1"/>
+</svg>

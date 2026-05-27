@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Reclaimer's Mark — Badge</title>
+
+  <!-- Backdrop -->
+  <circle cx="128" cy="128" r="124" fill="#0f1620"/>
+  <circle cx="128" cy="128" r="120" fill="#1a2230"/>
+
+  <!-- Outer rust ring -->
+  <circle cx="128" cy="128" r="118" fill="none" stroke="#8b4a2b" stroke-width="3"/>
+
+  <!-- Inner thin ring -->
+  <circle cx="128" cy="128" r="108" fill="none" stroke="#3a4554" stroke-width="1"/>
+
+  <!-- Compass tick marks (hazard yellow) -->
+  <g stroke="#f0c419" stroke-width="2" stroke-linecap="round">
+    <line x1="128" y1="8" x2="128" y2="20"/>
+    <line x1="128" y1="236" x2="128" y2="248"/>
+    <line x1="8" y1="128" x2="20" y2="128"/>
+    <line x1="236" y1="128" x2="248" y2="128"/>
+  </g>
+
+  <!-- Subtle horizon arc -->
+  <path d="M 30 152 Q 128 132 226 152" fill="none" stroke="#2a3548" stroke-width="2"/>
+
+  <!-- Broken hexagon (fortification ruin), top edge missing -->
+  <g stroke="#8a95a3" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 168 160 L 148 194.6 L 108 194.6 L 88 160 L 108 125.4 M 148 125.4 L 168 160"/>
+  </g>
+
+  <!-- Inner hex shadow (depth) -->
+  <path d="M 168 160 L 148 194.6 L 108 194.6 L 88 160 L 108 125.4 L 148 125.4 Z"
+        fill="#141c28" opacity="0.5"/>
+
+  <!-- Circuit roots rising through the break -->
+  <g stroke="#f0c419" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 113 125 L 113 100 L 95 100 L 95 72"/>
+    <path d="M 128 125 L 128 58"/>
+    <path d="M 143 125 L 143 100 L 161 100 L 161 72"/>
+    <path d="M 113 90 L 143 90"/>
+  </g>
+
+  <!-- Glowing node endpoints -->
+  <g fill="#f0c419">
+    <circle cx="95" cy="72" r="4"/>
+    <circle cx="128" cy="58" r="4.5"/>
+    <circle cx="161" cy="72" r="4"/>
+  </g>
+  <g fill="#fff5d0" opacity="0.75">
+    <circle cx="95" cy="72" r="1.8"/>
+    <circle cx="128" cy="58" r="2"/>
+    <circle cx="161" cy="72" r="1.8"/>
+  </g>
+
+  <!-- Curved motto along bottom -->
+  <defs>
+    <path id="bottom-arc" d="M 36 168 Q 128 232 220 168" fill="none"/>
+  </defs>
+  <text font-family="Georgia, 'Times New Roman', serif" font-size="13" letter-spacing="5" fill="#c9a961" font-weight="600">
+    <textPath href="#bottom-arc" startOffset="50%" text-anchor="middle">EX RUINIS · NOVUM</textPath>
+  </text>
+</svg>
