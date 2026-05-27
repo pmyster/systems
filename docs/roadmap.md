@@ -173,20 +173,24 @@ It does NOT own:
 ### M5: V1 Launch (months 12-15)
 
 **Deliverables:**
-- Diegetic ads integrated and selling (fictional analogues first; real-brand pipeline ready but stocked with placeholders)
-- Account service + cloud backup
-- Async design sharing (free-only, paid marketplace OFF until safeguards complete)
+- Free demo (1-2 PvE skirmishes — the hook) finalized; conversion-tested in beta
+- $2.99 paid PvE unlock via app store in-app purchase
+- App store presence (iOS, Android; possibly web build)
+- App store payment integration (handles ~30% platform fee; we receive ~$2.09 net per sale)
+- Demo-only real-brand diegetic ad placements (initial inventory)
+- Paid game uses fictional analogues (Atomic Cola, Sunset Sarsaparilla) — no real-brand ads in paid version
+- Account service + cloud backup (cross-device save sync)
+- Async design sharing (free, browse other players' designs offline)
 - Multi-region CDN (2-3 regions)
-- App store presence (iOS, Android, possibly web build)
 - Community moderation tools (visibility-tiered approval queue for uploads)
 - Public soft launch in 1-3 regions
-- Press / marketing assets
+- Press / marketing assets emphasizing the premium + anti-P2W positioning
 
-**Success criteria:** public launch with stable infrastructure. Ad revenue ramps. Retention holds from beta levels.
+**Success criteria:** public launch with stable infrastructure. Demo-to-buy conversion meets target (~3-5%). Retention holds from beta levels. The "I paid and it's actually good" review pattern emerges.
 
-**Decision gate:** if soft launch reveals issues, hold geographic expansion until stable. Don't push to global launch with shaky retention.
+**Decision gate:** if soft launch reveals issues (conversion well below target, payment friction, retention drop), hold geographic expansion until stable. Don't push to global launch with shaky metrics.
 
-**Resource needs:** 3-5 engineers, 2 designers, 2 artists, 1 UX, 1 community, 1 BD (ad sales, part-time).
+**Resource needs:** 3-5 engineers, 2 designers, 2 artists, 1 UX, 1 community, 1 BD (ad sales for demo inventory, part-time).
 
 ---
 

@@ -10,7 +10,7 @@ A post-apocalyptic mobile real-time strategy game built on three architectural b
 
 1. **A data-driven engine** where every game rule — every unit, weapon, environment, AI behavior, even the physics equations — is content that the engine interprets at runtime. Updates ship as small JSON files, not engine rebuilds. Modders, AI agents, and players all extend the universe through the same content format.
 
-2. **A creator economy that explicitly rejects pay-to-win.** Players sell their creative work to other players; the platform takes a small fee (~8%, vs. industry standard 30%). Twelve predatory monetization patterns (time-skip currency, lootboxes, FOMO, subscriptions, price ladders, manufactured scarcity, spending-leaderboards, pay-to-resurrect, etc.) are *architecturally absent* — not just unimplemented but unimplementable without explicit constitutional amendment.
+2. **A premium model that explicitly rejects pay-to-win.** $2.99 unlocks the full game after a free demo; every buyer plays by the same rules. A post-launch creator marketplace lets players sell custom unit designs to each other (platform fee ~8%, vs. industry standard 30%). Twelve predatory monetization patterns (time-skip currency, lootboxes, FOMO, subscriptions, price ladders, manufactured scarcity, spending-leaderboards, pay-to-resurrect, etc.) are *architecturally absent* — not just unimplemented but unimplementable without explicit constitutional amendment.
 
 3. **An AI-augmented narrative pipeline** that turns the game into a living world. Production-time AI agents generate PvE invasion scenarios and faction dynamics responsive to player behavior; later, runtime agents craft narrative in near-real-time. Content scales beyond what any team could author.
 
@@ -18,9 +18,9 @@ The design is comprehensively documented across 17+ technical specifications tot
 
 **Status:** design phase complete; engineering not yet started. The full design specification is ready to hand to an engineering team.
 
-**Revenue model:** diegetic in-world advertising (faded post-apocalyptic billboards, hologram signs) + creator marketplace + optional patronage. No pay-to-win. No subscriptions.
+**Revenue model:** premium one-time purchase ($2.99) after free demo + creator marketplace (V2+) + optional patronage (V2+). Real-brand diegetic ads appear in the free demo only. No subscriptions. No pay-to-win. No in-game purchases that affect gameplay.
 
-**Phased delivery:** V1 (PvE-only, ~15 months) revenue-positive before V2 (PvP, ~12 months) and V3 (Living World, ~12 months) investment. **Each phase funds the next.**
+**Phased delivery:** V1 (PvE-only paid game, ~15 months) revenue-positive before V2 (PvP, ~12 months) and V3 (Living World, ~12 months) investment. V2 and V3 ship as free updates to V1 buyers — the marketplace and Living World are content expansion, not separate SKUs. **Each phase funds the next through new-buyer acquisition plus marketplace revenue.**
 
 ---
 
@@ -127,19 +127,25 @@ Each phase is revenue-positive before the next phase begins. **The project boots
 
 ## Revenue Model
 
-### Stream 1: Diegetic Ads (V1 onward)
+### Stream 1: Premium One-Time Purchase (V1 onward)
 
-In-world ads as post-apocalyptic texture. Faded billboards. Hologram signs in dead cities. Brand decals on rusted vehicles. The pre-Fall corporations *were* real corporations.
+A free demo (1-2 PvE skirmishes, ~30-60 minutes) introduces the world, the core loop, and the unit Editor. **$2.99 unlocks the full game.**
 
-**Two flavors:**
-- Real brands (paid placements) — Coke, Pepsi, Toyota, Mountain Dew. Real revenue. Brands sensitive to dystopian context are excluded.
-- Fictional analogues (free creative control) — Atomic Cola, Sunset Sarsaparilla. Filler for sensitive contexts; primary V1 inventory before real-brand sales pipeline operates.
+**The $2.99 is more than revenue — it's a commitment mechanism.** Once a player pays, the endowment effect activates: they engage longer, tolerate small issues, recommend to friends, and form communities around something they paid into. The studio in turn earns a direct relationship with each buyer and a clear obligation to ship future content.
 
-**Hard rules** (player protection): diegetic only, atmospheric not promotional, no interaction required, density caps per map, free opt-out always available.
+This is the foundation of the V2/V3 investment case: V1 ships into an *invested* base. When V2 PvP and V3 Living World ship as free updates to V1 buyers, those buyers don't churn — they feel rewarded for buying early. Trust compounds. Each phase ships into a community ready for it, not into an attrition curve.
 
-**Revenue:** standard mobile ad benchmarks suggest $0.50-$5 per MAU/month at scale, depending on engagement and ad inventory quality.
+**V2 PvP and V3 Living World are free updates to V1 buyers.** New buyers continue to pay $2.99 at any point and receive the full current state of the game. The marketplace and Living World are content expansion, not separate SKUs.
 
-### Stream 2: Creator Marketplace (V2 onward)
+**Conversion economics:** at 1M demo downloads / 30% Skirmish-1 completion / 50% Skirmish-2 completion / 30% buy-conversion = ~45K buyers per million demos × $2.09 net (after app store cut) = ~$94K per million demos. Premium per-acquisition is lower than F2P-with-ads, but: cleaner experience, higher-quality players (pre-vetted as willing-to-pay), simpler operations, and the commitment effect amplifies LTV.
+
+### Stream 2: Real-Brand Diegetic Ads (Free Demo Only)
+
+In-world ads as post-apocalyptic texture during the free demo. Faded billboards. Hologram signs in dead cities. Brand decals on rusted vehicles. The pre-Fall corporations *were* real corporations.
+
+Real-brand placements (Coke, Pepsi, Toyota, etc.) appear only in the free demo, where they double as marketing exposure for the brands and atmospheric texture for prospective buyers. **The paid game replaces real-brand ads with fictional analogues** (Atomic Cola, Sunset Sarsaparilla) — same aesthetic, no monetization. Paid players never feel "I bought this and there are still ads"; they get a cleaner experience that justifies the price.
+
+**Hard rules** (player protection in both demo and paid): diegetic only, atmospheric not promotional, no interaction required, density caps per map.
 
 Players sell their custom unit designs to other players. Single design: $0.25. Pack of 5: $1.00. Premium experimental: $1.00.
 
@@ -162,9 +168,9 @@ Platform fee: $0.02 per $0.25 transaction (8%). Creator-generous (Roblox takes 7
 - 1M MAU = ~$250K/year
 - 10M MAU = ~$2.5M/year
 
-Marketplace is *additive* to ads, not replacing. At scale, becomes a meaningful third stream.
+Marketplace is *additive* to the base game price. At scale, becomes a meaningful second ongoing revenue stream (the first being new-buyer acquisition).
 
-### Stream 3: Optional Patronage (V2 onward)
+### Stream 4: Optional Patronage (V2 onward)
 
 Voluntary monthly contribution (Patreon-style). **Zero in-game benefit.** Players who want to support the project can; players who don't, don't. Distinguishable from subscriptions: no lock-in, no expiration of features, no FOMO.
 
@@ -188,9 +194,9 @@ Voluntary monthly contribution (Patreon-style). **Zero in-game benefit.** Player
 
 | Phase | Timing | Features | Infrastructure | Revenue Profile |
 |---|---|---|---|---|
-| **V1 PvE** | Months 0-15 | Full PvE game, Editor App, Hall of Conquered (PvE), diegetic ads, async design sharing (free) | $1-5K/mo at 10K MAU | Ad-positive at 10K MAU |
-| **V2 PvP** | Months 15-27 | Lockstep PvP, clans/alliances, marketplace, Phase 2 content (Lunar) | $10-30K/mo at 100K MAU | Ad + marketplace at 100K MAU |
-| **V3 Living World** | Months 27-36+ | AI runtime narrative, Phase 3 content (Reach), mature community ecosystem | $50-150K/mo at 1M MAU | Full revenue diversification |
+| **V1 PvE** | Months 0-15 | Free demo + $2.99 paid PvE game, Editor App, Hall of Conquered (PvE), async design sharing (free), demo-only real-brand ads | $0.7-2K/mo at 10K MAU | Sales-driven; ~$94K per million demos at target conversion |
+| **V2 PvP** | Months 15-27 | Lockstep PvP, clans/alliances, marketplace, Phase 2 content (Lunar) — **free upgrade to V1 buyers** | $10-30K/mo at 100K MAU | Sales + marketplace (~8% fee on player-to-player transactions) |
+| **V3 Living World** | Months 27-36+ | AI runtime narrative, Phase 3 content (Reach), mature community ecosystem — **free upgrade to V1 buyers** | $50-150K/mo at 1M MAU | Full diversification: sales + marketplace + patronage |
 
 **Decision gate between phases:** each phase must demonstrate retention and revenue before the next is funded. The architecture supports stopping at any phase if returns warrant — V1 is a complete game; V2 adds the social layer; V3 adds the living-world dynamism.
 
