@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>The Bulwark — Badge</title>
+
+  <defs>
+    <path id="bulwark-arc" d="M 36 168 Q 128 232 220 168" fill="none"/>
+  </defs>
+
+  <!-- Backdrop -->
+  <circle cx="128" cy="128" r="124" fill="#0a0e15"/>
+  <circle cx="128" cy="128" r="120" fill="#2a2e36"/>
+
+  <!-- Outer bone-white ring -->
+  <circle cx="128" cy="128" r="118" fill="none" stroke="#d9d1bc" stroke-width="3"/>
+
+  <!-- Inner thin red ring -->
+  <circle cx="128" cy="128" r="108" fill="none" stroke="#6b2530" stroke-width="1.5"/>
+
+  <!-- Rivet marks at compass points -->
+  <g fill="#d9d1bc">
+    <circle cx="128" cy="14" r="3"/>
+    <circle cx="128" cy="242" r="3"/>
+    <circle cx="14" cy="128" r="3"/>
+    <circle cx="242" cy="128" r="3"/>
+  </g>
+
+  <!-- Crossed I-beams behind bunker -->
+  <g stroke="#4a5060" stroke-width="9" stroke-linecap="square">
+    <line x1="58" y1="58" x2="198" y2="198"/>
+    <line x1="198" y1="58" x2="58" y2="198"/>
+  </g>
+  <g stroke="#6a7180" stroke-width="2">
+    <line x1="58" y1="58" x2="198" y2="198"/>
+    <line x1="198" y1="58" x2="58" y2="198"/>
+  </g>
+
+  <!-- Hexagonal bunker, frontal view -->
+  <g transform="translate(128 128)">
+    <polygon points="-44,-26 44,-26 60,0 44,26 -44,26 -60,0"
+             fill="#3a4048" stroke="#0e1015" stroke-width="3"/>
+    <polygon points="-44,-26 44,-26 60,0 -60,0" fill="#4a5058"/>
+    <g fill="#0e1015">
+      <circle cx="-32" cy="-22" r="2"/>
+      <circle cx="-16" cy="-22" r="2"/>
+      <circle cx="0" cy="-22" r="2"/>
+      <circle cx="16" cy="-22" r="2"/>
+      <circle cx="32" cy="-22" r="2"/>
+    </g>
+    <rect x="-30" y="-8" width="60" height="6" fill="#0a0e15"/>
+    <circle cx="0" cy="-5" r="2.2" fill="#d33"/>
+    <line x1="-44" y1="8" x2="44" y2="8" stroke="#0e1015" stroke-width="1.5"/>
+    <line x1="-20" y1="8" x2="-20" y2="26" stroke="#0e1015" stroke-width="1.5"/>
+    <line x1="20" y1="8" x2="20" y2="26" stroke="#0e1015" stroke-width="1.5"/>
+  </g>
+
+  <!-- Curved motto -->
+  <text font-family="Georgia, serif" font-size="13" letter-spacing="5" fill="#d9d1bc" font-weight="600">
+    <textPath href="#bulwark-arc" startOffset="50%" text-anchor="middle">STAT MURUS</textPath>
+  </text>
+</svg>
