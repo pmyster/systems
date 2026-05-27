@@ -17,14 +17,30 @@ This doc owns the fiction: setting, premise, history, lore, the in-world reasons
 
 ## The Fall
 
-What ended the prior civilization is deliberately unspecified. It was sudden enough that not everyone got out. It was complete enough that nothing centralized rebuilt. Different factions believe different things — and *that's part of why they're different factions*.
+Civilization didn't fall all at once. It frayed.
 
-The Fall left behind:
+Humans had been ravaging the environment for centuries — atmosphere, oceans, soil. When the first habitable belts narrowed, governments started fighting *the Wars* — not over ideology, but over *livable land*. The Wars went on long enough that everyone lost.
+
+The Fall is not a single event. It is the name for the end of those wars and everything that followed — collapse of governments, breakdown of supply chains, fragmentation of populations, and the slow rise of the survivors who would name themselves the **Children of Dusk**.
+
+What the Fall left behind:
 
 - **The Ruins** — engineering archives, factory complexes, weapon caches, AI shards, half-built megastructures. Most are radioactive, derelict, or contested.
 - **Off-world colonies** — settlements that had already left Earth and survived intact (Moon, Mars, asteroid belt, ice moons, one rotating habitat called The Wheel). They are isolated and resource-starved.
 - **Wreckage** — debris fields, crashed orbital infrastructure, drowned cities. The primary source of Scrap.
 - **A void** where institutions and ecosystems used to be — filled now by storms, scavenger AI, and mutated fauna. The Natural Enemy.
+
+## The Children of Dusk
+
+"Children of Dusk" is what the survivors call themselves. The name is half-elegiac, half-defiant — *Dusk* is the long fading of the world they were born into; *Children* is who they are now.
+
+All governments collapsed. What's left are **pockets of leadership** — local strongmen, rebuilt city-states, technocratic enclaves, salvage cartels, agricultural collectives. Some are honorable. Some are predatory. Most are *contingent*: they will trade with you if you trade fairly, fight you if you hoard or threaten, and disappear if pressured too hard by the Natural Enemy.
+
+The four factions (Reclaimer, Bulwark, Signal, Cinder Crown) are the largest and most organized — the ones that have stabilized enough to be ideologies. But the world is full of smaller enclaves who haven't picked a thesis yet, and the player encounters them constantly.
+
+**Whether an enclave helps or hurts the player is determined by the player's behavior, not by faction loyalty.** Share resources; they become allies. Hoard everything; they become hostile. The world *responds* to who you are.
+
+Detail: `docs/campaign.md` (the enclave karma system).
 
 ## The Salvage Era (the present)
 
@@ -69,13 +85,29 @@ In-fiction, a "match" is a contested action — two or more factions converging 
 
 A match is *one chapter*, not the whole war. The Commander's career is the war.
 
+## The Long View — campaign arc
+
+The Commander's career is a story in phases. Each phase opens new content, environments, and threats. The early phases are Earth survival; the later phases are stellar ambition.
+
+1. **The Salvage Era — Earth.** Where we start. Survive the Cradle, raid the Ruins, fight or befriend the local enclaves. Recover enough tech to leave a single planet.
+2. **Lunar Colonization — The Ashen Eye.** First permanent off-world expansion. Vacuum operations, low-g logistics, He-3 extraction. New unit compatibility constraints, new enclaves who've been there longer.
+3. **The Reach — Warp Gates.** Restoring or building gates to other solar systems. Long-term project requiring massive Exotic Matter stockpiles. Opens the multi-system map.
+4. **The Constellation — Player Worlds.** Speculative. Each player builds and tends their own planet, grouped with other players in the same solar system. Cooperative defense, contested trade routes, the metagame as collective storytelling.
+
+Each phase is *aspirational from where we sit*. The prototype scopes only Phase 1. But the architecture must not foreclose the later phases. A Schematic-driven engine, environment-as-data, and a modular unit editor are all the right architectural choices for a campaign that grows from one planet to many.
+
+Detail: `docs/campaign.md`.
+
 ## Open questions
 
 - OPEN[2026-05-27]: How long ago was the Fall? "Decades" feels right; staying vague for now. Resolve only if campaign narrative requires precision.
-- OPEN[2026-05-27]: Should the Fall have a canonical cause for campaign purposes, or remain deliberately unanswered? Lean unanswered — mystery is a hook for player theorycrafting and future content.
+- OPEN[2026-05-27]: The Wars are stated as the proximate cause of the Fall, but should there be a *specific* catalyst — a final atrocity, a runaway weapon, an ecological tipping point — or remain abstracted as "the Wars went on too long"? Lean abstracted. Mystery is a hook.
+- OPEN[2026-05-27]: Phase 4 (The Constellation) — co-op player-tended worlds. Scope and shape entirely speculative. Resolve in `docs/campaign.md` if/when we reach that phase.
+- OPEN[2026-05-27]: Enclave karma model — what player actions count as "sharing" vs "hoarding"? Resource flow over time? Threshold-based? Resolve in `docs/campaign.md`.
 
 ## Cross-references
-- `docs/factions.md` — the four factions in detail
+- `docs/factions.md` — the four major factions
+- `docs/campaign.md` — the campaign arc and enclave karma
 - `docs/physics.md` — the environment catalog
 - `docs/economy.md` — Scrap, Exotic Matter, and other in-fiction resources
 - `docs/tech.md` — the salvage-driven tech model

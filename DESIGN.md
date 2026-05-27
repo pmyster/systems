@@ -162,6 +162,23 @@ If no, we know early.
 
 ---
 
+## The Long View — campaign arc
+
+The persistent Commander implies a career. The career has phases. Each phase opens content (environments, units, threats) without rewriting the engine.
+
+1. **The Salvage Era — Earth.** Phase 1. Where the prototype lives.
+2. **Lunar Colonization — The Ashen Eye.** Phase 2. First permanent off-world expansion.
+3. **The Reach — Warp Gates.** Phase 3. Restoring/building gates to other systems.
+4. **The Constellation — Player Worlds.** Phase 4, speculative. Co-op player-tended planets in shared systems.
+
+The architecture must not foreclose any phase. Schematic-driven content, environment-as-data, and the modular unit editor are all built so that a Moon expansion is *content*, not engine work.
+
+**Enclave karma (the PvE flavor of "social dynamics").** Outside the four major factions, the world is full of smaller enclaves. They respond to player behavior: share resources and they ally; hoard or threaten and they go hostile. The karma is the meta-loop that ties resource decisions to PvE storyline.
+
+Detail: `docs/campaign.md`.
+
+---
+
 ## Open questions index
 
 Pulled from across all docs for visibility. Each is OWNED by its detail doc.
@@ -172,6 +189,8 @@ Pulled from across all docs for visibility. Each is OWNED by its detail doc.
 - OPEN: experimental units per faction — `docs/units.md`
 - OPEN: faction-locked tech vs universal — `docs/tech.md`
 - OPEN: Natural Enemy presentation (fifth faction?) — `docs/events.md`, `docs/offline-pve.md`
+- OPEN: enclave karma model — `docs/campaign.md`
+- OPEN: Phase 4 (Constellation) co-op planet-tending — `docs/campaign.md`
 
 ---
 
@@ -196,6 +215,7 @@ Pulled from across all docs for visibility. Each is OWNED by its detail doc.
 - [docs/ai-behaviors.md](docs/ai-behaviors.md)
 - [docs/events.md](docs/events.md)
 - [docs/humans.md](docs/humans.md)
+- [docs/campaign.md](docs/campaign.md) — campaign arc, enclave karma
 
 ### Tier 4 — experience
 - [docs/ui-ux.md](docs/ui-ux.md)

@@ -36,10 +36,23 @@ None. This is the first doc to load.
 
 | Term | Gloss | Authoritative doc |
 |---|---|---|
-| **The Fall** | The unspecified collapse that ended the prior civilization | `docs/world.md` |
+| **The Wars** | Pre-Fall conflicts over livable land that triggered the collapse | `docs/world.md` |
+| **The Fall** | The end of the Wars and everything that followed — collapse of governments and global order | `docs/world.md` |
+| **Dusk** | The long fading of the pre-Fall world — the period of collapse | `docs/world.md` |
+| **Children of Dusk** | The survivor generations born during or after the Fall — the self-name of every faction | `docs/world.md` |
+| **Enclave** | A small pocket of post-Fall leadership; morally contingent on player behavior | `docs/world.md`, `docs/campaign.md` |
 | **The Ruins** | Sites of pre-Fall technology; primary source of salvaged tech | `docs/world.md`, `docs/tech.md` |
-| **Salvage Era** | The current period — survivors rebuilding from ruins | `docs/world.md` |
+| **Salvage Era** | The current period — survivors rebuilding from ruins. Also: Phase 1 of the campaign | `docs/world.md`, `docs/campaign.md` |
 | **Natural Enemy** | The non-faction hostile presence (storms, scavenger AI, mutated wildlife) | `docs/offline-pve.md`, `docs/events.md` |
+
+## Campaign phases
+
+| Term | Gloss | Authoritative doc |
+|---|---|---|
+| **Salvage Era** | Phase 1 of the campaign — Earth survival, where the prototype lives | `docs/campaign.md` |
+| **Lunar Colonization** | Phase 2 of the campaign — first permanent off-world expansion | `docs/campaign.md` |
+| **The Reach** | Phase 3 of the campaign — warp gates to other solar systems | `docs/campaign.md` |
+| **The Constellation** | Phase 4 of the campaign (speculative) — player-tended worlds in shared systems | `docs/campaign.md` |
 
 ## Environments (per-map physics Schematics)
 
