@@ -1,0 +1,151 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/pmyster/systems/schemas/unit.schema.json",
+  "title": "Unit Schematic",
+  "description": "A complete unit definition for the Child of Light game engine. Declares physical inputs; gameplay stats (speed, range, damage, cooldown) are derived by the engine from these inputs through the equations in physics.md.",
+  "type": "object",
+  "required": ["kind", "id", "physics_version", "name", "chassis"],
+  "properties": {
+    "kind": { "type": "string", "const": "unit" },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "description": "Unique identifier within the Schematic namespace. Lowercase with hyphens or underscores."
+    },
+    "physics_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "The Physics Constitution version this unit resolves against (per the Invariance rule). Old units keep their original version forever."
+    },
+    "name": { "type": "string" },
+    "faction": {
+      "type": "string",
+      "enum": ["reclaimer", "bulwark", "signal", "cinder_crown", "neutral", "tethered", "quiet_court", "burnward", "drifters", "veiled"],
+      "description": "Faction affinity. Earth-faction units are restricted by faction tech. Returner units are V2+."
+    },
+    "description": { "type": "string" },
+    "designer": {
+      "type": "string",
+      "description": "Salvage Signature — the original designer's name. Carries forward through every derivative and salvage. Use STARTER_KIT for the base game's stock units."
+    },
+    "chassis": {
+      "type": "object",
+      "required": ["chassis_class", "mass_kg", "engine_kW", "drivetrain_efficiency"],
+      "properties": {
+        "chassis_class": {
+          "type": "string",
+          "enum": [
+            "ground_tracked",
+            "ground_wheeled",
+            "ground_legged",
+            "walker_fusion",
+            "air_fixed_wing",
+            "air_rotary",
+            "naval_surface",
+            "naval_submarine",
+            "subterranean",
+            "orbital",
+            "static_structure"
+          ]
+        },
+        "mass_kg": { "type": "number", "minimum": 1 },
+        "engine_kW": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Primary engine output in kilowatts. 0 acceptable for static structures."
+        },
+        "drivetrain_efficiency": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Fraction of engine output that reaches motion (0-1). Real values: tracked vehicles ~0.6-0.75; wheeled ~0.75-0.85; legged ~0.4-0.6."
+        },
+        "energy_source": {
+          "type": "string",
+          "enum": ["battery", "fuel_cell", "fusion", "hybrid", "grid_tethered", "solar_only"]
+        },
+        "battery_capacity_MJ": { "type": "number", "minimum": 0 },
+        "battery_recharge_rate_MJs": { "type": "number", "minimum": 0 },
+        "fuel_capacity_MJ": { "type": "number", "minimum": 0 },
+        "fuel_consumption_rate_MJs": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Fuel burn at full engine power. Cruise consumption is approximately 40-60% of this."
+        },
+        "solar_collection_area_m2": { "type": "number", "minimum": 0 },
+        "armor_thickness_mm": { "type": "number", "minimum": 0 },
+        "armor_material": {
+          "type": "string",
+          "enum": ["salvaged_steel", "alloy_composite", "ceramic_layered", "exotic_lattice"]
+        },
+        "hardpoint_count": { "type": "integer", "minimum": 0 },
+        "compatibility_tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "tracked", "wheeled", "legged", "tunneling", "displacement_hull",
+              "vacuum_rated", "low_g_stable", "high_g_rated",
+              "high_radiation", "thermal_extreme", "stealth_hull",
+              "amphibious", "all_weather"
+            ]
+          },
+          "description": "Capability tags. Determine which environments the unit can enter."
+        },
+        "thermal_capacity_MJ": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Chassis-level thermal mass for heat sinking (separate from per-weapon heat budgets)."
+        },
+        "voxel_data": {
+          "type": "object",
+          "description": "Optional voxel chassis data sculpted in the Editor App. Format TBD; placeholder for now."
+        }
+      }
+    },
+    "parts": {
+      "type": "array",
+      "description": "Mounted parts. Each occupies one hardpoint. May exceed hardpoint_count only for built-in components.",
+      "items": { "$ref": "part.schema.json" }
+    },
+    "costs": {
+      "type": "object",
+      "description": "Build cost per resource. Power is per-tick streaming cost; others are one-time stockpile cost.",
+      "properties": {
+        "power": { "type": "number", "minimum": 0 },
+        "scrap": { "type": "number", "minimum": 0 },
+        "alloy": { "type": "number", "minimum": 0 },
+        "fuel": { "type": "number", "minimum": 0 },
+        "tech_fragments": { "type": "number", "minimum": 0 },
+        "exotic_matter": { "type": "number", "minimum": 0 },
+        "biomass": { "type": "number", "minimum": 0 },
+        "helium_3": { "type": "number", "minimum": 0 },
+        "water_ice": { "type": "number", "minimum": 0 },
+        "rare_earths": { "type": "number", "minimum": 0 }
+      }
+    },
+    "build_time_seconds": { "type": "number", "minimum": 0 },
+    "tech_requirements": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "IDs of tech nodes that must be researched before this unit can be built."
+    },
+    "evolution": {
+      "type": "array",
+      "description": "Successor Schematics this unit can evolve into under specific conditions.",
+      "items": {
+        "type": "object",
+        "required": ["trigger", "successor"],
+        "properties": {
+          "trigger": { "type": "object" },
+          "successor": { "type": "string" }
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Free-form tags for searching/categorizing."
+    }
+  }
+}

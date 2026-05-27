@@ -1,0 +1,85 @@
+{
+  "kind": "unit",
+  "id": "bulwark-stonefist",
+  "physics_version": "1.0",
+  "name": "Stonefist",
+  "faction": "bulwark",
+  "description": "The Bulwark's signature heavy turret platform. Slow, immensely armored, with a long-range main gun and overlapping shield. Designed to anchor a defensive line and refuse to move.",
+  "designer": "STARTER_KIT",
+  "chassis": {
+    "chassis_class": "ground_tracked",
+    "mass_kg": 120000,
+    "engine_kW": 800,
+    "drivetrain_efficiency": 0.65,
+    "energy_source": "grid_tethered",
+    "battery_capacity_MJ": 200,
+    "fuel_capacity_MJ": 0,
+    "fuel_consumption_rate_MJs": 0,
+    "armor_thickness_mm": 280,
+    "armor_material": "ceramic_layered",
+    "hardpoint_count": 4,
+    "compatibility_tags": ["tracked", "all_weather"],
+    "thermal_capacity_MJ": 800
+  },
+  "parts": [
+    {
+      "id": "main-cannon-heavy",
+      "category": "weapon",
+      "name": "Stonefist Main Gun (155mm equivalent)",
+      "mass_kg": 4200,
+      "power_draw_kW": 15,
+      "weapon_type": "kinetic",
+      "propellant_energy_MJ": 25,
+      "projectile_mass_kg": 18,
+      "barrel_thermal_capacity_MJ": 800,
+      "per_shot_heat_MJ": 60,
+      "cooling_rate_MJs": 8,
+      "drag_coefficient": 0.25,
+      "elevation_range_deg": [-5, 45]
+    },
+    {
+      "id": "secondary-mg",
+      "category": "weapon",
+      "name": "Coaxial Machine Gun",
+      "mass_kg": 180,
+      "power_draw_kW": 3,
+      "weapon_type": "kinetic",
+      "propellant_energy_MJ": 0.05,
+      "projectile_mass_kg": 0.02,
+      "barrel_thermal_capacity_MJ": 8,
+      "per_shot_heat_MJ": 0.1,
+      "cooling_rate_MJs": 0.5,
+      "drag_coefficient": 0.35,
+      "elevation_range_deg": [-5, 45]
+    },
+    {
+      "id": "energy-shield",
+      "category": "defense",
+      "name": "Bulwark Pattern Shield",
+      "mass_kg": 800,
+      "power_draw_kW": 120,
+      "shield_capacity_MJ": 400,
+      "shield_regen_rate_MJs": 8
+    },
+    {
+      "id": "passive-radar",
+      "category": "sensor",
+      "name": "Passive Threat Sensor",
+      "mass_kg": 110,
+      "power_draw_kW": 3,
+      "sensor_modality": "radar",
+      "sensor_range_m": 2500,
+      "sensor_sensitivity": 0.9,
+      "sensor_active": false
+    }
+  ],
+  "costs": {
+    "scrap": 280,
+    "alloy": 140,
+    "tech_fragments": 5,
+    "power": 35
+  },
+  "build_time_seconds": 240,
+  "tech_requirements": ["bulwark_doctrine_basic"],
+  "tags": ["starter", "tier_2", "heavy", "defensive", "turret"]
+}

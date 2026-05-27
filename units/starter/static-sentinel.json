@@ -1,0 +1,59 @@
+{
+  "kind": "unit",
+  "id": "static-sentinel",
+  "physics_version": "1.0",
+  "name": "Sentinel Turret",
+  "faction": "neutral",
+  "description": "A simple stationary defense turret available to any faction. Grid-tethered power. Modest armor. Mounts a medium autocannon. Cheap to deploy along a defensive line.",
+  "designer": "STARTER_KIT",
+  "chassis": {
+    "chassis_class": "static_structure",
+    "mass_kg": 8500,
+    "engine_kW": 0,
+    "drivetrain_efficiency": 0,
+    "energy_source": "grid_tethered",
+    "battery_capacity_MJ": 0,
+    "fuel_capacity_MJ": 0,
+    "fuel_consumption_rate_MJs": 0,
+    "armor_thickness_mm": 120,
+    "armor_material": "ceramic_layered",
+    "hardpoint_count": 2,
+    "compatibility_tags": ["all_weather"],
+    "thermal_capacity_MJ": 200
+  },
+  "parts": [
+    {
+      "id": "medium-autocannon",
+      "category": "weapon",
+      "name": "Medium Autocannon",
+      "mass_kg": 850,
+      "power_draw_kW": 12,
+      "weapon_type": "kinetic",
+      "propellant_energy_MJ": 1.8,
+      "projectile_mass_kg": 0.8,
+      "barrel_thermal_capacity_MJ": 80,
+      "per_shot_heat_MJ": 4.5,
+      "cooling_rate_MJs": 4.0,
+      "drag_coefficient": 0.3,
+      "elevation_range_deg": [-15, 80]
+    },
+    {
+      "id": "target-radar",
+      "category": "sensor",
+      "name": "Fire Control Radar",
+      "mass_kg": 110,
+      "power_draw_kW": 9,
+      "sensor_modality": "radar",
+      "sensor_range_m": 3500,
+      "sensor_sensitivity": 1.0,
+      "sensor_active": true
+    }
+  ],
+  "costs": {
+    "scrap": 150,
+    "alloy": 60,
+    "power": 22
+  },
+  "build_time_seconds": 120,
+  "tags": ["starter", "tier_1", "defensive", "turret", "static", "neutral"]
+}

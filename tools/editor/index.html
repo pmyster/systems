@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Child of Light — Unit Editor (prototype)</title>
+  <style>
+    :root {
+      --bg: #1a1d23;
+      --panel: #232831;
+      --panel-2: #2c323d;
+      --border: #3a4150;
+      --text: #d8dde6;
+      --text-dim: #8a93a3;
+      --accent: #c9a55c;
+      --accent-2: #6b8eb3;
+      --good: #87c878;
+      --warn: #e0a86a;
+      --bad: #d97670;
+      --mono: 'SF Mono', Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg); color: var(--text); min-height: 100vh;
+      font-size: 14px;
+    }
+    header {
+      background: var(--panel); border-bottom: 1px solid var(--border);
+      padding: 14px 24px; display: flex; align-items: center; gap: 16px;
+      position: sticky; top: 0; z-index: 10;
+    }
+    header h1 {
+      margin: 0; font-size: 16px; font-weight: 600; letter-spacing: 0.02em;
+      color: var(--accent);
+    }
+    header h1 .sub { color: var(--text-dim); font-weight: 400; font-size: 13px; margin-left: 8px; }
+    header .actions { margin-left: auto; display: flex; gap: 8px; }
+    button {
+      background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+      padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px;
+      font-family: inherit;
+    }
+    button:hover { background: var(--accent-2); border-color: var(--accent-2); }
+    button.primary { background: var(--accent); color: #1a1d23; border-color: var(--accent); font-weight: 600; }
+    button.primary:hover { background: #d9b46c; border-color: #d9b46c; }
+    button.danger { background: transparent; color: var(--bad); border-color: var(--bad); }
+    button.danger:hover { background: var(--bad); color: white; }
+    button.small { padding: 3px 8px; font-size: 12px; }
+    main {
+      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1px; background: var(--border);
+      min-height: calc(100vh - 56px);
+    }
+    .pane {
+      background: var(--bg); padding: 20px; overflow-y: auto;
+      max-height: calc(100vh - 56px);
+    }
+    .pane h2 {
+      margin: 0 0 16px; font-size: 13px; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--text-dim); font-weight: 600;
+    }
+    .pane h2 .badge {
+      font-size: 11px; background: var(--panel-2); padding: 2px 8px;
+      border-radius: 10px; margin-left: 8px; color: var(--text-dim);
+      letter-spacing: 0; text-transform: none;
+    }
+    section {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 6px; padding: 14px 16px; margin-bottom: 14px;
+    }
+    section h3 {
+      margin: 0 0 12px; font-size: 13px; color: var(--accent);
+      display: flex; align-items: center; gap: 8px;
+    }
+    section h3 .remove {
+      margin-left: auto; color: var(--bad); cursor: pointer; font-size: 16px;
+      background: none; border: none; padding: 0;
+    }
+    section h3 .remove:hover { color: #ff8c87; background: none; }
+    .row { display: grid; grid-template-columns: 130px 1fr; gap: 8px; margin-bottom: 8px; align-items: center; }
+    .row label { color: var(--text-dim); font-size: 12px; }
+    .row input, .row select, .row textarea {
+      background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+      padding: 5px 8px; border-radius: 3px; font-size: 13px; font-family: inherit;
+      width: 100%;
+    }
+    .row input[type="number"] { font-family: var(--mono); }
+    .row textarea { font-family: var(--mono); resize: vertical; min-height: 50px; }
+    .tags-input {
+      display: flex; flex-wrap: wrap; gap: 4px; padding: 4px;
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 3px;
+      min-height: 30px;
+    }
+    .tags-input .tag {
+      background: var(--accent-2); padding: 2px 8px; border-radius: 3px; font-size: 12px;
+      color: white; display: inline-flex; align-items: center; gap: 4px;
+    }
+    .tags-input .tag .x { cursor: pointer; font-weight: bold; }
+    .tags-input select { background: transparent; border: none; color: var(--text-dim); font-size: 12px; padding: 2px; }
+    .add-part {
+      display: flex; gap: 8px; align-items: center;
+      margin-top: 8px;
+    }
+    .add-part select { flex: 1; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); padding: 6px; border-radius: 3px; }
+    pre.json {
+      background: var(--panel); color: var(--text); padding: 16px; border-radius: 6px;
+      overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 1.5;
+      border: 1px solid var(--border); margin: 0;
+      white-space: pre-wrap; word-break: break-all;
+    }
+    .stat-group {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 6px; padding: 14px 16px; margin-bottom: 14px;
+    }
+    .stat-group h3 { margin: 0 0 12px; font-size: 13px; color: var(--accent); }
+    .stat-row {
+      display: flex; justify-content: space-between; padding: 6px 0;
+      border-bottom: 1px dashed var(--border); font-size: 13px;
+    }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-row .label { color: var(--text-dim); }
+    .stat-row .value { font-family: var(--mono); font-weight: 600; color: var(--text); }
+    .stat-row .value.good { color: var(--good); }
+    .stat-row .value.warn { color: var(--warn); }
+    .stat-row .value.bad { color: var(--bad); }
+    .note {
+      font-size: 12px; color: var(--text-dim); font-style: italic;
+      padding: 8px 12px; background: var(--panel-2); border-left: 3px solid var(--accent);
+      border-radius: 3px; margin-top: 12px;
+    }
+    .help {
+      font-size: 11px; color: var(--text-dim); margin-top: 2px; font-style: italic;
+    }
+    #file-input { display: none; }
+    .empty-state { color: var(--text-dim); font-style: italic; padding: 20px; text-align: center; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Child of Light <span class="sub">Unit Editor (prototype v0.1)</span></h1>
+  <div class="actions">
+    <button onclick="newUnit()">New</button>
+    <button onclick="document.getElementById('file-input').click()">Load JSON</button>
+    <input type="file" id="file-input" accept=".json" onchange="loadFile(event)">
+    <button class="primary" onclick="saveJSON()">Save JSON</button>
+    <button class="danger" onclick="if(confirm('Clear everything?')) newUnit()">Clear</button>
+  </div>
+</header>
+
+<main>
+
+  <div class="pane">
+    <h2>Inputs <span class="badge" id="part-count">0 parts</span></h2>
+
+    <section>
+      <h3>Meta</h3>
+      <div class="row"><label>ID</label><input type="text" id="id" placeholder="my-unit-id" oninput="render()"></div>
+      <div class="row"><label>Name</label><input type="text" id="name" placeholder="Display Name" oninput="render()"></div>
+      <div class="row">
+        <label>Faction</label>
+        <select id="faction" onchange="render()">
+          <option value="reclaimer">Reclaimer</option>
+          <option value="bulwark">Bulwark</option>
+          <option value="signal">Signal</option>
+          <option value="cinder_crown">Cinder Crown</option>
+          <option value="neutral">Neutral</option>
+          <option value="tethered">Tethered (Returner)</option>
+          <option value="quiet_court">Quiet Court (Returner)</option>
+          <option value="burnward">Burnward (Returner)</option>
+          <option value="drifters">Drifters (Returner)</option>
+          <option value="veiled">Veiled (Returner)</option>
+        </select>
+      </div>
+      <div class="row"><label>Designer</label><input type="text" id="designer" placeholder="Your call-sign" value="STARTER_KIT" oninput="render()"></div>
+      <div class="row"><label>Description</label><textarea id="description" rows="2" oninput="render()" placeholder="One sentence flavor text"></textarea></div>
+    </section>
+
+    <section>
+      <h3>Chassis</h3>
+      <div class="row">
+        <label>Class</label>
+        <select id="chassis_class" onchange="render()">
+          <option value="ground_tracked">Ground — Tracked</option>
+          <option value="ground_wheeled">Ground — Wheeled</option>
+          <option value="ground_legged">Ground — Legged</option>
+          <option value="walker_fusion">Walker — Fusion</option>
+          <option value="air_fixed_wing">Air — Fixed Wing</option>
+          <option value="air_rotary">Air — Rotary / VTOL</option>
+          <option value="naval_surface">Naval — Surface</option>
+          <option value="naval_submarine">Naval — Submarine</option>
+          <option value="subterranean">Subterranean</option>
+          <option value="orbital">Orbital</option>
+          <option value="static_structure">Static Structure</option>
+        </select>
+      </div>
+      <div class="row"><label>Mass (kg)</label><input type="number" id="mass_kg" min="0" step="100" value="20000" oninput="render()"></div>
+      <div class="row"><label>Engine (kW)</label><input type="number" id="engine_kW" min="0" step="10" value="500" oninput="render()"></div>
+      <div class="row"><label>Drivetrain Eff.</label><input type="number" id="drivetrain_efficiency" min="0" max="1" step="0.05" value="0.7" oninput="render()"><div class="help">0-1; tracked ~0.7; wheeled ~0.82; legged ~0.55</div></div>
+      <div class="row">
+        <label>Energy Source</label>
+        <select id="energy_source" onchange="render()">
+          <option value="fuel_cell">Fuel Cell</option>
+          <option value="battery">Battery</option>
+          <option value="fusion">Fusion</option>
+          <option value="hybrid">Hybrid</option>
+          <option value="grid_tethered">Grid-Tethered</option>
+          <option value="solar_only">Solar-Only</option>
+        </select>
+      </div>
+      <div class="row"><label>Fuel Capacity (MJ)</label><input type="number" id="fuel_capacity_MJ" min="0" step="10" value="500" oninput="render()"></div>
+      <div class="row"><label>Fuel Rate (MJ/s)</label><input type="number" id="fuel_consumption_rate_MJs" min="0" step="0.1" value="4.5" oninput="render()"><div class="help">At full engine power. Cruise is ~50% of this.</div></div>
+      <div class="row"><label>Battery (MJ)</label><input type="number" id="battery_capacity_MJ" min="0" step="10" value="0" oninput="render()"></div>
+      <div class="row"><label>Solar Area (m²)</label><input type="number" id="solar_collection_area_m2" min="0" step="0.5" value="0" oninput="render()"></div>
+      <div class="row"><label>Armor (mm)</label><input type="number" id="armor_thickness_mm" min="0" step="5" value="60" oninput="render()"></div>
+      <div class="row">
+        <label>Armor Material</label>
+        <select id="armor_material" onchange="render()">
+          <option value="salvaged_steel">Salvaged Steel</option>
+          <option value="alloy_composite">Alloy Composite</option>
+          <option value="ceramic_layered">Ceramic Layered</option>
+          <option value="exotic_lattice">Exotic Lattice</option>
+        </select>
+      </div>
+      <div class="row"><label>Hardpoints</label><input type="number" id="hardpoint_count" min="0" step="1" value="3" oninput="render()"></div>
+      <div class="row"><label>Thermal Cap (MJ)</label><input type="number" id="thermal_capacity_MJ" min="0" step="10" value="100" oninput="render()"></div>
+      <div class="row">
+        <label>Compat. Tags</label>
+        <div class="tags-input" id="compatibility_tags">
+          <select onchange="addTag(this.value); this.value=''; render()">
+            <option value="">+ add tag</option>
+            <option value="tracked">tracked</option>
+            <option value="wheeled">wheeled</option>
+            <option value="legged">legged</option>
+            <option value="tunneling">tunneling</option>
+            <option value="displacement_hull">displacement_hull</option>
+            <option value="vacuum_rated">vacuum_rated</option>
+            <option value="low_g_stable">low_g_stable</option>
+            <option value="high_g_rated">high_g_rated</option>
+            <option value="high_radiation">high_radiation</option>
+            <option value="thermal_extreme">thermal_extreme</option>
+            <option value="stealth_hull">stealth_hull</option>
+            <option value="amphibious">amphibious</option>
+            <option value="all_weather">all_weather</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section id="parts-container">
+      <h3>Parts</h3>
+      <div id="parts-list"></div>
+      <div class="add-part">
+        <select id="new-part-category">
+          <option value="weapon">Weapon</option>
+          <option value="sensor">Sensor</option>
+          <option value="defense">Defense</option>
+          <option value="utility">Utility</option>
+          <option value="mobility_aux">Mobility Aux</option>
+          <option value="communications">Communications</option>
+        </select>
+        <button class="small primary" onclick="addPart()">+ Add Part</button>
+      </div>
+    </section>
+
+    <section>
+      <h3>Costs</h3>
+      <div class="row"><label>Scrap</label><input type="number" id="cost_scrap" min="0" step="5" value="100" oninput="render()"></div>
+      <div class="row"><label>Alloy</label><input type="number" id="cost_alloy" min="0" step="5" value="20" oninput="render()"></div>
+      <div class="row"><label>Fuel</label><input type="number" id="cost_fuel" min="0" step="5" value="30" oninput="render()"></div>
+      <div class="row"><label>Tech Fragments</label><input type="number" id="cost_tech_fragments" min="0" step="1" value="0" oninput="render()"></div>
+      <div class="row"><label>Exotic Matter</label><input type="number" id="cost_exotic_matter" min="0" step="1" value="0" oninput="render()"></div>
+      <div class="row"><label>Power (streaming)</label><input type="number" id="cost_power" min="0" step="1" value="5" oninput="render()"></div>
+      <div class="row"><label>Build Time (s)</label><input type="number" id="build_time_seconds" min="0" step="10" value="60" oninput="render()"></div>
+    </section>
+
+    <div class="note">
+      Authoring rule: type physical inputs only. Speed, range, damage, cooldown are <em>derived</em> from these by the engine. See the right column for the derived values.
+    </div>
+
+  </div>
+
+  <div class="pane">
+    <h2>JSON Preview <span class="badge" id="json-size">0 chars</span></h2>
+    <pre class="json" id="json-output">{}</pre>
+    <div class="note">
+      This JSON conforms to <code>schemas/unit.schema.json</code>. Copy or save to load into the engine.
+    </div>
+  </div>
+
+  <div class="pane">
+    <h2>Derived Stats <span class="badge">computed</span></h2>
+    <div id="derived-stats"></div>
+    <div class="note">
+      Derived stats are illustrative — they use simplified versions of the engine's equations. The real engine resolves these more precisely. Use them to feel the relationships, not as absolute truth.
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ============================================================
+// State
+// ============================================================
+const state = {
+  parts: [],
+  tags: []
+};
+
+// ============================================================
+// Add / remove parts
+// ============================================================
+let partCounter = 0;
+function addPart() {
+  const category = document.getElementById('new-part-category').value;
+  const id = `part_${++partCounter}`;
+  const part = {
+    id,
+    category,
+    name: `New ${category}`,
+    mass_kg: 100,
+    power_draw_kW: 5
+  };
+  if (category === 'weapon') {
+    part.weapon_type = 'kinetic';
+    part.propellant_energy_MJ = 1.0;
+    part.projectile_mass_kg = 0.5;
+    part.barrel_thermal_capacity_MJ = 50;
+    part.per_shot_heat_MJ = 3;
+    part.cooling_rate_MJs = 2;
+    part.drag_coefficient = 0.3;
+    part.elevation_range_deg = [-10, 30];
+  } else if (category === 'sensor') {
+    part.sensor_modality = 'radar';
+    part.sensor_range_m = 1500;
+    part.sensor_sensitivity = 1.0;
+    part.sensor_active = true;
+  } else if (category === 'defense') {
+    part.shield_capacity_MJ = 200;
+    part.shield_regen_rate_MJs = 4;
+    part.armor_bonus_mm = 20;
+  } else if (category === 'utility') {
+    part.utility_function = 'constructor';
+    part.utility_effect_radius_m = 8;
+    part.utility_effect_rate = 1.0;
+  } else if (category === 'mobility_aux') {
+    part.mobility_bonus_speed = 1.1;
+    part.mobility_bonus_turn_rate = 1.1;
+  } else if (category === 'communications') {
+    part.communications_type = 'radio';
+    part.communications_range_m = 5000;
+  }
+  state.parts.push(part);
+  renderPartsList();
+  render();
+}
+
+function removePart(idx) {
+  state.parts.splice(idx, 1);
+  renderPartsList();
+  render();
+}
+
+function updatePart(idx, field, value, isNumber) {
+  if (isNumber) value = parseFloat(value) || 0;
+  state.parts[idx][field] = value;
+  render();
+}
+
+function renderPartsList() {
+  const container = document.getElementById('parts-list');
+  if (state.parts.length === 0) {
+    container.innerHTML = '<div class="empty-state">No parts. Click + Add Part below.</div>';
+    return;
+  }
+  container.innerHTML = state.parts.map((p, idx) => renderPartForm(p, idx)).join('');
+}
+
+function renderPartForm(p, idx) {
+  let categoryRows = '';
+  if (p.category === 'weapon') {
+    categoryRows = `
+      <div class="row"><label>Type</label><select onchange="updatePart(${idx}, 'weapon_type', this.value, false)">
+        ${['kinetic', 'beam', 'missile', 'thermal', 'psionic'].map(t => `<option value="${t}" ${t===p.weapon_type?'selected':''}>${t}</option>`).join('')}
+      </select></div>
+      <div class="row"><label>Propellant (MJ)</label><input type="number" min="0" step="0.1" value="${p.propellant_energy_MJ}" oninput="updatePart(${idx}, 'propellant_energy_MJ', this.value, true)"></div>
+      <div class="row"><label>Projectile (kg)</label><input type="number" min="0" step="0.05" value="${p.projectile_mass_kg}" oninput="updatePart(${idx}, 'projectile_mass_kg', this.value, true)"></div>
+      <div class="row"><label>Therm. Cap (MJ)</label><input type="number" min="0" step="5" value="${p.barrel_thermal_capacity_MJ}" oninput="updatePart(${idx}, 'barrel_thermal_capacity_MJ', this.value, true)"></div>
+      <div class="row"><label>Heat/Shot (MJ)</label><input type="number" min="0" step="0.5" value="${p.per_shot_heat_MJ}" oninput="updatePart(${idx}, 'per_shot_heat_MJ', this.value, true)"></div>
+      <div class="row"><label>Cooling (MJ/s)</label><input type="number" min="0" step="0.5" value="${p.cooling_rate_MJs}" oninput="updatePart(${idx}, 'cooling_rate_MJs', this.value, true)"></div>
+      <div class="row"><label>Drag</label><input type="number" min="0" step="0.05" value="${p.drag_coefficient || 0.3}" oninput="updatePart(${idx}, 'drag_coefficient', this.value, true)"></div>`;
+  } else if (p.category === 'sensor') {
+    categoryRows = `
+      <div class="row"><label>Modality</label><select onchange="updatePart(${idx}, 'sensor_modality', this.value, false)">
+        ${['visual', 'radar', 'sonar', 'seismic', 'thermal', 'psionic', 'lidar'].map(t => `<option value="${t}" ${t===p.sensor_modality?'selected':''}>${t}</option>`).join('')}
+      </select></div>
+      <div class="row"><label>Range (m)</label><input type="number" min="0" step="100" value="${p.sensor_range_m}" oninput="updatePart(${idx}, 'sensor_range_m', this.value, true)"></div>
+      <div class="row"><label>Sensitivity</label><input type="number" min="0" step="0.1" value="${p.sensor_sensitivity}" oninput="updatePart(${idx}, 'sensor_sensitivity', this.value, true)"></div>
+      <div class="row"><label>Active</label><input type="checkbox" ${p.sensor_active?'checked':''} onchange="updatePart(${idx}, 'sensor_active', this.checked, false)"></div>`;
+  } else if (p.category === 'defense') {
+    categoryRows = `
+      <div class="row"><label>Shield Cap (MJ)</label><input type="number" min="0" step="10" value="${p.shield_capacity_MJ}" oninput="updatePart(${idx}, 'shield_capacity_MJ', this.value, true)"></div>
+      <div class="row"><label>Regen (MJ/s)</label><input type="number" min="0" step="0.5" value="${p.shield_regen_rate_MJs}" oninput="updatePart(${idx}, 'shield_regen_rate_MJs', this.value, true)"></div>
+      <div class="row"><label>Armor Bonus (mm)</label><input type="number" min="0" step="5" value="${p.armor_bonus_mm}" oninput="updatePart(${idx}, 'armor_bonus_mm', this.value, true)"></div>`;
+  } else if (p.category === 'utility') {
+    categoryRows = `
+      <div class="row"><label>Function</label><select onchange="updatePart(${idx}, 'utility_function', this.value, false)">
+        ${['constructor', 'repair', 'medic', 'transport', 'scientist', 'cloak', 'jammer', 'counter_jammer', 'refueler', 'miner', 'scout_drone_bay'].map(t => `<option value="${t}" ${t===p.utility_function?'selected':''}>${t}</option>`).join('')}
+      </select></div>
+      <div class="row"><label>Radius (m)</label><input type="number" min="0" step="1" value="${p.utility_effect_radius_m}" oninput="updatePart(${idx}, 'utility_effect_radius_m', this.value, true)"></div>
+      <div class="row"><label>Rate</label><input type="number" min="0" step="0.1" value="${p.utility_effect_rate}" oninput="updatePart(${idx}, 'utility_effect_rate', this.value, true)"></div>`;
+  } else if (p.category === 'communications') {
+    categoryRows = `
+      <div class="row"><label>Type</label><select onchange="updatePart(${idx}, 'communications_type', this.value, false)">
+        ${['radio', 'laser_link', 'quantum_paired'].map(t => `<option value="${t}" ${t===p.communications_type?'selected':''}>${t}</option>`).join('')}
+      </select></div>
+      <div class="row"><label>Range (m)</label><input type="number" min="0" step="500" value="${p.communications_range_m}" oninput="updatePart(${idx}, 'communications_range_m', this.value, true)"></div>`;
+  } else if (p.category === 'mobility_aux') {
+    categoryRows = `
+      <div class="row"><label>Speed × </label><input type="number" min="0" step="0.05" value="${p.mobility_bonus_speed || 1.0}" oninput="updatePart(${idx}, 'mobility_bonus_speed', this.value, true)"></div>
+      <div class="row"><label>Turn × </label><input type="number" min="0" step="0.05" value="${p.mobility_bonus_turn_rate || 1.0}" oninput="updatePart(${idx}, 'mobility_bonus_turn_rate', this.value, true)"></div>`;
+  }
+
+  return `
+    <section style="background: var(--panel-2); margin-bottom: 8px;">
+      <h3>
+        ${p.category} #${idx + 1}
+        <button class="remove" onclick="removePart(${idx})" title="remove">×</button>
+      </h3>
+      <div class="row"><label>ID</label><input type="text" value="${p.id}" oninput="updatePart(${idx}, 'id', this.value, false)"></div>
+      <div class="row"><label>Name</label><input type="text" value="${p.name}" oninput="updatePart(${idx}, 'name', this.value, false)"></div>
+      <div class="row"><label>Mass (kg)</label><input type="number" min="0" step="10" value="${p.mass_kg}" oninput="updatePart(${idx}, 'mass_kg', this.value, true)"></div>
+      <div class="row"><label>Power Draw (kW)</label><input type="number" min="0" step="1" value="${p.power_draw_kW}" oninput="updatePart(${idx}, 'power_draw_kW', this.value, true)"></div>
+      ${categoryRows}
+    </section>`;
+}
+
+// ============================================================
+// Tags
+// ============================================================
+function addTag(tag) {
+  if (!tag || state.tags.includes(tag)) return;
+  state.tags.push(tag);
+  renderTags();
+}
+function removeTag(tag) {
+  state.tags = state.tags.filter(t => t !== tag);
+  renderTags();
+  render();
+}
+function renderTags() {
+  const container = document.getElementById('compatibility_tags');
+  const select = container.querySelector('select');
+  container.innerHTML = '';
+  state.tags.forEach(t => {
+    const el = document.createElement('span');
+    el.className = 'tag';
+    el.innerHTML = `${t} <span class="x" onclick="removeTag('${t}')">×</span>`;
+    container.appendChild(el);
+  });
+  container.appendChild(select);
+}
+
+// ============================================================
+// Build the Schematic from form state
+// ============================================================
+function getValue(id) { return document.getElementById(id).value; }
+function getNumber(id) { return parseFloat(document.getElementById(id).value) || 0; }
+
+function buildSchematic() {
+  const unit = {
+    kind: 'unit',
+    id: getValue('id') || 'unnamed',
+    physics_version: '1.0',
+    name: getValue('name') || 'Unnamed Unit',
+    faction: getValue('faction'),
+    description: getValue('description'),
+    designer: getValue('designer') || 'STARTER_KIT',
+    chassis: {
+      chassis_class: getValue('chassis_class'),
+      mass_kg: getNumber('mass_kg'),
+      engine_kW: getNumber('engine_kW'),
+      drivetrain_efficiency: getNumber('drivetrain_efficiency'),
+      energy_source: getValue('energy_source'),
+      battery_capacity_MJ: getNumber('battery_capacity_MJ'),
+      fuel_capacity_MJ: getNumber('fuel_capacity_MJ'),
+      fuel_consumption_rate_MJs: getNumber('fuel_consumption_rate_MJs'),
+      solar_collection_area_m2: getNumber('solar_collection_area_m2'),
+      armor_thickness_mm: getNumber('armor_thickness_mm'),
+      armor_material: getValue('armor_material'),
+      hardpoint_count: parseInt(getValue('hardpoint_count'), 10) || 0,
+      compatibility_tags: state.tags.slice(),
+      thermal_capacity_MJ: getNumber('thermal_capacity_MJ')
+    },
+    parts: state.parts.map(p => ({ ...p })),
+    costs: {
+      scrap: getNumber('cost_scrap'),
+      alloy: getNumber('cost_alloy'),
+      fuel: getNumber('cost_fuel'),
+      tech_fragments: getNumber('cost_tech_fragments'),
+      exotic_matter: getNumber('cost_exotic_matter'),
+      power: getNumber('cost_power')
+    },
+    build_time_seconds: getNumber('build_time_seconds')
+  };
+  return unit;
+}
+
+// ============================================================
+// Derived stat formulas
+// (simplified versions of the engine's equations — illustrative)
+// ============================================================
+function deriveStats(u) {
+  const c = u.chassis;
+  const mass_t = c.mass_kg / 1000;
+  const stats = {};
+
+  // Speed: simplified power-to-mass relationship
+  // v ≈ (engine_kW × eff) / (mass_t + 5) — gives m/s in a reasonable range
+  let speed = 0;
+  if (c.chassis_class !== 'static_structure' && mass_t > 0) {
+    speed = (c.engine_kW * c.drivetrain_efficiency) / (mass_t + 5);
+    // Apply mobility-aux bonuses
+    u.parts.forEach(p => {
+      if (p.category === 'mobility_aux' && p.mobility_bonus_speed) {
+        speed *= p.mobility_bonus_speed;
+      }
+    });
+  }
+  stats.speed_mps = speed;
+  stats.speed_kmh = speed * 3.6;
+
+  // Total power draw from parts
+  const totalPartPower = u.parts.reduce((sum, p) => sum + (p.power_draw_kW || 0), 0);
+  stats.total_part_power_kW = totalPartPower;
+  stats.power_balance_kW = c.engine_kW - totalPartPower;
+
+  // Fuel range — at cruise (50% power, proportional fuel)
+  let range_m = 0;
+  if (c.fuel_consumption_rate_MJs > 0 && c.fuel_capacity_MJ > 0) {
+    const cruise_speed = speed * 0.7; // cruise is below top
+    const cruise_burn = c.fuel_consumption_rate_MJs * 0.5;
+    const time_at_cruise = c.fuel_capacity_MJ / cruise_burn;
+    range_m = cruise_speed * time_at_cruise;
+  }
+  stats.fuel_range_km = range_m / 1000;
+
+  // Battery endurance (idle drain)
+  let battery_endurance_s = 0;
+  if (c.battery_capacity_MJ > 0 && totalPartPower > 0) {
+    battery_endurance_s = (c.battery_capacity_MJ * 1000) / totalPartPower; // kJ / kW = s
+  }
+  stats.battery_endurance_s = battery_endurance_s;
+
+  // Solar charge time (battery / area / typical insolation)
+  let solar_charge_s = 0;
+  if (c.battery_capacity_MJ > 0 && c.solar_collection_area_m2 > 0) {
+    const solar_W = c.solar_collection_area_m2 * 200; // 200 W/m² average
+    solar_charge_s = (c.battery_capacity_MJ * 1e6) / solar_W;
+  }
+  stats.solar_full_charge_s = solar_charge_s;
+
+  // Effective armor (chassis + part bonuses)
+  let armor = c.armor_thickness_mm;
+  u.parts.forEach(p => {
+    if (p.armor_bonus_mm) armor += p.armor_bonus_mm;
+  });
+  stats.effective_armor_mm = armor;
+
+  // Shield totals
+  let shield_cap = 0, shield_regen = 0;
+  u.parts.forEach(p => {
+    if (p.shield_capacity_MJ) shield_cap += p.shield_capacity_MJ;
+    if (p.shield_regen_rate_MJs) shield_regen += p.shield_regen_rate_MJs;
+  });
+  stats.total_shield_MJ = shield_cap;
+  stats.total_shield_regen_MJs = shield_regen;
+
+  // Total mass (chassis + parts)
+  let total_mass = c.mass_kg;
+  u.parts.forEach(p => total_mass += p.mass_kg || 0);
+  stats.total_mass_kg = total_mass;
+
+  // Per-weapon derived
+  stats.weapons = u.parts.filter(p => p.category === 'weapon').map(w => {
+    const w_stats = { name: w.name, type: w.weapon_type };
+    if (w.weapon_type === 'kinetic' || w.weapon_type === 'thermal') {
+      // muzzle velocity (with thermal-loss factor 0.3)
+      if (w.projectile_mass_kg > 0) {
+        const mv = Math.sqrt(2 * w.propellant_energy_MJ * 1e6 / w.projectile_mass_kg) * 0.3;
+        w_stats.muzzle_velocity_mps = mv;
+        w_stats.effective_range_m = mv * 2; // simple range-from-velocity
+        w_stats.impact_energy_kJ = 0.5 * w.projectile_mass_kg * mv * mv / 1000;
+      }
+    } else if (w.weapon_type === 'beam') {
+      w_stats.effective_range_m = w.propellant_energy_MJ * 200; // rough
+      w_stats.impact_energy_kJ = w.propellant_energy_MJ * 1000;
+    }
+    // Cooldown: time between shots to keep heat sustainable
+    if (w.cooling_rate_MJs > 0 && w.per_shot_heat_MJ > 0) {
+      if (w.per_shot_heat_MJ <= w.cooling_rate_MJs) {
+        w_stats.sustainable_shots_per_sec = w.cooling_rate_MJs / w.per_shot_heat_MJ;
+        w_stats.time_between_shots_s = w.per_shot_heat_MJ / w.cooling_rate_MJs;
+      } else {
+        // Will overheat eventually
+        w_stats.shots_to_overheat = Math.floor(w.barrel_thermal_capacity_MJ / w.per_shot_heat_MJ);
+        w_stats.time_between_shots_s = w.per_shot_heat_MJ / w.cooling_rate_MJs;
+        w_stats.vent_duration_s = w.barrel_thermal_capacity_MJ / w.cooling_rate_MJs;
+      }
+    }
+    return w_stats;
+  });
+
+  return stats;
+}
+
+function renderDerived(stats, u) {
+  const c = u.chassis;
+  const lines = [];
+
+  // Mobility
+  let mobilityHTML = `<h3>Mobility</h3>`;
+  if (c.chassis_class === 'static_structure') {
+    mobilityHTML += `<div class="stat-row"><span class="label">Stationary</span><span class="value">no movement</span></div>`;
+  } else {
+    const speed_class = stats.speed_mps > 30 ? 'good' : stats.speed_mps > 10 ? '' : 'warn';
+    mobilityHTML += `
+      <div class="stat-row"><span class="label">Top Speed</span><span class="value ${speed_class}">${stats.speed_mps.toFixed(1)} m/s (${stats.speed_kmh.toFixed(0)} km/h)</span></div>
+      <div class="stat-row"><span class="label">Total Mass</span><span class="value">${(stats.total_mass_kg / 1000).toFixed(1)} t</span></div>`;
+    if (stats.fuel_range_km > 0) {
+      mobilityHTML += `<div class="stat-row"><span class="label">Fuel Range</span><span class="value">${stats.fuel_range_km.toFixed(1)} km</span></div>`;
+    }
+  }
+  lines.push(`<div class="stat-group">${mobilityHTML}</div>`);
+
+  // Energy
+  let energyHTML = `<h3>Energy</h3>`;
+  const power_class = stats.power_balance_kW < 0 ? 'bad' : stats.power_balance_kW < 20 ? 'warn' : 'good';
+  energyHTML += `
+    <div class="stat-row"><span class="label">Engine Output</span><span class="value">${c.engine_kW.toFixed(0)} kW</span></div>
+    <div class="stat-row"><span class="label">Parts Draw</span><span class="value">${stats.total_part_power_kW.toFixed(0)} kW</span></div>
+    <div class="stat-row"><span class="label">Power Balance</span><span class="value ${power_class}">${stats.power_balance_kW > 0 ? '+' : ''}${stats.power_balance_kW.toFixed(0)} kW</span></div>`;
+  if (stats.battery_endurance_s > 0) {
+    energyHTML += `<div class="stat-row"><span class="label">Battery Endurance</span><span class="value">${formatDuration(stats.battery_endurance_s)}</span></div>`;
+  }
+  if (stats.solar_full_charge_s > 0) {
+    energyHTML += `<div class="stat-row"><span class="label">Solar Full Charge</span><span class="value">${formatDuration(stats.solar_full_charge_s)}</span></div>`;
+  }
+  lines.push(`<div class="stat-group">${energyHTML}</div>`);
+
+  // Defense
+  let defenseHTML = `<h3>Defense</h3>`;
+  defenseHTML += `<div class="stat-row"><span class="label">Armor</span><span class="value">${stats.effective_armor_mm.toFixed(0)} mm <span class="label" style="font-size: 11px;">(${c.armor_material})</span></span></div>`;
+  if (stats.total_shield_MJ > 0) {
+    defenseHTML += `<div class="stat-row"><span class="label">Shield Capacity</span><span class="value">${stats.total_shield_MJ.toFixed(0)} MJ</span></div>`;
+    defenseHTML += `<div class="stat-row"><span class="label">Shield Regen</span><span class="value">${stats.total_shield_regen_MJs.toFixed(1)} MJ/s</span></div>`;
+  }
+  lines.push(`<div class="stat-group">${defenseHTML}</div>`);
+
+  // Weapons
+  if (stats.weapons.length > 0) {
+    let wHTML = `<h3>Weapons (${stats.weapons.length})</h3>`;
+    stats.weapons.forEach((w, i) => {
+      wHTML += `<div style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dashed var(--border);">`;
+      wHTML += `<div style="font-weight: 600; color: var(--accent-2); font-size: 12px;">${w.name} <span style="color: var(--text-dim); font-weight: normal;">(${w.type})</span></div>`;
+      if (w.muzzle_velocity_mps !== undefined) {
+        wHTML += `<div class="stat-row"><span class="label">Muzzle Velocity</span><span class="value">${w.muzzle_velocity_mps.toFixed(0)} m/s</span></div>`;
+      }
+      if (w.effective_range_m !== undefined) {
+        wHTML += `<div class="stat-row"><span class="label">Effective Range</span><span class="value">${(w.effective_range_m / 1000).toFixed(2)} km</span></div>`;
+      }
+      if (w.impact_energy_kJ !== undefined) {
+        wHTML += `<div class="stat-row"><span class="label">Impact Energy</span><span class="value">${w.impact_energy_kJ.toFixed(1)} kJ</span></div>`;
+      }
+      if (w.sustainable_shots_per_sec !== undefined) {
+        wHTML += `<div class="stat-row"><span class="label">Sustained ROF</span><span class="value good">${w.sustainable_shots_per_sec.toFixed(2)} /s (steady)</span></div>`;
+      } else if (w.shots_to_overheat !== undefined) {
+        wHTML += `<div class="stat-row"><span class="label">Burst Capacity</span><span class="value warn">${w.shots_to_overheat} shots → vent ${formatDuration(w.vent_duration_s)}</span></div>`;
+        wHTML += `<div class="stat-row"><span class="label">Time/Shot</span><span class="value">${w.time_between_shots_s.toFixed(2)} s</span></div>`;
+      }
+      wHTML += `</div>`;
+    });
+    lines.push(`<div class="stat-group">${wHTML}</div>`);
+  }
+
+  document.getElementById('derived-stats').innerHTML = lines.join('');
+}
+
+function formatDuration(s) {
+  if (s < 60) return s.toFixed(1) + ' s';
+  if (s < 3600) return (s/60).toFixed(1) + ' min';
+  return (s/3600).toFixed(1) + ' h';
+}
+
+// ============================================================
+// Render the JSON + stats
+// ============================================================
+function render() {
+  const unit = buildSchematic();
+  const json = JSON.stringify(unit, null, 2);
+  document.getElementById('json-output').textContent = json;
+  document.getElementById('json-size').textContent = `${json.length} chars`;
+  document.getElementById('part-count').textContent = `${state.parts.length} parts`;
+  const stats = deriveStats(unit);
+  renderDerived(stats, unit);
+}
+
+// ============================================================
+// New / Save / Load
+// ============================================================
+function newUnit() {
+  state.parts = [];
+  state.tags = [];
+  partCounter = 0;
+  const defaults = {
+    id: '', name: '', faction: 'reclaimer', designer: 'STARTER_KIT', description: '',
+    chassis_class: 'ground_tracked',
+    mass_kg: 20000, engine_kW: 500, drivetrain_efficiency: 0.7,
+    energy_source: 'fuel_cell',
+    battery_capacity_MJ: 0, fuel_capacity_MJ: 500, fuel_consumption_rate_MJs: 4.5,
+    solar_collection_area_m2: 0,
+    armor_thickness_mm: 60, armor_material: 'salvaged_steel',
+    hardpoint_count: 3, thermal_capacity_MJ: 100,
+    cost_scrap: 100, cost_alloy: 20, cost_fuel: 30,
+    cost_tech_fragments: 0, cost_exotic_matter: 0, cost_power: 5,
+    build_time_seconds: 60
+  };
+  for (const [k, v] of Object.entries(defaults)) {
+    const el = document.getElementById(k);
+    if (el) el.value = v;
+  }
+  renderPartsList();
+  renderTags();
+  render();
+}
+
+function saveJSON() {
+  const unit = buildSchematic();
+  const json = JSON.stringify(unit, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${unit.id || 'unit'}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function loadFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const unit = JSON.parse(e.target.result);
+      loadUnit(unit);
+    } catch (err) {
+      alert('Invalid JSON: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function loadUnit(unit) {
+  const u = unit || {};
+  const c = u.chassis || {};
+  const co = u.costs || {};
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && val !== undefined && val !== null) el.value = val;
+  };
+  set('id', u.id);
+  set('name', u.name);
+  set('faction', u.faction);
+  set('designer', u.designer);
+  set('description', u.description);
+  set('chassis_class', c.chassis_class);
+  set('mass_kg', c.mass_kg);
+  set('engine_kW', c.engine_kW);
+  set('drivetrain_efficiency', c.drivetrain_efficiency);
+  set('energy_source', c.energy_source);
+  set('battery_capacity_MJ', c.battery_capacity_MJ);
+  set('fuel_capacity_MJ', c.fuel_capacity_MJ);
+  set('fuel_consumption_rate_MJs', c.fuel_consumption_rate_MJs);
+  set('solar_collection_area_m2', c.solar_collection_area_m2);
+  set('armor_thickness_mm', c.armor_thickness_mm);
+  set('armor_material', c.armor_material);
+  set('hardpoint_count', c.hardpoint_count);
+  set('thermal_capacity_MJ', c.thermal_capacity_MJ);
+  set('cost_scrap', co.scrap);
+  set('cost_alloy', co.alloy);
+  set('cost_fuel', co.fuel);
+  set('cost_tech_fragments', co.tech_fragments);
+  set('cost_exotic_matter', co.exotic_matter);
+  set('cost_power', co.power);
+  set('build_time_seconds', u.build_time_seconds);
+  state.tags = (c.compatibility_tags || []).slice();
+  state.parts = (u.parts || []).map(p => ({ ...p }));
+  partCounter = state.parts.length;
+  renderTags();
+  renderPartsList();
+  render();
+}
+
+// ============================================================
+// Bootstrap
+// ============================================================
+window.addEventListener('DOMContentLoaded', () => {
+  newUnit();
+});
+</script>
+
+</body>
+</html>
