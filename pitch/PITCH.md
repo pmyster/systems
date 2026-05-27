@@ -18,9 +18,9 @@ The design is comprehensively documented across 17+ technical specifications tot
 
 **Status:** design phase complete; engineering not yet started. The full design specification is ready to hand to an engineering team.
 
-**Revenue model:** premium one-time purchase ($2.99) after free demo + creator marketplace (V2+) + optional patronage (V2+). Real-brand diegetic ads appear in the free demo only. No subscriptions. No pay-to-win. No in-game purchases that affect gameplay.
+**Revenue model:** premium one-time purchase ($2.99) after free demo serves as the entry fee and commitment mechanism; **diegetic in-world ads (faded post-apocalyptic billboards, hologram signs) are the bread-and-butter ongoing revenue** that scales with active community and funds V2/V3 development. Creator marketplace (V2+) and optional patronage (V2+) layer on top. No subscriptions. No pay-to-win. No in-game purchases that affect gameplay.
 
-**Phased delivery:** V1 (PvE-only paid game, ~15 months) revenue-positive before V2 (PvP, ~12 months) and V3 (Living World, ~12 months) investment. V2 and V3 ship as free updates to V1 buyers — the marketplace and Living World are content expansion, not separate SKUs. **Each phase funds the next through new-buyer acquisition plus marketplace revenue.**
+**Phased delivery:** V1 (PvE-only paid game, ~15 months) revenue-positive on sales + ramping ad revenue before V2 (PvP, ~12 months) and V3 (Living World, ~12 months) investment. V2 and V3 ship as free updates to V1 buyers — the marketplace and Living World are content expansion, not separate SKUs. **Each phase ships into a revenue base that covers the next phase's infrastructure costs many times over.** The project is structurally capable of bootstrapping from launch revenue alone.
 
 ---
 
@@ -139,13 +139,17 @@ This is the foundation of the V2/V3 investment case: V1 ships into an *invested*
 
 **Conversion economics:** at 1M demo downloads / 30% Skirmish-1 completion / 50% Skirmish-2 completion / 30% buy-conversion = ~45K buyers per million demos × $2.09 net (after app store cut) = ~$94K per million demos. Premium per-acquisition is lower than F2P-with-ads, but: cleaner experience, higher-quality players (pre-vetted as willing-to-pay), simpler operations, and the commitment effect amplifies LTV.
 
-### Stream 2: Real-Brand Diegetic Ads (Free Demo Only)
+### Stream 2: Diegetic In-World Advertising (V1 onward — bread-and-butter ongoing revenue)
 
-In-world ads as post-apocalyptic texture during the free demo. Faded billboards. Hologram signs in dead cities. Brand decals on rusted vehicles. The pre-Fall corporations *were* real corporations.
+The post-apocalyptic frame makes this stream uniquely natural. Pre-Fall corporate signage — faded billboards on ruined gas stations, hologram signs flickering above dead cities, brand decals on rusted trucks — *is* the world's aesthetic. Real-brand placements (Coke, Pepsi, Toyota, Mountain Dew) work because the world that fell was ours.
 
-Real-brand placements (Coke, Pepsi, Toyota, etc.) appear only in the free demo, where they double as marketing exposure for the brands and atmospheric texture for prospective buyers. **The paid game replaces real-brand ads with fictional analogues** (Atomic Cola, Sunset Sarsaparilla) — same aesthetic, no monetization. Paid players never feel "I bought this and there are still ads"; they get a cleaner experience that justifies the price.
+**This is the ongoing revenue stream that funds V2 and V3 development.** While the $2.99 purchase is a one-time event per buyer, ad placements generate revenue continuously from every active session. Revenue scales with active community (MAU), not with the new-acquisition treadmill. Conservative projection at $1.50/MAU/month: 100K MAU yields $150K/month; 1M MAU yields $1.5M/month. **Each phase ships into a revenue base that already covers the next phase's infrastructure many times over.**
 
-**Hard rules** (player protection in both demo and paid): diegetic only, atmospheric not promotional, no interaction required, density caps per map.
+**Why ads work in the paid game:** they're diegetic, not promotional. A faded Coke billboard on a ruined highway is the *kind of thing* the post-apocalyptic world contains. Removing them would make the world feel less real. They serve double duty — aesthetic texture for the player and revenue from the advertiser. Unlike F2P ad mechanics that extract value from players (interruptions, rewarded video, forced views), these ads exist *in* the world and the player never has to engage with them.
+
+**Hard rules** (player protections, architecturally enforced): diegetic only (never UI overlays or interruptions), atmospheric not promotional (no CTAs), no interaction required (no watch-ad-for-resources), density caps per map (placement budget declared by environment Schematic), free minimal-ads opt-out toggle, optional ad-removal one-time purchase ($2-5) for ad-averse players.
+
+**Brand-safety controls:** each real-brand placement is contractually approved by the advertiser; contextual filtering ensures inappropriate juxtapositions are avoided; cultural-sensitivity review per region; full trademark licensing.
 
 Players sell their custom unit designs to other players. Single design: $0.25. Pack of 5: $1.00. Premium experimental: $1.00.
 
@@ -194,9 +198,9 @@ Voluntary monthly contribution (Patreon-style). **Zero in-game benefit.** Player
 
 | Phase | Timing | Features | Infrastructure | Revenue Profile |
 |---|---|---|---|---|
-| **V1 PvE** | Months 0-15 | Free demo + $2.99 paid PvE game, Editor App, Hall of Conquered (PvE), async design sharing (free), demo-only real-brand ads | $0.7-2K/mo at 10K MAU | Sales-driven; ~$94K per million demos at target conversion |
-| **V2 PvP** | Months 15-27 | Lockstep PvP, clans/alliances, marketplace, Phase 2 content (Lunar) — **free upgrade to V1 buyers** | $10-30K/mo at 100K MAU | Sales + marketplace (~8% fee on player-to-player transactions) |
-| **V3 Living World** | Months 27-36+ | AI runtime narrative, Phase 3 content (Reach), mature community ecosystem — **free upgrade to V1 buyers** | $50-150K/mo at 1M MAU | Full diversification: sales + marketplace + patronage |
+| **V1 PvE** | Months 0-15 | Free demo + $2.99 paid PvE game, Editor App, Hall (PvE), async design sharing, diegetic ads active in demo and paid | $0.7-2K/mo at 10K MAU | Sales (~$94K/million demos) + ad revenue ramping with MAU ($15K-150K/mo at 10K-100K MAU) |
+| **V2 PvP** | Months 15-27 | Lockstep PvP, clans/alliances, marketplace, Phase 2 content (Lunar) — **free upgrade to V1 buyers** | $10-30K/mo at 100K MAU | Continuing sales + ads (now bread-and-butter at $150K-1M/mo) + marketplace |
+| **V3 Living World** | Months 27-36+ | AI runtime narrative, Phase 3 content (Reach), mature community ecosystem — **free upgrade to V1 buyers** | $50-150K/mo at 1M MAU | Mature mix: sales + ads ($500K-3M/mo) + marketplace + patronage |
 
 **Decision gate between phases:** each phase must demonstrate retention and revenue before the next is funded. The architecture supports stopping at any phase if returns warrant — V1 is a complete game; V2 adds the social layer; V3 adds the living-world dynamism.
 
