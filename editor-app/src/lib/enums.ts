@@ -24,6 +24,8 @@ import type {
   CompatibilityTag,
   EnergySource,
   Faction,
+  HardpointSlotType,
+  StructureType,
   UnitRole,
 } from "../types/unit";
 import type {
@@ -64,6 +66,7 @@ export const CHASSIS_CLASSES: readonly ChassisClass[] = [
   "subterranean",
   "orbital",
   "static_structure",
+  "static_wall",
 ] as const satisfies readonly ChassisClass[];
 
 export const ENERGY_SOURCES: readonly EnergySource[] = [
@@ -111,6 +114,14 @@ export const ROLES: readonly UnitRole[] = [
   "structure",
   "elite",
 ] as const satisfies readonly UnitRole[];
+
+export const STRUCTURE_TYPES: readonly StructureType[] = [
+  "tower", "wall", "gate", "bunker", "factory", "depot", "relay",
+] as const satisfies readonly StructureType[];
+
+export const HARDPOINT_SLOT_TYPES: readonly HardpointSlotType[] = [
+  "heavy_gun", "light_gun", "missile", "flak", "aux", "shield", "sensor", "gate",
+] as const satisfies readonly HardpointSlotType[];
 
 // ---------------------------------------------------------------------------
 // Part-level enums.

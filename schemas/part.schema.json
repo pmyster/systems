@@ -26,6 +26,11 @@
       "type": "string",
       "enum": ["kinetic", "beam", "missile", "thermal", "psionic"]
     },
+    "slot_type": {
+      "type": "string",
+      "enum": ["heavy_gun", "light_gun", "missile", "flak", "aux", "shield", "sensor", "gate", "universal"],
+      "description": "Which hardpoint slot types this part can be mounted in. 'universal' fits any slot. If absent, part is compatible with any hardpoint."
+    },
     "propellant_energy_MJ": {
       "type": "number",
       "minimum": 0,

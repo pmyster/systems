@@ -45,7 +45,8 @@
             "naval_submarine",
             "subterranean",
             "orbital",
-            "static_structure"
+            "static_structure",
+            "static_wall"
           ]
         },
         "mass_kg": { "type": "number", "minimum": 1 },
@@ -100,6 +101,34 @@
         "voxel_data": {
           "type": "object",
           "description": "Optional voxel chassis data sculpted in the Editor App. Format TBD; placeholder for now."
+        },
+        "structure_type": {
+          "type": "string",
+          "enum": ["tower", "wall", "gate", "bunker", "factory", "depot", "relay"],
+          "description": "Subtype for static_structure and static_wall chassis. Governs placement rules and upgrade chains in the game engine."
+        },
+        "hardpoints": {
+          "type": "array",
+          "description": "Named weapon/module slots. Each slot has an ID and a type that constrains which weapon platform can be mounted. For mobile units, prefer bare hardpoint_count. For structures, use this array for full slot identity.",
+          "items": {
+            "type": "object",
+            "required": ["id", "type"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique slot name within this unit (e.g. 'main_gun', 'aux_1', 'gate_north')"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["heavy_gun", "light_gun", "missile", "flak", "aux", "shield", "sensor", "gate"],
+                "description": "Slot class — constrains which part types can mount here"
+              },
+              "occupied_by": {
+                "type": "string",
+                "description": "Part schematic ID currently mounted in this slot. Omit for empty slot."
+              }
+            }
+          }
         }
       }
     },

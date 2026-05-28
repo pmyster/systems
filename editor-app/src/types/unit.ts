@@ -49,7 +49,21 @@ export type ChassisClass =
   | "naval_submarine"
   | "subterranean"
   | "orbital"
-  | "static_structure";
+  | "static_structure"
+  | "static_wall";
+
+export type StructureType =
+  | "tower" | "wall" | "gate" | "bunker" | "factory" | "depot" | "relay";
+
+export type HardpointSlotType =
+  | "heavy_gun" | "light_gun" | "missile" | "flak"
+  | "aux" | "shield" | "sensor" | "gate";
+
+export interface HardpointSlot {
+  readonly id: string;
+  readonly type: HardpointSlotType;
+  readonly occupied_by?: string;
+}
 
 export type EnergySource =
   | "battery"
@@ -121,6 +135,8 @@ export interface UnitChassis {
    * union keyed on `format`.
    */
   readonly voxel_data?: VoxelGrid;
+  readonly structure_type?: StructureType;
+  readonly hardpoints?: readonly HardpointSlot[];
 }
 
 // ---------------------------------------------------------------------------

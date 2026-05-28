@@ -35,6 +35,7 @@ import type { UnitSchematic } from "../../types/unit";
 import { ChassisSection } from "./ChassisSection";
 import { CostsSection } from "./CostsSection";
 import { DerivedStatsPanel } from "./DerivedStatsPanel";
+import { HardpointSection } from "./HardpointSection";
 import { MetaSection } from "./MetaSection";
 import { PartsSection } from "./PartsSection";
 import { ValidationPanel } from "./ValidationPanel";
@@ -56,6 +57,7 @@ export function AttributeForm(props: AttributeFormProps): ReactNode {
     <div className={styles.form}>
       <MetaSection unit={unit} onUnitChange={onUnitChange} />
       <ChassisSection unit={unit} onUnitChange={onUnitChange} />
+      <HardpointSection unit={unit} onUnitChange={onUnitChange} />
       <PartsSection unit={unit} onUnitChange={onUnitChange} />
       <CostsSection unit={unit} onUnitChange={onUnitChange} />
       <DerivedStatsPanel unit={unit} />

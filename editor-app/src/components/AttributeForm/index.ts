@@ -7,3 +7,5 @@
  */
 
 export { AttributeForm } from "./AttributeForm";
+export { HardpointSection } from "./HardpointSection";
+export type { HardpointSectionProps } from "./HardpointSection";

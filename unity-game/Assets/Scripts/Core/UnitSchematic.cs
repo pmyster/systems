@@ -1,6 +1,9 @@
 // UnitSchematic.cs
 // C# data classes mirroring the JSON unit schema.
 // Requires: com.unity.nuget.newtonsoft-json
+//
+// Extended: hardpoints, evolution, slot_type, structure_type added for
+// DefenseTower, WallSegment, and UpgradeSystem support.
 
 using System;
 using System.Collections.Generic;
@@ -54,6 +57,53 @@ namespace ChildOfLight.Core
     }
 
     // ─────────────────────────────────────────────
+    //  Hardpoint slot (for towers and large structures)
+    // ─────────────────────────────────────────────
+
+    [Serializable]
+    public class HardpointSlot
+    {
+        /// <summary>Unique id within the schematic, e.g. "front_left".</summary>
+        [JsonProperty("slot_id")]
+        public string SlotId = string.Empty;
+
+        /// <summary>Type of platform this slot accepts, e.g. "cannon", "missile", "universal".</summary>
+        [JsonProperty("slot_type")]
+        public string SlotType = "universal";
+
+        /// <summary>Unit id of the platform currently mounted in this slot (empty = unoccupied).</summary>
+        [JsonProperty("occupied_by")]
+        public string OccupiedBy = string.Empty;
+    }
+
+    // ─────────────────────────────────────────────
+    //  Evolution / upgrade trigger
+    // ─────────────────────────────────────────────
+
+    [Serializable]
+    public class EvolutionTrigger
+    {
+        [JsonProperty("scrap")]        public int   Scrap        = 0;
+        [JsonProperty("alloy")]        public int   Alloy        = 0;
+        [JsonProperty("power")]        public int   Power        = 0;
+        [JsonProperty("fuel")]         public float Fuel         = 0f;
+        [JsonProperty("tech_fragments")] public int TechFragments = 0;
+        [JsonProperty("exotic_matter")] public float ExoticMatter = 0f;
+    }
+
+    [Serializable]
+    public class EvolutionEntry
+    {
+        /// <summary>Unit id of the successor schematic (the upgraded form).</summary>
+        [JsonProperty("successor")]
+        public string Successor = string.Empty;
+
+        /// <summary>Resource costs required to execute this upgrade.</summary>
+        [JsonProperty("trigger")]
+        public EvolutionTrigger Trigger = new EvolutionTrigger();
+    }
+
+    // ─────────────────────────────────────────────
     //  Part schematic (simplified — full schema in part.schema.json)
     // ─────────────────────────────────────────────
 
@@ -68,6 +118,13 @@ namespace ChildOfLight.Core
 
         [JsonProperty("part_type")]
         public string PartType = string.Empty;   // "weapon", "engine", "armor", "sensor", etc.
+
+        /// <summary>
+        /// Slot compatibility type for weapon-platform parts, e.g. "cannon", "missile", "universal".
+        /// Only relevant when PartType == "weapon_platform".
+        /// </summary>
+        [JsonProperty("slot_type")]
+        public string SlotType = "universal";
 
         // --- Armor fields ---
         [JsonProperty("armor_thickness_mm")]
@@ -128,6 +185,13 @@ namespace ChildOfLight.Core
 
         [JsonProperty("name")]
         public string Name = string.Empty;
+
+        /// <summary>
+        /// Structure sub-type for static buildings: "wall", "gate", "tower", "base", etc.
+        /// Used by WallSegment to identify gate pieces.
+        /// </summary>
+        [JsonProperty("structure_type")]
+        public string StructureType = string.Empty;
 
         [JsonProperty("mass_kg")]
         public float MassKg = 5000f;
@@ -211,7 +275,24 @@ namespace ChildOfLight.Core
         [JsonProperty("tags")]
         public List<string> Tags = new List<string>();
 
+        /// <summary>
+        /// Hardpoint slots for structure / tower schematics.
+        /// Empty list for mobile units.
+        /// </summary>
+        [JsonProperty("hardpoints")]
+        public List<HardpointSlot> Hardpoints = new List<HardpointSlot>();
+
+        /// <summary>
+        /// Upgrade paths available from this schematic.
+        /// Empty list means this schematic cannot be upgraded.
+        /// </summary>
+        [JsonProperty("evolution")]
+        public List<EvolutionEntry> Evolution = new List<EvolutionEntry>();
+
         // ── Convenience accessors ──
+
+        /// <summary>Alias for UnitId — used by UpgradeSystem and DefenseTower for consistency.</summary>
+        public string Id => UnitId;
 
         public UnitRole Role => RoleStr switch
         {

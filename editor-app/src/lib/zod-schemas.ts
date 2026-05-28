@@ -35,6 +35,7 @@ import type {
   WeaponPart,
 } from "../types/part";
 import type {
+  HardpointSlot,
   UnitChassis,
   UnitCosts,
   UnitEvolution,
@@ -94,7 +95,22 @@ const chassisClassSchema = z.enum([
   "subterranean",
   "orbital",
   "static_structure",
+  "static_wall",
 ]);
+
+const structureTypeSchema = z.enum([
+  "tower", "wall", "gate", "bunker", "factory", "depot", "relay",
+]);
+
+const hardpointSlotTypeSchema = z.enum([
+  "heavy_gun", "light_gun", "missile", "flak", "aux", "shield", "sensor", "gate",
+]);
+
+const hardpointSlotSchema = z.object({
+  id: z.string(),
+  type: hardpointSlotTypeSchema,
+  occupied_by: z.string().optional(),
+});
 
 const energySourceSchema = z.enum([
   "battery",
@@ -331,6 +347,8 @@ const unitChassisSchema = z.object({
   compatibility_tags: z.array(compatibilityTagSchema).optional(),
   thermal_capacity_MJ: z.number().nonnegative().optional(),
   voxel_data: VoxelGridSchema.optional(),
+  structure_type: structureTypeSchema.optional(),
+  hardpoints: z.array(hardpointSlotSchema).optional(),
 });
 
 const unitCostsSchema = z.object({
@@ -414,6 +432,7 @@ type _AssertEvolution = z.infer<typeof evolutionSchema> extends UnitEvolution ? 
 type _AssertUnit = z.infer<typeof UnitSchematicSchema> extends UnitSchematic ? true : never;
 type _AssertGrid = z.infer<typeof VoxelGridSchema> extends VoxelGrid ? true : never;
 type _AssertHardpoint = z.infer<typeof hardpointSchema> extends Hardpoint ? true : never;
+type _AssertHardpointSlot = z.infer<typeof hardpointSlotSchema> extends HardpointSlot ? true : never;
 type _AssertVoxelMaterial = z.infer<typeof voxelMaterialSpecSchema> extends VoxelMaterialSpec
   ? true
   : never;
@@ -433,6 +452,7 @@ type _SyncChecks = [
   _AssertUnit,
   _AssertGrid,
   _AssertHardpoint,
+  _AssertHardpointSlot,
   _AssertVoxelMaterial,
 ];
 export type __EditorSchemaSyncChecks = _SyncChecks;

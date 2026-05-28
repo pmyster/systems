@@ -88,6 +88,46 @@ namespace ChildOfLight.Gameplay
                 Debug.Log($"[FactionController] {Faction} lost unit '{unit?.DisplayName}'. Remaining: {_units.Count}");
         }
 
+        // ─── Structure management ─────────────────────────
+
+        private readonly List<DefenseTower> _towers   = new();
+        private readonly List<WallSegment>  _walls    = new();
+
+        public IReadOnlyList<DefenseTower> Towers => _towers;
+        public IReadOnlyList<WallSegment>  Walls  => _walls;
+
+        /// <summary>Register a tower structure with this faction.</summary>
+        public void RegisterStructure(DefenseTower tower)
+        {
+            if (tower == null || _towers.Contains(tower)) return;
+            _towers.Add(tower);
+            tower.Faction = Faction;
+            Debug.Log($"[FactionController] {Faction} registered tower '{tower.gameObject.name}'. Towers: {_towers.Count}");
+        }
+
+        /// <summary>Remove a tower (called by DefenseTower.Die).</summary>
+        public void UnregisterStructure(DefenseTower tower)
+        {
+            if (_towers.Remove(tower))
+                Debug.Log($"[FactionController] {Faction} lost tower '{tower?.gameObject.name}'. Remaining: {_towers.Count}");
+        }
+
+        /// <summary>Register a wall segment with this faction.</summary>
+        public void RegisterStructure(WallSegment wall)
+        {
+            if (wall == null || _walls.Contains(wall)) return;
+            _walls.Add(wall);
+            wall.Faction = Faction;
+            Debug.Log($"[FactionController] {Faction} registered wall '{wall.gameObject.name}'. Walls: {_walls.Count}");
+        }
+
+        /// <summary>Remove a wall segment (called by WallSegment.Die).</summary>
+        public void UnregisterStructure(WallSegment wall)
+        {
+            if (_walls.Remove(wall))
+                Debug.Log($"[FactionController] {Faction} lost wall '{wall?.gameObject.name}'. Remaining: {_walls.Count}");
+        }
+
         // ─── Economy ──────────────────────────────────────
 
         public bool CanAfford(int power, int scrap, int alloy) =>

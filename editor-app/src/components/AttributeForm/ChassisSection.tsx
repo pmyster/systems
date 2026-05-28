@@ -15,9 +15,9 @@
  * Lift source: tools/editor/index.html lines 179-248.
  */
 
-import type { ReactNode } from "react";
+import { type ReactNode } from "react";
 
-import { ARCHETYPES } from "../../lib/archetypes";
+import { ARCHETYPES, type ArchetypePreset } from "../../lib/archetypes";
 import {
   ARMOR_MATERIALS,
   CHASSIS_CLASSES,
@@ -81,28 +81,62 @@ export function ChassisSection(props: ChassisSectionProps): ReactNode {
       </h3>
 
       {/* Archetype quick-fill — sets role + all chassis fields in one click */}
-      <div className={styles.row}>
-        <label className={styles.label}>Archetype</label>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-          {ARCHETYPES.map((a) => (
+      {((): ReactNode => {
+        const mobile = ARCHETYPES.filter(
+          (a: ArchetypePreset) =>
+            a.chassisClass !== "static_structure" && a.chassisClass !== "static_wall",
+        );
+        const towers = ARCHETYPES.filter(
+          (a: ArchetypePreset) =>
+            a.chassisClass === "static_structure" && a.id !== "structure",
+        );
+        const walls = ARCHETYPES.filter(
+          (a: ArchetypePreset) => a.chassisClass === "static_wall",
+        );
+        // Legacy "structure / Tower" preset
+        const legacyStructure = ARCHETYPES.filter(
+          (a: ArchetypePreset) => a.id === "structure",
+        );
+
+        function applyArchetype(a: ArchetypePreset): void {
+          onUnitChange({ ...unit, role: a.role, chassis: { ...c, ...a.chassis } });
+        }
+
+        function groupButtons(archetypes: readonly ArchetypePreset[]): ReactNode {
+          return archetypes.map((a) => (
             <button
               key={a.id}
               type="button"
               className={styles.archetypeBtn}
               title={`Fill as ${a.label}`}
-              onClick={() => {
-                onUnitChange({
-                  ...unit,
-                  role: a.role,
-                  chassis: { ...c, ...a.chassis },
-                });
-              }}
+              onClick={() => applyArchetype(a)}
             >
               {a.label}
             </button>
-          ))}
-        </div>
-      </div>
+          ));
+        }
+
+        return (
+          <div className={styles.row}>
+            <label className={styles.label}>Archetype</label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+              <span style={{ fontSize: 10, color: "#6b7280", width: "100%", marginBottom: 2 }}>
+                — Mobile —
+              </span>
+              {groupButtons(mobile)}
+              <span style={{ fontSize: 10, color: "#6b7280", width: "100%", marginTop: 4, marginBottom: 2 }}>
+                — Structures —
+              </span>
+              {groupButtons(legacyStructure)}
+              {groupButtons(towers)}
+              <span style={{ fontSize: 10, color: "#6b7280", width: "100%", marginTop: 4, marginBottom: 2 }}>
+                — Walls —
+              </span>
+              {groupButtons(walls)}
+            </div>
+          </div>
+        );
+      })()}
 
       <SelectField<ChassisClass>
         label="Class"
