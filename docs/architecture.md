@@ -390,9 +390,50 @@ public interface IRenderer {
 }
 ```
 
-**V1 implementation:** Unity-based rendering. Mobile-optimized shaders. Voxel chassis rendering with hardpoint-attached parts. Diegetic ad billboard system.
+**Rendering approach (locked decision): Top-down 3D, Total Annihilation style.**
 
-**Platform swap path:** can swap Unity for custom or web renderer behind the same interface. Simulation has no Unity dependencies.
+True 3D simulation with a fixed-axis camera angled ~55-60° from vertical. Camera supports pan and strategic zoom (smooth zoom from tactical to map-wide view) but does NOT rotate around the vertical axis. This is the camera language of TA and Supreme Commander — the camera you immediately recognize as "RTS."
+
+Specifically:
+- **Fixed azimuth** — camera rotation around the vertical axis is locked. The world has a consistent "up" direction in screen space. Players don't get lost.
+- **Tilt-clamped pitch** — pitch is adjustable but clamped between near-top-down (~85°) and oblique (~30°). Default ~58°.
+- **Strategic zoom** — smooth zoom from close (individual units fill the screen) to far (whole battlefield visible). At max zoom, units may transition to icon LOD.
+- **WASD or middle-drag pan** — camera target moves in the world plane.
+- **Real 3D underneath** — units are 3D voxel meshes, terrain is a 3D heightmap, projectiles are 3D objects with real ballistic arcs.
+
+**Unit rendering:**
+
+Units are voxel meshes built from the `voxel_data` block of the unit Schematic (see `schemas/unit.schema.json` and `tools/voxel-editor/`). The renderer:
+
+1. Reads the sparse voxel grid (list of `[x, y, z, material_id]`).
+2. For each material, builds an InstancedMesh of voxel cubes (or a greedy-meshed merged geometry for performance at scale).
+3. Applies the active faction palette via material `color_class` (team-primary / team-secondary / team-accent / fixed). The same voxel data renders in different faction colors without modification.
+4. Attaches parts at the unit's declared hardpoints, oriented per the `facing` direction.
+5. Renders with `MeshStandardMaterial` for PBR lighting — armor reflects, glass transmits, engine cells emit.
+
+**LOD (level of detail):**
+
+- **Close** (camera zoomed in): full voxel mesh per unit, soft shadows enabled.
+- **Mid** (default zoom): same voxel mesh, simplified shadows, faction-color silhouette priority over per-material detail.
+- **Far** (strategic zoom): unit becomes a faction-colored icon sprite on a small base plate. Voxel detail not visible at this scale anyway.
+
+LOD transitions are smooth (alpha-blended) to avoid pop-in.
+
+**Terrain rendering:**
+
+Heightmap mesh from the environment Schematic. Vertex-colored by elevation and biome. Receives shadows from units and terrain features. Real LOS checks happen in the physics solver against the same heightmap.
+
+**Projectile rendering:**
+
+Each in-flight projectile is a small 3D object following its physics-derived trajectory. Long-range shells trace visible arcs across the screen. Beam weapons render as line geometries with bloom. Impact effects are GPU particle emitters bound to the impact point.
+
+**Atmosphere:**
+
+Apocalyptic golden-hour lighting by default (warm directional sun + cool fill). Per-environment Schematic can override (Cradle = warm; Ashen Eye = harsh white + blue rim; Cryomantle = pale blue; etc.). Fog distance tied to zoom level so far-zoom doesn't visually clip.
+
+**Platform implementation:** Unity for the V1 production renderer (mature mobile pipeline). The prototype renderer (`tools/battlefield-viewer/index.html`) uses Three.js + WebGL to demonstrate the look and validate the approach without needing Unity installed. Both consume the same Schematic JSON; both honor the same TA-style camera + LOD model. The simulation has no Unity dependencies, so the renderer is the only Unity-specific module — replaceable without touching physics, AI, or persistence.
+
+**Platform swap path:** swap Unity for a custom WebGL or native engine behind the same interface. The prototype Three.js viewer is proof that the same renderer logic is implementable without Unity if that ever becomes necessary.
 
 ---
 

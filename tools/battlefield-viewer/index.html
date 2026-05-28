@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Child of Light — Battlefield Viewer (TA-style)</title>
+  <style>
+    :root {
+      --bg: #0a0d12;
+      --panel: #14171d;
+      --panel-2: #1d2128;
+      --border: #2a3040;
+      --text: #d8dde6;
+      --text-dim: #8a93a3;
+      --accent: #c9a55c;
+      --accent-2: #6b8eb3;
+      --good: #87c878;
+      --warn: #e0a86a;
+      --bad: #d97670;
+      --mono: 'SF Mono', Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; height: 100%; overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg); color: var(--text);
+      font-size: 13px; user-select: none;
+    }
+    #canvas-container {
+      position: fixed; inset: 0;
+      cursor: grab;
+    }
+    #canvas-container.panning { cursor: grabbing; }
+    #canvas-container canvas { display: block; }
+
+    .hud {
+      position: fixed;
+      pointer-events: none;
+      font-family: var(--mono);
+      z-index: 10;
+    }
+
+    /* Top-left: title */
+    .hud-title {
+      top: 16px; left: 16px;
+      background: rgba(10, 13, 18, 0.7);
+      padding: 8px 12px; border-radius: 4px;
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+    }
+    .hud-title h1 {
+      margin: 0; font-size: 13px; color: var(--accent); letter-spacing: 0.05em;
+      font-weight: 600;
+    }
+    .hud-title .sub {
+      font-size: 11px; color: var(--text-dim); margin-top: 2px;
+    }
+
+    /* Top-right: stats */
+    .hud-stats {
+      top: 16px; right: 16px;
+      background: rgba(10, 13, 18, 0.7);
+      padding: 8px 12px; border-radius: 4px;
+      border: 1px solid var(--border);
+      min-width: 200px;
+      font-size: 11px;
+    }
+    .hud-stats .row {
+      display: flex; justify-content: space-between; padding: 1px 0;
+    }
+    .hud-stats .label { color: var(--text-dim); }
+    .hud-stats .value { color: var(--accent); font-weight: 600; }
+
+    /* Bottom-left: controls help */
+    .hud-help {
+      bottom: 16px; left: 16px;
+      background: rgba(10, 13, 18, 0.7);
+      padding: 8px 12px; border-radius: 4px;
+      border: 1px solid var(--border);
+      font-size: 10px;
+      line-height: 1.5;
+      color: var(--text-dim);
+      max-width: 280px;
+    }
+    .hud-help kbd {
+      background: var(--bg);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--accent);
+      border: 1px solid var(--border);
+    }
+
+    /* Bottom-right: buttons */
+    .hud-actions {
+      bottom: 16px; right: 16px;
+      display: flex; gap: 6px;
+      pointer-events: auto;
+    }
+    .hud-actions button {
+      background: var(--panel); color: var(--text); border: 1px solid var(--border);
+      padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;
+      font-family: inherit;
+    }
+    .hud-actions button:hover {
+      background: var(--accent-2); border-color: var(--accent-2);
+    }
+    .hud-actions button.active {
+      background: var(--accent); color: #1a1d23; border-color: var(--accent);
+    }
+
+    /* Selection box */
+    .selection-box {
+      position: fixed;
+      border: 1px solid var(--accent);
+      background: rgba(201, 165, 92, 0.1);
+      pointer-events: none; z-index: 20;
+      display: none;
+    }
+
+    /* Unit info popup */
+    .unit-info {
+      position: fixed;
+      top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: rgba(10, 13, 18, 0.92);
+      border: 1px solid var(--accent);
+      padding: 14px 18px; border-radius: 6px;
+      font-size: 12px; pointer-events: auto; z-index: 30;
+      min-width: 280px; max-width: 400px;
+      display: none;
+      border-left: 4px solid var(--accent);
+    }
+    .unit-info h2 {
+      margin: 0 0 8px; font-size: 14px; color: var(--accent);
+    }
+    .unit-info .desc { color: var(--text-dim); font-size: 11px; margin-bottom: 10px; line-height: 1.5; }
+    .unit-info .row { display: flex; justify-content: space-between; padding: 2px 0; }
+    .unit-info .label { color: var(--text-dim); font-size: 11px; }
+    .unit-info .value { color: var(--text); font-family: var(--mono); font-size: 11px; font-weight: 600; }
+    .unit-info .close {
+      position: absolute; top: 8px; right: 12px;
+      cursor: pointer; color: var(--text-dim); font-size: 16px;
+      background: none; border: none;
+    }
+
+    #file-input { display: none; }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/[email protected]/build/three.module.js",
+      "three/addons/": "https://unpkg.com/[email protected]/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<div class="hud hud-title">
+  <h1>CHILD OF LIGHT</h1>
+  <div class="sub">Battlefield Viewer — TA-style — v0.1</div>
+</div>
+
+<div class="hud hud-stats" id="stats">
+  <div class="row"><span class="label">UNITS</span><span class="value" id="stat-units">0</span></div>
+  <div class="row"><span class="label">CAMERA</span><span class="value" id="stat-cam">—</span></div>
+  <div class="row"><span class="label">ZOOM</span><span class="value" id="stat-zoom">—</span></div>
+  <div class="row"><span class="label">SELECTED</span><span class="value" id="stat-selected">none</span></div>
+  <div class="row"><span class="label">FPS</span><span class="value" id="stat-fps">—</span></div>
+</div>
+
+<div class="hud hud-help">
+  <strong>CAMERA</strong><br>
+  <kbd>W/A/S/D</kbd> or <kbd>middle-drag</kbd> pan<br>
+  <kbd>wheel</kbd> strategic zoom<br>
+  <kbd>Q/E</kbd> tilt (clamped)<br>
+  <br>
+  <strong>UNITS</strong><br>
+  <kbd>left-click</kbd> select / move<br>
+  <kbd>shift+click</kbd> add to selection<br>
+  <kbd>drag</kbd> box select<br>
+  <kbd>right-click</kbd> deselect<br>
+  <kbd>I</kbd> inspect selected
+</div>
+
+<div class="hud-actions">
+  <button id="btn-add-unit">+ Spawn Unit</button>
+  <button id="btn-load">Load Voxel JSON</button>
+  <input type="file" id="file-input" accept=".json" multiple>
+  <button id="btn-toggle-shadows" class="active">Shadows</button>
+  <button id="btn-toggle-wireframe">Wireframe</button>
+</div>
+
+<div class="selection-box" id="selection-box"></div>
+
+<div class="unit-info" id="unit-info">
+  <button class="close" onclick="document.getElementById('unit-info').style.display='none'">×</button>
+  <h2 id="info-name">—</h2>
+  <div class="desc" id="info-desc">—</div>
+  <div class="row"><span class="label">Faction</span><span class="value" id="info-faction">—</span></div>
+  <div class="row"><span class="label">Mass</span><span class="value" id="info-mass">—</span></div>
+  <div class="row"><span class="label">Voxels</span><span class="value" id="info-voxels">—</span></div>
+  <div class="row"><span class="label">Position</span><span class="value" id="info-pos">—</span></div>
+  <div class="row"><span class="label">Designer</span><span class="value" id="info-designer">—</span></div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ============================================================
+// Constants
+// ============================================================
+const MAP_SIZE = 128;                // 128 × 128 world units
+const CELL_SIZE_M = 0.5;             // matches voxel-editor: each voxel cell is 0.5m
+const VOXEL_SCALE = CELL_SIZE_M;     // render scale
+const TERRAIN_AMP = 4.5;             // terrain height variation
+const CAM_PITCH_MIN = Math.PI * 0.18; // shallow angle
+const CAM_PITCH_MAX = Math.PI * 0.44; // near-top-down
+const CAM_PITCH_DEFAULT = Math.PI * 0.32; // ~TA-style
+const ZOOM_MIN = 25, ZOOM_MAX = 220, ZOOM_DEFAULT = 90;
+
+// Faction palettes — each is { primary, secondary, accent } applied to voxel materials
+const FACTION_PALETTES = {
+  reclaimer:    { primary: 0xc9a55c, secondary: 0x8b6e3a, accent: 0xe5c890 },
+  bulwark:      { primary: 0x90969c, secondary: 0x5a5e64, accent: 0xb8bec4 },
+  signal:       { primary: 0x6b9eb3, secondary: 0x3a5b6e, accent: 0x9bc3d4 },
+  cinder_crown: { primary: 0xc16060, secondary: 0x7a2828, accent: 0xe09090 },
+  neutral:      { primary: 0xa0a0a0, secondary: 0x707070, accent: 0xc0c0c0 },
+  tethered:     { primary: 0x8eb4c9, secondary: 0x5e84a0, accent: 0xb8d0e0 },
+  quiet_court:  { primary: 0x9b7eb3, secondary: 0x6b4e80, accent: 0xc0a0d0 },
+  burnward:     { primary: 0x8b3a3a, secondary: 0x551818, accent: 0xb8585b },
+  drifters:     { primary: 0xc0c0c0, secondary: 0x808080, accent: 0xe0e0e0 },
+  veiled:       { primary: 0x553a6b, secondary: 0x2a1a40, accent: 0x7858a0 }
+};
+
+// ============================================================
+// Noise (simple value noise for terrain)
+// ============================================================
+function hash2(x, y) {
+  let h = x * 374761393 + y * 668265263;
+  h = (h ^ (h >> 13)) * 1274126177;
+  h = h ^ (h >> 16);
+  return ((h >>> 0) / 4294967295) * 2 - 1;
+}
+function smoothNoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf);
+  const v = yf * yf * (3 - 2 * yf);
+  const a = hash2(xi, yi);
+  const b = hash2(xi + 1, yi);
+  const c = hash2(xi, yi + 1);
+  const d = hash2(xi + 1, yi + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function fbm(x, y) {
+  let v = 0, amp = 1, freq = 1, total = 0;
+  for (let i = 0; i < 4; i++) {
+    v += smoothNoise(x * freq, y * freq) * amp;
+    total += amp;
+    amp *= 0.5;
+    freq *= 2;
+  }
+  return v / total;
+}
+
+// ============================================================
+// Three.js scene
+// ============================================================
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1d28);
+scene.fog = new THREE.Fog(0x1a1d28, 80, 220);
+
+const camera = new THREE.PerspectiveCamera(35, 1, 0.5, 600);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+container.appendChild(renderer.domElement);
+
+// ============================================================
+// Lighting — apocalyptic golden hour
+// ============================================================
+const hemi = new THREE.HemisphereLight(0xffeacc, 0x3a3528, 0.55);
+scene.add(hemi);
+
+const sun = new THREE.DirectionalLight(0xffd9a0, 1.4);
+sun.position.set(50, 80, 30);
+sun.castShadow = true;
+sun.shadow.mapSize.width = 2048;
+sun.shadow.mapSize.height = 2048;
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far = 250;
+sun.shadow.camera.left = -100;
+sun.shadow.camera.right = 100;
+sun.shadow.camera.top = 100;
+sun.shadow.camera.bottom = -100;
+sun.shadow.bias = -0.0005;
+scene.add(sun);
+
+const fill = new THREE.DirectionalLight(0x4a6080, 0.25);
+fill.position.set(-30, 20, -40);
+scene.add(fill);
+
+// ============================================================
+// Terrain — generated heightmap
+// ============================================================
+const segments = 96;
+const terrainGeom = new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE, segments, segments);
+terrainGeom.rotateX(-Math.PI / 2);
+
+const colorAttr = new Float32Array(terrainGeom.attributes.position.count * 3);
+const tempColor = new THREE.Color();
+
+const pos = terrainGeom.attributes.position;
+for (let i = 0; i < pos.count; i++) {
+  const x = pos.getX(i);
+  const z = pos.getZ(i);
+  const nx = x / MAP_SIZE * 4;
+  const nz = z / MAP_SIZE * 4;
+  let h = fbm(nx, nz) * TERRAIN_AMP;
+  // Add some larger features
+  h += smoothNoise(x * 0.02, z * 0.02) * 1.5;
+  pos.setY(i, h);
+
+  // Color by height — low = dark ash, mid = dust, high = rock
+  if (h < -1) tempColor.setHex(0x1a1814);
+  else if (h < 0.5) tempColor.setHex(0x3a3225);
+  else if (h < 2) tempColor.setHex(0x5a4a35);
+  else tempColor.setHex(0x6e5a3e);
+  // Slight randomness
+  const flicker = (Math.random() - 0.5) * 0.08;
+  tempColor.r = Math.max(0, Math.min(1, tempColor.r + flicker));
+  tempColor.g = Math.max(0, Math.min(1, tempColor.g + flicker));
+  tempColor.b = Math.max(0, Math.min(1, tempColor.b + flicker));
+  colorAttr[i * 3] = tempColor.r;
+  colorAttr[i * 3 + 1] = tempColor.g;
+  colorAttr[i * 3 + 2] = tempColor.b;
+}
+terrainGeom.setAttribute('color', new THREE.BufferAttribute(colorAttr, 3));
+terrainGeom.computeVertexNormals();
+
+const terrainMat = new THREE.MeshStandardMaterial({
+  vertexColors: true,
+  roughness: 0.95,
+  metalness: 0
+});
+const terrain = new THREE.Mesh(terrainGeom, terrainMat);
+terrain.position.set(MAP_SIZE / 2, 0, MAP_SIZE / 2);
+terrain.receiveShadow = true;
+terrain.userData.isTerrain = true;
+scene.add(terrain);
+
+// Helper: get terrain height at world position
+function getTerrainHeight(wx, wz) {
+  // Sample the noise function directly (matches what we baked)
+  const x = wx - MAP_SIZE / 2;
+  const z = wz - MAP_SIZE / 2;
+  const nx = x / MAP_SIZE * 4;
+  const nz = z / MAP_SIZE * 4;
+  let h = fbm(nx, nz) * TERRAIN_AMP;
+  h += smoothNoise(x * 0.02, z * 0.02) * 1.5;
+  return h;
+}
+
+// ============================================================
+// Camera control (TA-style: fixed-axis, strategic zoom)
+// ============================================================
+const camTarget = new THREE.Vector3(MAP_SIZE / 2, 0, MAP_SIZE / 2);
+let camPitch = CAM_PITCH_DEFAULT;
+let camZoom = ZOOM_DEFAULT;
+const camAzimuth = -Math.PI / 4; // fixed rotation around vertical (looking southwest)
+
+function updateCamera() {
+  // Camera position: spherical around target
+  // Pitch is angle from horizontal; high pitch = top-down
+  const horizontalDist = camZoom * Math.cos(camPitch);
+  const verticalDist = camZoom * Math.sin(camPitch);
+  camera.position.set(
+    camTarget.x + Math.cos(camAzimuth) * horizontalDist,
+    camTarget.y + verticalDist,
+    camTarget.z + Math.sin(camAzimuth) * horizontalDist
+  );
+  camera.lookAt(camTarget);
+  document.getElementById('stat-cam').textContent =
+    `${camTarget.x.toFixed(0)}, ${camTarget.z.toFixed(0)}`;
+  document.getElementById('stat-zoom').textContent = camZoom.toFixed(0);
+}
+
+// ============================================================
+// Voxel unit rendering
+// ============================================================
+const units = [];
+let selectedUnits = new Set();
+
+function createVoxelMesh(voxelData, faction, unitMeta) {
+  const group = new THREE.Group();
+  const palette = FACTION_PALETTES[faction] || FACTION_PALETTES.neutral;
+  const materials = voxelData.materials || {};
+  const voxels = voxelData.voxels || [];
+
+  // Group voxels by resolved color for fewer draw calls
+  const byColor = new Map();
+  for (const v of voxels) {
+    const [x, y, z, matId] = v;
+    const matSpec = materials[matId] || {};
+    let color;
+    if (matSpec.color_class === 'team-primary') color = palette.primary;
+    else if (matSpec.color_class === 'team-secondary') color = palette.secondary;
+    else if (matSpec.color_class === 'team-accent') color = palette.accent;
+    else if (matSpec.color_hex) color = parseInt(matSpec.color_hex.replace('#', ''), 16);
+    else color = 0xaaaaaa;
+    const key = `${color}_${matId}`;
+    if (!byColor.has(key)) byColor.set(key, { color, matId, positions: [] });
+    byColor.get(key).positions.push([x, y, z]);
+  }
+
+  // For each color group, create an InstancedMesh
+  const cubeGeom = new THREE.BoxGeometry(VOXEL_SCALE, VOXEL_SCALE, VOXEL_SCALE);
+  for (const { color, matId, positions } of byColor.values()) {
+    const isEngine = matId === 'engine';
+    const isHardpoint = matId === 'hardpoint';
+    const isGlass = matId === 'glass';
+    const mat = new THREE.MeshStandardMaterial({
+      color,
+      roughness: isGlass ? 0.2 : (matId === 'armor' ? 0.55 : 0.75),
+      metalness: matId === 'armor' ? 0.4 : (matId === 'hull' ? 0.2 : 0.1),
+      transparent: isGlass,
+      opacity: isGlass ? 0.6 : 1.0,
+      emissive: isEngine ? 0x551a0c : (isHardpoint ? 0x4a3a1c : 0x000000),
+      emissiveIntensity: isEngine ? 0.7 : (isHardpoint ? 0.5 : 0)
+    });
+    const inst = new THREE.InstancedMesh(cubeGeom, mat, positions.length);
+    inst.castShadow = true;
+    inst.receiveShadow = true;
+    const dummy = new THREE.Object3D();
+    positions.forEach(([x, y, z], i) => {
+      dummy.position.set(x * VOXEL_SCALE, y * VOXEL_SCALE, z * VOXEL_SCALE);
+      dummy.updateMatrix();
+      inst.setMatrixAt(i, dummy.matrix);
+    });
+    inst.instanceMatrix.needsUpdate = true;
+    group.add(inst);
+  }
+
+  // Center the unit on its bounding box (x, z axis)
+  const box = new THREE.Box3().setFromObject(group);
+  const centerX = (box.min.x + box.max.x) / 2;
+  const centerZ = (box.min.z + box.max.z) / 2;
+  group.children.forEach(child => {
+    if (child.isInstancedMesh) {
+      // Shift instance matrices
+      const dummy = new THREE.Object3D();
+      for (let i = 0; i < child.count; i++) {
+        child.getMatrixAt(i, dummy.matrix);
+        dummy.matrix.decompose(dummy.position, dummy.quaternion, dummy.scale);
+        dummy.position.x -= centerX;
+        dummy.position.z -= centerZ;
+        dummy.position.y -= box.min.y; // rest on ground
+        dummy.updateMatrix();
+        child.setMatrixAt(i, dummy.matrix);
+      }
+      child.instanceMatrix.needsUpdate = true;
+    }
+  });
+
+  group.userData = {
+    isUnit: true,
+    faction,
+    voxelData,
+    meta: unitMeta || {},
+    target: null,
+    speed: unitMeta?.speed || 6,
+    selected: false
+  };
+  return group;
+}
+
+// Selection indicator ring
+function createSelectionRing() {
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(1.6, 2.0, 32),
+    new THREE.MeshBasicMaterial({ color: 0xc9a55c, transparent: true, opacity: 0.8, side: THREE.DoubleSide })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.05;
+  ring.visible = false;
+  return ring;
+}
+
+function placeUnit(unitGroup, x, z) {
+  unitGroup.position.set(x, getTerrainHeight(x, z), z);
+  const ring = createSelectionRing();
+  unitGroup.add(ring);
+  unitGroup.userData.ring = ring;
+  scene.add(unitGroup);
+  units.push(unitGroup);
+  updateUnitCount();
+  return unitGroup;
+}
+
+function updateUnitCount() {
+  document.getElementById('stat-units').textContent = units.length;
+}
+
+function setSelection(newSelection) {
+  selectedUnits.forEach(u => {
+    u.userData.selected = false;
+    if (u.userData.ring) u.userData.ring.visible = false;
+  });
+  selectedUnits = new Set(newSelection);
+  selectedUnits.forEach(u => {
+    u.userData.selected = true;
+    if (u.userData.ring) u.userData.ring.visible = true;
+  });
+  document.getElementById('stat-selected').textContent =
+    selectedUnits.size === 0 ? 'none' :
+    selectedUnits.size === 1 ? (Array.from(selectedUnits)[0].userData.meta?.name || 'unit') :
+    `${selectedUnits.size} units`;
+}
+
+// ============================================================
+// Built-in starter voxel units (so the demo isn't empty)
+// ============================================================
+const STARTER_RECLAIMER = {
+  format: 'sparse_grid_v1',
+  grid_size: [12, 6, 10],
+  voxels: [
+    // Treads
+    ...range(2, 10).map(x => [x, 0, 2, 'hull']),
+    ...range(2, 10).map(x => [x, 0, 3, 'hull']),
+    ...range(2, 10).map(x => [x, 0, 7, 'hull']),
+    ...range(2, 10).map(x => [x, 0, 8, 'hull']),
+    // Body
+    ...range(3, 9).flatMap(x => range(3, 7).map(z => [x, 1, z, 'armor'])),
+    ...range(3, 9).flatMap(x => range(3, 7).map(z => [x, 2, z, 'armor'])),
+    // Turret base
+    ...range(4, 8).flatMap(x => range(4, 6).map(z => [x, 3, z, 'accent'])),
+    // Turret top
+    ...range(4, 8).flatMap(x => range(4, 6).map(z => [x, 4, z, 'armor'])),
+    // Gun barrel
+    [8, 4, 4, 'armor'], [9, 4, 4, 'armor'], [10, 4, 4, 'armor'],
+    [8, 4, 5, 'armor'], [9, 4, 5, 'armor'], [10, 4, 5, 'armor'],
+    // Engine glow
+    [3, 1, 2, 'engine'], [3, 1, 8, 'engine'],
+    [2, 1, 4, 'engine'], [2, 1, 6, 'engine'],
+    // Cockpit glass
+    [6, 4, 4, 'glass'], [6, 4, 5, 'glass'],
+    // Hardpoints
+    [10, 4, 4, 'hardpoint']
+  ],
+  materials: {
+    armor:     { color_class: 'team-primary',   density_kg_m3: 7800 },
+    hull:      { color_class: 'team-secondary', density_kg_m3: 2700 },
+    accent:    { color_class: 'team-accent',    density_kg_m3: 4500 },
+    glass:     { color_class: 'fixed',          color_hex: '#6bb3c9', density_kg_m3: 2500 },
+    engine:    { color_class: 'fixed',          color_hex: '#e07050', density_kg_m3: 4000 },
+    hardpoint: { color_class: 'fixed',          color_hex: '#c9a55c', density_kg_m3: 500 }
+  }
+};
+
+const STARTER_BULWARK = {
+  format: 'sparse_grid_v1',
+  grid_size: [10, 7, 10],
+  voxels: [
+    // Wide base
+    ...range(2, 8).flatMap(x => range(2, 8).map(z => [x, 0, z, 'armor'])),
+    // Reinforced second layer
+    ...range(2, 8).flatMap(x => range(2, 8).map(z => [x, 1, z, 'armor'])),
+    // Bunker walls
+    ...range(2, 8).map(x => [x, 2, 2, 'armor']),
+    ...range(2, 8).map(x => [x, 2, 7, 'armor']),
+    ...range(2, 8).map(z => [2, 2, z, 'armor']),
+    ...range(2, 8).map(z => [7, 2, z, 'armor']),
+    ...range(2, 8).map(x => [x, 3, 2, 'armor']),
+    ...range(2, 8).map(x => [x, 3, 7, 'armor']),
+    ...range(2, 8).map(z => [2, 3, z, 'armor']),
+    ...range(2, 8).map(z => [7, 3, z, 'armor']),
+    // Inner platform
+    ...range(3, 7).flatMap(x => range(3, 7).map(z => [x, 2, z, 'hull'])),
+    // Cannon turret center
+    [4, 3, 4, 'accent'], [5, 3, 4, 'accent'], [4, 3, 5, 'accent'], [5, 3, 5, 'accent'],
+    [4, 4, 4, 'armor'], [5, 4, 4, 'armor'], [4, 4, 5, 'armor'], [5, 4, 5, 'armor'],
+    // Long cannon barrel
+    [6, 4, 4, 'armor'], [7, 4, 4, 'armor'], [8, 4, 4, 'armor'], [9, 4, 4, 'armor'],
+    // Hardpoint at barrel tip
+    [9, 4, 4, 'hardpoint'],
+    // Engine glow
+    [2, 1, 4, 'engine'], [2, 1, 5, 'engine'],
+    [7, 1, 4, 'engine'], [7, 1, 5, 'engine']
+  ],
+  materials: {
+    armor:     { color_class: 'team-primary',   density_kg_m3: 7800 },
+    hull:      { color_class: 'team-secondary', density_kg_m3: 2700 },
+    accent:    { color_class: 'team-accent',    density_kg_m3: 4500 },
+    glass:     { color_class: 'fixed',          color_hex: '#6bb3c9', density_kg_m3: 2500 },
+    engine:    { color_class: 'fixed',          color_hex: '#e07050', density_kg_m3: 4000 },
+    hardpoint: { color_class: 'fixed',          color_hex: '#c9a55c', density_kg_m3: 500 }
+  }
+};
+
+const STARTER_SIGNAL = {
+  format: 'sparse_grid_v1',
+  grid_size: [10, 5, 6],
+  voxels: [
+    // Sleek wheeled body
+    ...range(1, 9).flatMap(x => range(1, 5).map(z => [x, 0, z, 'hull'])),
+    ...range(2, 8).flatMap(x => range(1, 5).map(z => [x, 1, z, 'hull'])),
+    // Cockpit
+    ...range(3, 7).flatMap(x => range(2, 4).map(z => [x, 2, z, 'armor'])),
+    // Antenna array
+    [5, 3, 2, 'accent'], [5, 3, 3, 'accent'],
+    [5, 4, 2, 'accent'], [5, 4, 3, 'accent'],
+    // Sensor mast (tall)
+    [4, 3, 2, 'hull'], [4, 4, 2, 'hardpoint'],
+    [6, 3, 3, 'hull'], [6, 4, 3, 'hardpoint'],
+    // Glass
+    [3, 2, 2, 'glass'], [3, 2, 3, 'glass'],
+    // Engine glow (small)
+    [1, 0, 2, 'engine'], [1, 0, 3, 'engine']
+  ],
+  materials: {
+    armor:     { color_class: 'team-primary',   density_kg_m3: 7800 },
+    hull:      { color_class: 'team-secondary', density_kg_m3: 2700 },
+    accent:    { color_class: 'team-accent',    density_kg_m3: 4500 },
+    glass:     { color_class: 'fixed',          color_hex: '#6bb3c9', density_kg_m3: 2500 },
+    engine:    { color_class: 'fixed',          color_hex: '#e07050', density_kg_m3: 4000 },
+    hardpoint: { color_class: 'fixed',          color_hex: '#c9a55c', density_kg_m3: 500 }
+  }
+};
+
+const STARTER_CINDER = {
+  format: 'sparse_grid_v1',
+  grid_size: [10, 6, 8],
+  voxels: [
+    // Spider legs (low-slung)
+    [1, 0, 1, 'hull'], [1, 0, 6, 'hull'],
+    [8, 0, 1, 'hull'], [8, 0, 6, 'hull'],
+    [2, 1, 1, 'hull'], [2, 1, 6, 'hull'],
+    [7, 1, 1, 'hull'], [7, 1, 6, 'hull'],
+    // Central body
+    ...range(3, 7).flatMap(x => range(3, 5).map(z => [x, 1, z, 'armor'])),
+    ...range(3, 7).flatMap(x => range(3, 5).map(z => [x, 2, z, 'armor'])),
+    // Top dome
+    [4, 3, 3, 'accent'], [5, 3, 3, 'accent'], [4, 3, 4, 'accent'], [5, 3, 4, 'accent'],
+    // Twin flame launchers (front)
+    [7, 2, 3, 'armor'], [8, 2, 3, 'armor'], [9, 2, 3, 'accent'],
+    [7, 2, 4, 'armor'], [8, 2, 4, 'armor'], [9, 2, 4, 'accent'],
+    // Hardpoints at launcher tips
+    [9, 2, 3, 'hardpoint'], [9, 2, 4, 'hardpoint'],
+    // Big engine plumes (rear)
+    [1, 1, 3, 'engine'], [1, 1, 4, 'engine'],
+    [2, 2, 3, 'engine'], [2, 2, 4, 'engine']
+  ],
+  materials: {
+    armor:     { color_class: 'team-primary',   density_kg_m3: 7800 },
+    hull:      { color_class: 'team-secondary', density_kg_m3: 2700 },
+    accent:    { color_class: 'team-accent',    density_kg_m3: 4500 },
+    glass:     { color_class: 'fixed',          color_hex: '#6bb3c9', density_kg_m3: 2500 },
+    engine:    { color_class: 'fixed',          color_hex: '#e07050', density_kg_m3: 4000 },
+    hardpoint: { color_class: 'fixed',          color_hex: '#c9a55c', density_kg_m3: 500 }
+  }
+};
+
+function range(a, b) { const r = []; for (let i = a; i < b; i++) r.push(i); return r; }
+
+// Compute mass from voxel data
+function computeMass(voxelData) {
+  let mass = 0;
+  const cellVol = CELL_SIZE_M ** 3;
+  for (const v of voxelData.voxels || []) {
+    const m = voxelData.materials?.[v[3]];
+    if (m?.density_kg_m3) mass += m.density_kg_m3 * cellVol;
+  }
+  return mass;
+}
+
+// ============================================================
+// Initial spawn — a few units across factions
+// ============================================================
+function seedBattlefield() {
+  placeUnit(createVoxelMesh(STARTER_RECLAIMER, 'reclaimer', { name: 'Patcher MkI', desc: 'Reclaimer medium tank. Mainline salvage chassis.', speed: 7 }), 50, 60);
+  placeUnit(createVoxelMesh(STARTER_RECLAIMER, 'reclaimer', { name: 'Patcher MkI', desc: 'Reclaimer medium tank. Mainline salvage chassis.', speed: 7 }), 55, 62);
+  placeUnit(createVoxelMesh(STARTER_RECLAIMER, 'reclaimer', { name: 'Patcher MkI', desc: 'Reclaimer medium tank. Mainline salvage chassis.', speed: 7 }), 45, 64);
+
+  placeUnit(createVoxelMesh(STARTER_BULWARK, 'bulwark', { name: 'Stonefist', desc: 'Bulwark heavy bunker-platform with reinforced shield walls.', speed: 3 }), 80, 50);
+
+  placeUnit(createVoxelMesh(STARTER_SIGNAL, 'signal', { name: 'Whisper', desc: 'Signal stealth scout. Passive sensors, suppressed weapons.', speed: 11 }), 30, 80);
+  placeUnit(createVoxelMesh(STARTER_SIGNAL, 'signal', { name: 'Whisper', desc: 'Signal stealth scout. Passive sensors, suppressed weapons.', speed: 11 }), 33, 78);
+
+  placeUnit(createVoxelMesh(STARTER_CINDER, 'cinder_crown', { name: 'Pyre', desc: 'Cinder Crown twin-launcher skirmisher. Fast, brittle, burns.', speed: 9 }), 85, 90);
+  placeUnit(createVoxelMesh(STARTER_CINDER, 'cinder_crown', { name: 'Pyre', desc: 'Cinder Crown twin-launcher skirmisher. Fast, brittle, burns.', speed: 9 }), 90, 85);
+}
+seedBattlefield();
+
+// ============================================================
+// Input / Camera control
+// ============================================================
+const keys = {};
+window.addEventListener('keydown', (e) => {
+  keys[e.key.toLowerCase()] = true;
+  if (e.key.toLowerCase() === 'i' && selectedUnits.size > 0) showInspector();
+});
+window.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
+
+// Mouse: orbit (pan with middle button), select (left button), command (left button when units selected)
+let isPanning = false;
+let panStart = null;
+let isSelecting = false;
+let selectStart = null;
+
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+
+function screenToNDC(clientX, clientY) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  return ndc;
+}
+
+function pickUnit(clientX, clientY) {
+  screenToNDC(clientX, clientY);
+  raycaster.setFromCamera(ndc, camera);
+  // Build a list of unit meshes (the children of unit groups)
+  const meshes = [];
+  units.forEach(u => {
+    u.traverse(o => {
+      if (o.isMesh || o.isInstancedMesh) meshes.push(o);
+    });
+  });
+  const hits = raycaster.intersectObjects(meshes);
+  if (hits.length === 0) return null;
+  // Walk up to the unit group
+  let obj = hits[0].object;
+  while (obj.parent && !obj.userData?.isUnit) obj = obj.parent;
+  return obj.userData?.isUnit ? obj : null;
+}
+
+function pickTerrain(clientX, clientY) {
+  screenToNDC(clientX, clientY);
+  raycaster.setFromCamera(ndc, camera);
+  const hits = raycaster.intersectObject(terrain);
+  return hits[0] || null;
+}
+
+container.addEventListener('contextmenu', (e) => e.preventDefault());
+
+container.addEventListener('pointerdown', (e) => {
+  if (e.button === 1) {
+    // Middle-button pan
+    isPanning = true;
+    panStart = { x: e.clientX, y: e.clientY, tx: camTarget.x, tz: camTarget.z };
+    container.classList.add('panning');
+  } else if (e.button === 0) {
+    // Left button: start selection box or click
+    selectStart = { x: e.clientX, y: e.clientY };
+    isSelecting = false;
+  } else if (e.button === 2) {
+    // Right-click: deselect
+    setSelection([]);
+  }
+});
+
+container.addEventListener('pointermove', (e) => {
+  if (isPanning && panStart) {
+    const dx = e.clientX - panStart.x;
+    const dy = e.clientY - panStart.y;
+    const speed = camZoom * 0.0025;
+    // Pan in world-space along camera-aligned axes
+    const forward = new THREE.Vector3(-Math.cos(camAzimuth), 0, -Math.sin(camAzimuth));
+    const right = new THREE.Vector3(forward.z, 0, -forward.x);
+    camTarget.x = panStart.tx + (forward.x * dy + right.x * (-dx)) * speed;
+    camTarget.z = panStart.tz + (forward.z * dy + right.z * (-dx)) * speed;
+    updateCamera();
+  } else if (selectStart) {
+    const dx = e.clientX - selectStart.x;
+    const dy = e.clientY - selectStart.y;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+      isSelecting = true;
+      const box = document.getElementById('selection-box');
+      box.style.display = 'block';
+      box.style.left = Math.min(selectStart.x, e.clientX) + 'px';
+      box.style.top = Math.min(selectStart.y, e.clientY) + 'px';
+      box.style.width = Math.abs(dx) + 'px';
+      box.style.height = Math.abs(dy) + 'px';
+    }
+  }
+});
+
+container.addEventListener('pointerup', (e) => {
+  if (isPanning) {
+    isPanning = false;
+    container.classList.remove('panning');
+    panStart = null;
+    return;
+  }
+
+  if (selectStart && e.button === 0) {
+    if (isSelecting) {
+      // Box selection
+      const box = document.getElementById('selection-box');
+      box.style.display = 'none';
+      const x1 = Math.min(selectStart.x, e.clientX);
+      const x2 = Math.max(selectStart.x, e.clientX);
+      const y1 = Math.min(selectStart.y, e.clientY);
+      const y2 = Math.max(selectStart.y, e.clientY);
+      const newSelection = [];
+      units.forEach(u => {
+        const v = new THREE.Vector3();
+        u.getWorldPosition(v);
+        v.project(camera);
+        const rect = renderer.domElement.getBoundingClientRect();
+        const sx = (v.x * 0.5 + 0.5) * rect.width + rect.left;
+        const sy = (-v.y * 0.5 + 0.5) * rect.height + rect.top;
+        if (sx >= x1 && sx <= x2 && sy >= y1 && sy <= y2) {
+          newSelection.push(u);
+        }
+      });
+      setSelection(newSelection);
+    } else {
+      // Single click
+      const u = pickUnit(e.clientX, e.clientY);
+      if (u) {
+        if (e.shiftKey) {
+          const set = new Set(selectedUnits);
+          if (set.has(u)) set.delete(u); else set.add(u);
+          setSelection(Array.from(set));
+        } else {
+          setSelection([u]);
+        }
+      } else {
+        // Click on ground — if units selected, command move
+        const t = pickTerrain(e.clientX, e.clientY);
+        if (t && selectedUnits.size > 0) {
+          // Spread units in a small formation around the click
+          const arr = Array.from(selectedUnits);
+          arr.forEach((unit, i) => {
+            const angle = (i / arr.length) * Math.PI * 2;
+            const radius = arr.length > 1 ? 2.5 : 0;
+            unit.userData.target = new THREE.Vector3(
+              t.point.x + Math.cos(angle) * radius,
+              0,
+              t.point.z + Math.sin(angle) * radius
+            );
+          });
+        } else if (!e.shiftKey) {
+          setSelection([]);
+        }
+      }
+    }
+    selectStart = null;
+    isSelecting = false;
+  }
+});
+
+container.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  camZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, camZoom + e.deltaY * 0.05));
+  updateCamera();
+}, { passive: false });
+
+// ============================================================
+// Action buttons
+// ============================================================
+const STARTERS = [
+  { data: STARTER_RECLAIMER, faction: 'reclaimer', meta: { name: 'Patcher MkI', desc: 'Reclaimer medium tank.', speed: 7 } },
+  { data: STARTER_BULWARK, faction: 'bulwark', meta: { name: 'Stonefist', desc: 'Bulwark heavy bunker.', speed: 3 } },
+  { data: STARTER_SIGNAL, faction: 'signal', meta: { name: 'Whisper', desc: 'Signal stealth scout.', speed: 11 } },
+  { data: STARTER_CINDER, faction: 'cinder_crown', meta: { name: 'Pyre', desc: 'Cinder Crown skirmisher.', speed: 9 } }
+];
+let spawnIdx = 0;
+document.getElementById('btn-add-unit').onclick = () => {
+  const s = STARTERS[spawnIdx % STARTERS.length];
+  spawnIdx++;
+  // Spawn near camera target
+  const angle = Math.random() * Math.PI * 2;
+  const dist = 8 + Math.random() * 8;
+  const x = camTarget.x + Math.cos(angle) * dist;
+  const z = camTarget.z + Math.sin(angle) * dist;
+  placeUnit(createVoxelMesh(s.data, s.faction, s.meta), x, z);
+};
+
+document.getElementById('btn-load').onclick = () => document.getElementById('file-input').click();
+document.getElementById('file-input').onchange = (event) => {
+  const files = Array.from(event.target.files);
+  files.forEach((file, idx) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        // Spawn loaded unit near camera target
+        const x = camTarget.x + (idx - files.length / 2) * 4;
+        const z = camTarget.z + 5;
+        // Try to detect faction from filename or default to reclaimer
+        let faction = 'reclaimer';
+        const fname = file.name.toLowerCase();
+        for (const f of Object.keys(FACTION_PALETTES)) {
+          if (fname.includes(f.replace('_', ''))) { faction = f; break; }
+        }
+        placeUnit(createVoxelMesh(data, faction, { name: file.name.replace('.json', ''), desc: 'Loaded from ' + file.name, speed: 6 }), x, z);
+      } catch (err) {
+        alert(`Could not load ${file.name}: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+  });
+  event.target.value = '';
+};
+
+const btnShadows = document.getElementById('btn-toggle-shadows');
+btnShadows.onclick = () => {
+  renderer.shadowMap.enabled = !renderer.shadowMap.enabled;
+  scene.traverse(o => {
+    if (o.isMesh || o.isInstancedMesh) {
+      o.castShadow = renderer.shadowMap.enabled && !o.userData.isTerrain;
+      o.receiveShadow = renderer.shadowMap.enabled;
+    }
+  });
+  btnShadows.classList.toggle('active', renderer.shadowMap.enabled);
+};
+
+let wireframeOn = false;
+const btnWireframe = document.getElementById('btn-toggle-wireframe');
+btnWireframe.onclick = () => {
+  wireframeOn = !wireframeOn;
+  scene.traverse(o => {
+    if (o.material && !Array.isArray(o.material)) {
+      o.material.wireframe = wireframeOn;
+    }
+  });
+  btnWireframe.classList.toggle('active', wireframeOn);
+};
+
+// ============================================================
+// Inspector
+// ============================================================
+function showInspector() {
+  if (selectedUnits.size === 0) return;
+  const u = Array.from(selectedUnits)[0];
+  const meta = u.userData.meta;
+  const mass = computeMass(u.userData.voxelData);
+  document.getElementById('info-name').textContent = meta.name || 'Unit';
+  document.getElementById('info-desc').textContent = meta.desc || '';
+  document.getElementById('info-faction').textContent = u.userData.faction;
+  document.getElementById('info-mass').textContent = mass < 1000 ? `${mass.toFixed(0)} kg` : `${(mass / 1000).toFixed(1)} t`;
+  document.getElementById('info-voxels').textContent = (u.userData.voxelData.voxels || []).length;
+  document.getElementById('info-pos').textContent = `${u.position.x.toFixed(1)}, ${u.position.z.toFixed(1)}`;
+  document.getElementById('info-designer').textContent = u.userData.voxelData.designer || 'STARTER_KIT';
+  document.getElementById('unit-info').style.display = 'block';
+}
+
+// ============================================================
+// Resize
+// ============================================================
+function onResize() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+window.addEventListener('resize', onResize);
+onResize();
+
+// ============================================================
+// Main loop
+// ============================================================
+let lastTime = performance.now();
+let fpsAccum = 0, fpsFrames = 0, fpsLast = lastTime;
+
+function tick() {
+  requestAnimationFrame(tick);
+  const now = performance.now();
+  const dt = Math.min(0.1, (now - lastTime) / 1000);
+  lastTime = now;
+
+  // Camera keyboard pan
+  const panSpeed = camZoom * 0.8 * dt;
+  let moved = false;
+  const forward = new THREE.Vector3(-Math.cos(camAzimuth), 0, -Math.sin(camAzimuth));
+  const right = new THREE.Vector3(forward.z, 0, -forward.x);
+  if (keys['w']) { camTarget.addScaledVector(forward, panSpeed); moved = true; }
+  if (keys['s']) { camTarget.addScaledVector(forward, -panSpeed); moved = true; }
+  if (keys['a']) { camTarget.addScaledVector(right, -panSpeed); moved = true; }
+  if (keys['d']) { camTarget.addScaledVector(right, panSpeed); moved = true; }
+  if (keys['q']) { camPitch = Math.max(CAM_PITCH_MIN, camPitch - dt * 0.6); moved = true; }
+  if (keys['e']) { camPitch = Math.min(CAM_PITCH_MAX, camPitch + dt * 0.6); moved = true; }
+  if (moved) updateCamera();
+
+  // Unit movement
+  for (const u of units) {
+    if (u.userData.target) {
+      const target = u.userData.target;
+      const dx = target.x - u.position.x;
+      const dz = target.z - u.position.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < 0.5) {
+        u.userData.target = null;
+      } else {
+        const speed = u.userData.speed || 5;
+        const move = Math.min(dist, speed * dt);
+        u.position.x += (dx / dist) * move;
+        u.position.z += (dz / dist) * move;
+        // Stick to terrain
+        u.position.y = getTerrainHeight(u.position.x, u.position.z);
+        // Face direction
+        u.rotation.y = Math.atan2(dx, dz) - Math.PI / 2;
+      }
+    } else {
+      // Always stick to terrain
+      u.position.y = getTerrainHeight(u.position.x, u.position.z);
+    }
+  }
+
+  // FPS counter
+  fpsFrames++;
+  if (now - fpsLast > 500) {
+    const fps = (fpsFrames * 1000) / (now - fpsLast);
+    document.getElementById('stat-fps').textContent = fps.toFixed(0);
+    fpsFrames = 0;
+    fpsLast = now;
+  }
+
+  renderer.render(scene, camera);
+}
+
+updateCamera();
+tick();
+
+</script>
+
+</body>
+</html>
