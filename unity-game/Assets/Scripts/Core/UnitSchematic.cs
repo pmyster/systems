@@ -171,6 +171,22 @@ namespace ChildOfLight.Core
         // --- Mass contribution ---
         [JsonProperty("mass_kg")]
         public float MassKg = 500f;
+
+        // --- Sensor / stealth fields ---
+        /// <summary>Direct line-of-sight vision radius in metres (0 = no contribution).</summary>
+        [JsonProperty("vision_range_m")]
+        public float VisionRangeM = 0f;
+
+        /// <summary>Radar detection radius in metres (0 = no radar on this part).</summary>
+        [JsonProperty("radar_range_m")]
+        public float RadarRangeM = 0f;
+
+        /// <summary>
+        /// 0-1 stealth rating.  0 = fully visible to enemy radar.
+        /// 1 = completely invisible to radar (e.g. stealth coating).
+        /// </summary>
+        [JsonProperty("stealth_rating")]
+        public float StealthRating = 0f;
     }
 
     // ─────────────────────────────────────────────
@@ -180,6 +196,10 @@ namespace ChildOfLight.Core
     [Serializable]
     public class UnitChassis
     {
+        /// <summary>Chassis type enum value from the schema, e.g. "ground_tracked", "air_fixed_wing".</summary>
+        [JsonProperty("chassis_class")]
+        public string ChassisClass = string.Empty;
+
         [JsonProperty("chassis_id")]
         public string ChassisId = string.Empty;
 

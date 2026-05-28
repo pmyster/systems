@@ -12,6 +12,14 @@ namespace ChildOfLight.Gameplay
     [RequireComponent(typeof(CombatSystem))]
     public class UnitController : MonoBehaviour
     {
+        // ─── Static player faction (set by FactionController or game bootstrap) ──
+        /// <summary>
+        /// The faction controlled by the local player.
+        /// Enemy units with VisibilityState.Unexplored will have their renderers hidden.
+        /// Set this once at game start (e.g. from FactionController.IsPlayerFaction).
+        /// </summary>
+        public static Faction PlayerFaction = Faction.Reclaimer;
+
         // ─── Inspector fields ─────────────────────────────
         [Header("Faction")]
         public Faction Faction = Faction.Reclaimer;
@@ -44,15 +52,32 @@ namespace ChildOfLight.Gameplay
         public float HpFraction => MaxHp > 0f ? Mathf.Clamp01(CurrentHp / MaxHp) : 0f;
 
         // ─── Component references ─────────────────────────
-        private MovementSystem _movement = null!;
-        private CombatSystem   _combat   = null!;
+        private MovementSystem _movement  = null!;
+        private CombatSystem   _combat    = null!;
+
+        // ─── Cached renderer list (populated once in Awake) ──
+        private Renderer[] _renderers = System.Array.Empty<Renderer>();
 
         // ─── Unity messages ──────────────────────────────
 
         private void Awake()
         {
-            _movement = GetComponent<MovementSystem>();
-            _combat   = GetComponent<CombatSystem>();
+            _movement  = GetComponent<MovementSystem>();
+            _combat    = GetComponent<CombatSystem>();
+            _renderers = GetComponentsInChildren<Renderer>(includeInactive: true);
+        }
+
+        private void Update()
+        {
+            if (IsDead) return;
+
+            // Fog-of-war renderer culling: hide enemy units that are in unexplored cells.
+            // Player faction units and explored/visible enemy units are always shown.
+            if (FogOfWarManager.Instance != null && Faction != PlayerFaction)
+            {
+                VisibilityState vis = FogOfWarManager.Instance.GetVisibilityAt(transform.position);
+                SetRenderersVisible(vis != VisibilityState.Unexplored);
+            }
         }
 
         // ─── Schematic initialisation ─────────────────────
@@ -91,8 +116,75 @@ namespace ChildOfLight.Gameplay
             // Name the GameObject for debugging.
             gameObject.name = $"[{Faction}] {schematic.Name}";
 
+            // ── Vision provider wiring ──────────────────────────
+            var vp = GetComponent<VisionProvider>();
+            if (vp != null)
+            {
+                // Aircraft see over all terrain — they fly above it.
+                // Use the canonical chassis_class string from the schema.
+                bool isAircraft = schematic.Chassis?.ChassisClass is "air_fixed_wing" or "air_rotary" ||
+                                  schematic.Role is UnitRole.AirFighter or UnitRole.Gunship;
+                vp.SetIgnoresHeightCheck(isAircraft);
+
+                float maxVision = GetMaxVisionRange();
+                if (maxVision > 0f) vp.SetVisionRange(maxVision);
+            }
+
+            // ── Radar provider wiring ───────────────────────────
+            var rp = GetComponent<RadarProvider>();
+            if (rp != null)
+            {
+                rp.SetOwnerFaction(Faction);
+                float maxRadar = GetMaxRadarRange();
+                if (maxRadar > 0f) rp.SetRadarRange(maxRadar);
+
+                // Apply highest stealth rating found across all parts.
+                float maxStealth = GetMaxStealthRating();
+                if (maxStealth > 0f) rp.SetStealthRating(maxStealth);
+            }
+
             Debug.Log($"[UnitController] Initialised '{schematic.Name}' — " +
                       $"HP={MaxHp:F0}  Speed={Stats.MaxSpeedMs:F1} m/s  Range={Stats.RangeM:F0} m");
+        }
+
+        // ─── Sensor stat helpers ──────────────────────────
+
+        private float GetMaxVisionRange()
+        {
+            if (Schematic?.Parts == null) return 0f;
+            float max = 0f;
+            foreach (var p in Schematic.Parts)
+                if (p.VisionRangeM > max) max = p.VisionRangeM;
+            return max;
+        }
+
+        private float GetMaxRadarRange()
+        {
+            if (Schematic?.Parts == null) return 0f;
+            float max = 0f;
+            foreach (var p in Schematic.Parts)
+                if (p.RadarRangeM > max) max = p.RadarRangeM;
+            return max;
+        }
+
+        private float GetMaxStealthRating()
+        {
+            if (Schematic?.Parts == null) return 0f;
+            float max = 0f;
+            foreach (var p in Schematic.Parts)
+                if (p.StealthRating > max) max = p.StealthRating;
+            return max;
+        }
+
+        // ─── Renderer visibility ──────────────────────────
+
+        /// <summary>Enable or disable all child Renderer components for fog-of-war culling.</summary>
+        private void SetRenderersVisible(bool visible)
+        {
+            foreach (var r in _renderers)
+            {
+                if (r != null) r.enabled = visible;
+            }
         }
 
         // ─── Movement ─────────────────────────────────────
