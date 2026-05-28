@@ -21,29 +21,17 @@
     }
     * { box-sizing: border-box; }
     body {
-      margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      font-size: 13px;
-      overflow: hidden;
+      margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg); color: var(--text);
+      height: 100vh; display: flex; flex-direction: column;
+      font-size: 13px; overflow: hidden;
     }
     header {
-      background: var(--panel);
-      border-bottom: 1px solid var(--border);
-      padding: 12px 20px;
-      display: flex;
-      align-items: center;
-      gap: 14px;
+      background: var(--panel); border-bottom: 1px solid var(--border);
+      padding: 12px 20px; display: flex; align-items: center; gap: 14px;
       flex-shrink: 0;
     }
-    header h1 {
-      margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.02em;
-      color: var(--accent);
-    }
+    header h1 { margin: 0; font-size: 15px; font-weight: 600; color: var(--accent); }
     header h1 .sub { color: var(--text-dim); font-weight: 400; font-size: 12px; margin-left: 8px; }
     header .actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
     button {
@@ -53,138 +41,77 @@
     }
     button:hover { background: var(--accent-2); border-color: var(--accent-2); }
     button.primary { background: var(--accent); color: #1a1d23; border-color: var(--accent); font-weight: 600; }
-    button.primary:hover { background: #d9b46c; border-color: #d9b46c; }
+    button.primary:hover { background: #d9b46c; }
     button.danger { background: transparent; color: var(--bad); border-color: var(--bad); }
     button.danger:hover { background: var(--bad); color: white; }
     button.toggle { background: var(--panel-2); }
     button.toggle.active { background: var(--accent-2); border-color: var(--accent-2); }
 
-    main {
-      flex: 1;
-      display: grid;
-      grid-template-columns: 260px 1fr;
-      min-height: 0;
-    }
-    aside {
-      background: var(--panel);
-      border-right: 1px solid var(--border);
-      padding: 16px;
-      overflow-y: auto;
-    }
+    main { flex: 1; display: grid; grid-template-columns: 260px 1fr; min-height: 0; }
+    aside { background: var(--panel); border-right: 1px solid var(--border); padding: 16px; overflow-y: auto; }
     aside h2 {
-      margin: 16px 0 8px;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--text-dim);
-      font-weight: 600;
+      margin: 16px 0 8px; font-size: 11px; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--text-dim); font-weight: 600;
     }
     aside h2:first-child { margin-top: 0; }
-
-    .palette {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 6px;
-    }
+    .palette { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
     .swatch {
-      aspect-ratio: 1;
-      border: 2px solid var(--border);
-      border-radius: 4px;
-      cursor: pointer;
-      position: relative;
-      display: flex;
-      align-items: end;
-      justify-content: center;
-      padding-bottom: 4px;
-      font-size: 9px;
-      color: white;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-      transition: transform 0.1s;
+      aspect-ratio: 1; border: 2px solid var(--border); border-radius: 4px;
+      cursor: pointer; position: relative; display: flex; align-items: end;
+      justify-content: center; padding-bottom: 4px; font-size: 9px; color: white;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.8); transition: transform 0.1s;
     }
     .swatch:hover { transform: scale(1.05); }
     .swatch.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(201, 165, 92, 0.3); }
-
-    .stat-row {
-      display: flex; justify-content: space-between; padding: 4px 0;
-      font-size: 12px;
-    }
+    .stat-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; }
     .stat-row .label { color: var(--text-dim); }
-    .stat-row .value { font-family: var(--mono); font-weight: 600; color: var(--text); }
-
-    .checkbox-row {
-      display: flex; align-items: center; gap: 8px;
-      padding: 4px 0; cursor: pointer; user-select: none;
-    }
-    .checkbox-row input { cursor: pointer; }
+    .stat-row .value { font-family: var(--mono); font-weight: 600; }
+    .checkbox-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; }
     .checkbox-row label { font-size: 12px; cursor: pointer; }
-
     .help {
-      font-size: 11px;
-      color: var(--text-dim);
-      line-height: 1.5;
-      padding: 10px;
-      background: var(--panel-2);
-      border-radius: 4px;
+      font-size: 11px; color: var(--text-dim); line-height: 1.5;
+      padding: 10px; background: var(--panel-2); border-radius: 4px;
       border-left: 2px solid var(--accent);
     }
     .help kbd {
-      background: var(--bg);
-      padding: 1px 5px;
-      border-radius: 3px;
-      font-family: var(--mono);
-      font-size: 10px;
-      color: var(--accent);
+      background: var(--bg); padding: 1px 5px; border-radius: 3px;
+      font-family: var(--mono); font-size: 10px; color: var(--accent);
       border: 1px solid var(--border);
     }
-
-    #canvas-container {
-      position: relative;
-      background: var(--bg);
-      overflow: hidden;
-    }
+    #canvas-container { position: relative; background: var(--bg); overflow: hidden; }
     #canvas-container canvas { display: block; }
     #overlay {
-      position: absolute;
-      top: 12px;
-      left: 12px;
-      color: var(--text-dim);
-      font-family: var(--mono);
-      font-size: 11px;
-      pointer-events: none;
-      background: rgba(10, 13, 18, 0.7);
-      padding: 6px 10px;
-      border-radius: 4px;
-      border: 1px solid var(--border);
+      position: absolute; top: 12px; left: 12px;
+      color: var(--text-dim); font-family: var(--mono); font-size: 11px;
+      pointer-events: none; background: rgba(10, 13, 18, 0.7);
+      padding: 6px 10px; border-radius: 4px; border: 1px solid var(--border);
     }
-    #overlay .label { color: var(--text-dim); }
     #overlay .value { color: var(--accent); font-weight: 600; }
-
     #file-input { display: none; }
-
     .selected-mat {
-      padding: 8px;
-      background: var(--panel-2);
-      border-radius: 4px;
-      border: 1px solid var(--border);
-      font-size: 12px;
-      margin-bottom: 8px;
+      padding: 8px; background: var(--panel-2); border-radius: 4px;
+      border: 1px solid var(--border); font-size: 12px; margin-bottom: 8px;
     }
     .selected-mat .name { font-weight: 600; color: var(--accent); margin-bottom: 4px; }
     .selected-mat .desc { color: var(--text-dim); font-size: 11px; line-height: 1.4; }
-  </style>
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/[email protected]/build/three.module.js",
-      "three/addons/": "https://unpkg.com/[email protected]/examples/jsm/"
+    #error-overlay {
+      position: fixed; inset: 0; background: rgba(10, 13, 18, 0.95);
+      color: var(--text); display: none; align-items: center; justify-content: center;
+      z-index: 1000; font-family: var(--mono); padding: 40px;
     }
-  }
-  </script>
+    #error-overlay .box {
+      max-width: 600px; padding: 30px; background: var(--panel);
+      border-left: 4px solid var(--bad); border-radius: 6px;
+    }
+    #error-overlay h2 { color: var(--bad); margin: 0 0 14px; font-family: -apple-system, sans-serif; }
+    #error-overlay p { line-height: 1.6; color: var(--text-dim); }
+    #error-overlay code { background: var(--bg); padding: 1px 6px; border-radius: 3px; color: var(--accent); }
+  </style>
 </head>
 <body>
 
 <header>
-  <h1>Child of Light <span class="sub">Voxel Editor (3D, v0.1)</span></h1>
+  <h1>Child of Light <span class="sub">Voxel Editor (3D, v0.2)</span></h1>
   <div class="actions">
     <button id="btn-clear" class="danger">Clear</button>
     <button id="btn-symmetry" class="toggle">Mirror X</button>
@@ -195,7 +122,6 @@
 </header>
 
 <main>
-
   <aside>
     <h2>Material</h2>
     <div class="selected-mat" id="selected-mat">
@@ -224,31 +150,50 @@
       <strong>Mouse:</strong><br>
       <kbd>Left-click</kbd> add voxel<br>
       <kbd>Right-click</kbd> remove voxel<br>
-      <kbd>Drag</kbd> orbit camera<br>
-      <kbd>Wheel</kbd> zoom<br>
+      <kbd>Left-drag</kbd> orbit camera<br>
       <kbd>Middle-drag</kbd> pan<br>
+      <kbd>Wheel</kbd> zoom<br>
       <br>
-      <strong>Keyboard:</strong><br>
-      <kbd>1</kbd>–<kbd>6</kbd> select material<br>
-      <kbd>M</kbd> toggle Mirror X<br>
-      <kbd>G</kbd> toggle grid
+      <strong>Keys:</strong><br>
+      <kbd>1</kbd>–<kbd>6</kbd> material<br>
+      <kbd>M</kbd> Mirror X<br>
+      <kbd>G</kbd> grid
     </div>
   </aside>
 
   <div id="canvas-container">
     <div id="overlay">
-      <span class="label">cursor:</span> <span class="value" id="cursor-pos">—</span>
+      <span>cursor:</span> <span class="value" id="cursor-pos">—</span>
     </div>
   </div>
-
 </main>
 
-<script type="module">
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+<div id="error-overlay">
+  <div class="box">
+    <h2>3D engine failed to load</h2>
+    <p id="error-detail">Three.js could not be loaded from the CDN. This usually means:</p>
+    <p>
+      • No internet connection (Three.js is fetched from <code>cdn.jsdelivr.net</code> the first time)<br>
+      • A firewall is blocking the CDN<br>
+      • The browser is in a strict mode that blocks external scripts
+    </p>
+    <p>Fix: connect to the internet, reload the page, and your browser will cache the library for future offline use.</p>
+  </div>
+</div>
+
+<!-- Three.js as a global UMD script — works from file:// without CORS issues -->
+<script src="https://cdn.jsdelivr.net/npm/[email protected]/build/three.min.js"
+        onerror="document.getElementById('error-overlay').style.display='flex';"></script>
+
+<script>
+// Verify Three.js loaded
+if (typeof THREE === 'undefined') {
+  document.getElementById('error-overlay').style.display = 'flex';
+  throw new Error('Three.js failed to load');
+}
 
 // ============================================================
-// Materials — each has a color, density, and team-color hook
+// Materials
 // ============================================================
 const MATERIALS = [
   { id: 'armor',     name: 'Armor',     color: 0x8a8a8a, density: 7800, team: 'primary',   desc: 'High-density plating. Heavy. Tinted with team-primary.' },
@@ -259,19 +204,17 @@ const MATERIALS = [
   { id: 'hardpoint', name: 'Hardpoint', color: 0xc9a55c, density: 500,  team: 'fixed',     desc: 'A mount point for parts. Lightweight marker. Glows.' }
 ];
 const MATERIAL_BY_ID = Object.fromEntries(MATERIALS.map(m => [m.id, m]));
-const CELL_SIZE_M = 0.5; // each voxel is 0.5m × 0.5m × 0.5m
+const CELL_SIZE_M = 0.5;
 const CELL_VOLUME_M3 = CELL_SIZE_M ** 3;
 const GRID_SIZE = 16;
 
 // ============================================================
 // State
 // ============================================================
-const voxels = new Map();        // "x,y,z" -> { material }
-const voxelMeshes = new Map();   // same key -> Mesh
+const voxels = new Map();
+const voxelMeshes = new Map();
 let selectedMaterial = 'armor';
 let mirrorX = false;
-let showGrid = true;
-let showRegion = true;
 
 // ============================================================
 // Three.js setup
@@ -281,8 +224,6 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0d12);
 
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
-camera.position.set(20, 18, 20);
-camera.lookAt(GRID_SIZE / 2, 3, GRID_SIZE / 2);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -290,19 +231,26 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 container.appendChild(renderer.domElement);
 
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(GRID_SIZE / 2, 3, GRID_SIZE / 2);
-controls.dampingFactor = 0.08;
-controls.enableDamping = true;
-controls.minDistance = 5;
-controls.maxDistance = 100;
-controls.maxPolarAngle = Math.PI * 0.49; // don't allow flipping under the ground
+// --- Custom orbit camera state (no OrbitControls dependency) ---
+const camTarget = new THREE.Vector3(GRID_SIZE / 2, 3, GRID_SIZE / 2);
+let camAzimuth = Math.PI * 1.25;
+let camElevation = Math.PI * 0.32;
+let camDistance = 28;
+
+function updateCameraOrbit() {
+  const x = camTarget.x + camDistance * Math.cos(camElevation) * Math.sin(camAzimuth);
+  const y = camTarget.y + camDistance * Math.sin(camElevation);
+  const z = camTarget.z + camDistance * Math.cos(camElevation) * Math.cos(camAzimuth);
+  camera.position.set(x, y, z);
+  camera.lookAt(camTarget);
+}
+updateCameraOrbit();
 
 // Lighting
 const ambient = new THREE.AmbientLight(0xb0b8c8, 0.5);
 scene.add(ambient);
 
-const sun = new THREE.DirectionalLight(0xfff0d8, 0.9);
+const sun = new THREE.DirectionalLight(0xfff0d8, 0.95);
 sun.position.set(20, 30, 15);
 sun.castShadow = true;
 sun.shadow.mapSize.width = 1024;
@@ -319,14 +267,13 @@ const rim = new THREE.DirectionalLight(0x6b8eb3, 0.25);
 rim.position.set(-15, 10, -10);
 scene.add(rim);
 
-// Ground plane (for receiving shadows + first-click placement)
+// Ground plane
 const groundGeom = new THREE.PlaneGeometry(GRID_SIZE * 3, GRID_SIZE * 3);
 const groundMat = new THREE.MeshStandardMaterial({ color: 0x14171e, roughness: 0.9, metalness: 0 });
 const ground = new THREE.Mesh(groundGeom, groundMat);
 ground.rotation.x = -Math.PI / 2;
 ground.position.set(GRID_SIZE / 2, 0, GRID_SIZE / 2);
 ground.receiveShadow = true;
-ground.userData.isGround = true;
 scene.add(ground);
 
 // Grid helper
@@ -334,7 +281,7 @@ const gridHelper = new THREE.GridHelper(GRID_SIZE, GRID_SIZE, 0x3a4150, 0x252b38
 gridHelper.position.set(GRID_SIZE / 2, 0.01, GRID_SIZE / 2);
 scene.add(gridHelper);
 
-// Build region wireframe (16×16×16)
+// Build region wireframe
 const regionGeom = new THREE.BoxGeometry(GRID_SIZE, GRID_SIZE, GRID_SIZE);
 const regionEdges = new THREE.EdgesGeometry(regionGeom);
 const regionMat = new THREE.LineBasicMaterial({ color: 0x2a3040, transparent: true, opacity: 0.5 });
@@ -342,7 +289,7 @@ const regionBox = new THREE.LineSegments(regionEdges, regionMat);
 regionBox.position.set(GRID_SIZE / 2, GRID_SIZE / 2, GRID_SIZE / 2);
 scene.add(regionBox);
 
-// Mirror plane indicator (when mirror X is on)
+// Mirror plane indicator
 const mirrorPlaneGeom = new THREE.PlaneGeometry(GRID_SIZE, GRID_SIZE);
 const mirrorPlaneMat = new THREE.MeshBasicMaterial({ color: 0xc9a55c, transparent: true, opacity: 0.08, side: THREE.DoubleSide });
 const mirrorPlane = new THREE.Mesh(mirrorPlaneGeom, mirrorPlaneMat);
@@ -351,17 +298,13 @@ mirrorPlane.position.set(GRID_SIZE / 2, GRID_SIZE / 2, GRID_SIZE / 2);
 mirrorPlane.visible = false;
 scene.add(mirrorPlane);
 
-// Cursor preview cube (shows where a voxel will be placed)
-const cursorGeom = new THREE.BoxGeometry(1, 1, 1);
-const cursorMat = new THREE.MeshBasicMaterial({ color: 0xc9a55c, transparent: true, opacity: 0.3, wireframe: false });
-const cursorMesh = new THREE.Mesh(cursorGeom, cursorMat);
+// Cursor preview
+const cursorMat = new THREE.MeshBasicMaterial({ color: 0xc9a55c, transparent: true, opacity: 0.3 });
+const cursorMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), cursorMat);
 cursorMesh.visible = false;
 scene.add(cursorMesh);
-
-// Cursor wireframe (visible edges)
-const cursorEdgeGeom = new THREE.EdgesGeometry(cursorGeom);
 const cursorEdgeMat = new THREE.LineBasicMaterial({ color: 0xc9a55c });
-const cursorEdge = new THREE.LineSegments(cursorEdgeGeom, cursorEdgeMat);
+const cursorEdge = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1,1,1)), cursorEdgeMat);
 cursorEdge.visible = false;
 scene.add(cursorEdge);
 
@@ -369,21 +312,15 @@ scene.add(cursorEdge);
 // Voxel operations
 // ============================================================
 function key(x, y, z) { return `${x},${y},${z}`; }
-
-function inBounds(x, y, z) {
-  return x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE && z >= 0 && z < GRID_SIZE;
-}
+function inBounds(x, y, z) { return x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE && z >= 0 && z < GRID_SIZE; }
 
 function addVoxel(x, y, z, materialId, recordMirror = true) {
   if (!inBounds(x, y, z)) return;
   const k = key(x, y, z);
   if (voxels.has(k)) return;
-
   const mat = MATERIAL_BY_ID[materialId];
   if (!mat) return;
-
   voxels.set(k, { material: materialId });
-
   const geom = new THREE.BoxGeometry(1, 1, 1);
   const meshMat = new THREE.MeshStandardMaterial({
     color: mat.color,
@@ -398,16 +335,12 @@ function addVoxel(x, y, z, materialId, recordMirror = true) {
   mesh.position.set(x + 0.5, y + 0.5, z + 0.5);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
-  mesh.userData.voxelKey = k;
   scene.add(mesh);
   voxelMeshes.set(k, mesh);
-
-  // Mirror across X-center if enabled
   if (mirrorX && recordMirror) {
     const mx = GRID_SIZE - 1 - x;
     if (mx !== x) addVoxel(mx, y, z, materialId, false);
   }
-
   updateStats();
 }
 
@@ -422,12 +355,10 @@ function removeVoxel(x, y, z, recordMirror = true) {
     mesh.material.dispose();
     voxelMeshes.delete(k);
   }
-
   if (mirrorX && recordMirror) {
     const mx = GRID_SIZE - 1 - x;
     if (mx !== x) removeVoxel(mx, y, z, false);
   }
-
   updateStats();
 }
 
@@ -442,27 +373,14 @@ function clearAll() {
   updateStats();
 }
 
-// ============================================================
-// Stats
-// ============================================================
 function updateStats() {
   document.getElementById('stat-voxels').textContent = voxels.size.toString();
-
-  // Mass = sum of (count_by_material × density × cell_volume)
   let mass = 0;
-  const counts = {};
   for (const v of voxels.values()) {
-    counts[v.material] = (counts[v.material] || 0) + 1;
+    const m = MATERIAL_BY_ID[v.material];
+    if (m) mass += m.density * CELL_VOLUME_M3;
   }
-  for (const [matId, count] of Object.entries(counts)) {
-    const m = MATERIAL_BY_ID[matId];
-    if (m) mass += count * m.density * CELL_VOLUME_M3;
-  }
-  document.getElementById('stat-mass').textContent = mass < 1000
-    ? `${mass.toFixed(0)} kg`
-    : `${(mass / 1000).toFixed(1)} t`;
-
-  // Bounding box
+  document.getElementById('stat-mass').textContent = mass < 1000 ? `${mass.toFixed(0)} kg` : `${(mass / 1000).toFixed(1)} t`;
   if (voxels.size === 0) {
     document.getElementById('stat-bbox').textContent = '—';
   } else {
@@ -473,53 +391,38 @@ function updateStats() {
       if (y < minY) minY = y; if (y > maxY) maxY = y;
       if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
     }
-    const w = maxX - minX + 1, h = maxY - minY + 1, d = maxZ - minZ + 1;
-    document.getElementById('stat-bbox').textContent = `${w}×${h}×${d}`;
+    document.getElementById('stat-bbox').textContent = `${maxX-minX+1}×${maxY-minY+1}×${maxZ-minZ+1}`;
   }
 }
 
 // ============================================================
-// Picking — raycasting on click
+// Picking
 // ============================================================
 const raycaster = new THREE.Raycaster();
-const mouse = new THREE.Vector2();
+const mouseNDC = new THREE.Vector2();
 
 function getIntersect(event) {
   const rect = renderer.domElement.getBoundingClientRect();
-  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-  raycaster.setFromCamera(mouse, camera);
-
-  // Try voxels first
+  mouseNDC.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mouseNDC.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouseNDC, camera);
   const meshList = Array.from(voxelMeshes.values());
   const voxelHits = raycaster.intersectObjects(meshList);
-  if (voxelHits.length > 0) {
-    return { type: 'voxel', hit: voxelHits[0] };
-  }
-
-  // Then ground plane
+  if (voxelHits.length > 0) return { type: 'voxel', hit: voxelHits[0] };
   const groundHits = raycaster.intersectObject(ground);
-  if (groundHits.length > 0) {
-    return { type: 'ground', hit: groundHits[0] };
-  }
+  if (groundHits.length > 0) return { type: 'ground', hit: groundHits[0] };
   return null;
 }
 
 function handleClick(event, action) {
   const result = getIntersect(event);
   if (!result) return;
-
   if (action === 'add') {
     if (result.type === 'voxel') {
-      // Add on the face of the hit voxel
       const normal = result.hit.face.normal.clone();
       const pos = result.hit.object.position.clone();
-      const newX = Math.floor(pos.x + normal.x);
-      const newY = Math.floor(pos.y + normal.y);
-      const newZ = Math.floor(pos.z + normal.z);
-      addVoxel(newX, newY, newZ, selectedMaterial);
+      addVoxel(Math.floor(pos.x + normal.x), Math.floor(pos.y + normal.y), Math.floor(pos.z + normal.z), selectedMaterial);
     } else if (result.type === 'ground') {
-      // Add at clicked ground cell, on the first layer (y=0)
       const p = result.hit.point;
       addVoxel(Math.floor(p.x), 0, Math.floor(p.z), selectedMaterial);
     }
@@ -531,12 +434,10 @@ function handleClick(event, action) {
   }
 }
 
-// Cursor preview
 function updateCursor(event) {
   const result = getIntersect(event);
   if (!result) {
-    cursorMesh.visible = false;
-    cursorEdge.visible = false;
+    cursorMesh.visible = false; cursorEdge.visible = false;
     document.getElementById('cursor-pos').textContent = '—';
     return;
   }
@@ -544,51 +445,80 @@ function updateCursor(event) {
   if (result.type === 'voxel') {
     const normal = result.hit.face.normal.clone();
     const pos = result.hit.object.position.clone();
-    x = Math.floor(pos.x + normal.x);
-    y = Math.floor(pos.y + normal.y);
-    z = Math.floor(pos.z + normal.z);
+    x = Math.floor(pos.x + normal.x); y = Math.floor(pos.y + normal.y); z = Math.floor(pos.z + normal.z);
   } else {
     const p = result.hit.point;
-    x = Math.floor(p.x);
-    y = 0;
-    z = Math.floor(p.z);
+    x = Math.floor(p.x); y = 0; z = Math.floor(p.z);
   }
   if (!inBounds(x, y, z)) {
-    cursorMesh.visible = false;
-    cursorEdge.visible = false;
-    document.getElementById('cursor-pos').textContent = `(${x},${y},${z}) ✗ out of region`;
+    cursorMesh.visible = false; cursorEdge.visible = false;
+    document.getElementById('cursor-pos').textContent = `(${x},${y},${z}) ✗`;
     return;
   }
-  cursorMesh.visible = true;
-  cursorEdge.visible = true;
+  cursorMesh.visible = true; cursorEdge.visible = true;
   cursorMesh.position.set(x + 0.5, y + 0.5, z + 0.5);
   cursorEdge.position.set(x + 0.5, y + 0.5, z + 0.5);
   document.getElementById('cursor-pos').textContent = `(${x},${y},${z})`;
 }
 
-// Mouse events
+// ============================================================
+// Combined pointer handlers: drag = orbit/pan, click = add/remove
+// ============================================================
 let isDragging = false;
-let mouseDownPos = null;
-renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+let mouseStart = null;
+
+renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
+
 renderer.domElement.addEventListener('pointerdown', (e) => {
   isDragging = false;
-  mouseDownPos = { x: e.clientX, y: e.clientY };
+  mouseStart = {
+    x: e.clientX, y: e.clientY, button: e.button,
+    az: camAzimuth, el: camElevation,
+    tx: camTarget.x, ty: camTarget.y, tz: camTarget.z
+  };
 });
+
 renderer.domElement.addEventListener('pointermove', (e) => {
-  if (mouseDownPos) {
-    const dx = e.clientX - mouseDownPos.x;
-    const dy = e.clientY - mouseDownPos.y;
-    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) isDragging = true;
+  if (mouseStart) {
+    const dx = e.clientX - mouseStart.x;
+    const dy = e.clientY - mouseStart.y;
+    if (!isDragging && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) isDragging = true;
+    if (isDragging) {
+      if (mouseStart.button === 0) {
+        // Left-drag = orbit
+        camAzimuth = mouseStart.az - dx * 0.008;
+        camElevation = mouseStart.el + dy * 0.008;
+        camElevation = Math.max(0.05, Math.min(Math.PI * 0.49, camElevation));
+        updateCameraOrbit();
+      } else if (mouseStart.button === 1) {
+        // Middle-drag = pan
+        const speed = camDistance * 0.0025;
+        const camRight = new THREE.Vector3(Math.cos(camAzimuth), 0, -Math.sin(camAzimuth));
+        const camForward = new THREE.Vector3(-Math.sin(camAzimuth), 0, -Math.cos(camAzimuth));
+        camTarget.set(mouseStart.tx, mouseStart.ty, mouseStart.tz);
+        camTarget.addScaledVector(camRight, -dx * speed);
+        camTarget.addScaledVector(camForward, dy * speed);
+        updateCameraOrbit();
+      }
+    }
   }
   updateCursor(e);
 });
+
 renderer.domElement.addEventListener('pointerup', (e) => {
-  if (!isDragging && mouseDownPos) {
+  if (!isDragging && mouseStart) {
     if (e.button === 0) handleClick(e, 'add');
     else if (e.button === 2) handleClick(e, 'remove');
   }
-  mouseDownPos = null;
+  mouseStart = null;
 });
+
+renderer.domElement.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  camDistance *= 1 + e.deltaY * 0.0015;
+  camDistance = Math.max(8, Math.min(120, camDistance));
+  updateCameraOrbit();
+}, { passive: false });
 
 // ============================================================
 // Resize
@@ -604,11 +534,10 @@ window.addEventListener('resize', onResize);
 onResize();
 
 // ============================================================
-// Animation loop
+// Render loop
 // ============================================================
 function animate() {
   requestAnimationFrame(animate);
-  controls.update();
   renderer.render(scene, camera);
 }
 animate();
@@ -655,25 +584,17 @@ btnSymmetry.onclick = () => {
   mirrorPlane.visible = mirrorX;
 };
 
-document.getElementById('show-grid').onchange = (e) => {
-  showGrid = e.target.checked;
-  gridHelper.visible = showGrid;
-};
-document.getElementById('show-region').onchange = (e) => {
-  showRegion = e.target.checked;
-  regionBox.visible = showRegion;
-};
+document.getElementById('show-grid').onchange = e => gridHelper.visible = e.target.checked;
+document.getElementById('show-region').onchange = e => regionBox.visible = e.target.checked;
 
-// Keyboard shortcuts
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
   const k = e.key.toLowerCase();
   if (k >= '1' && k <= '9') {
     const idx = parseInt(k, 10) - 1;
     if (idx < MATERIALS.length) selectMaterial(MATERIALS[idx].id);
-  } else if (k === 'm') {
-    btnSymmetry.click();
-  } else if (k === 'g') {
+  } else if (k === 'm') btnSymmetry.click();
+  else if (k === 'g') {
     const cb = document.getElementById('show-grid');
     cb.checked = !cb.checked;
     cb.dispatchEvent(new Event('change'));
@@ -681,7 +602,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ============================================================
-// Save / Load JSON (voxel_data schema)
+// Save / Load
 // ============================================================
 function exportJSON() {
   const voxList = [];
@@ -698,38 +619,31 @@ function exportJSON() {
       cell_size_m: CELL_SIZE_M
     };
   });
-  // Bounding box for origin hint
   let minX = 0, minY = 0, minZ = 0, maxX = 0, maxY = 0, maxZ = 0;
   if (voxList.length > 0) {
-    minX = minY = minZ = Infinity;
-    maxX = maxY = maxZ = -Infinity;
+    minX = minY = minZ = Infinity; maxX = maxY = maxZ = -Infinity;
     for (const v of voxList) {
       if (v[0] < minX) minX = v[0]; if (v[0] > maxX) maxX = v[0];
       if (v[1] < minY) minY = v[1]; if (v[1] > maxY) maxY = v[1];
       if (v[2] < minZ) minZ = v[2]; if (v[2] > maxZ) maxZ = v[2];
     }
   }
-  // Hardpoints — derived from voxels with material 'hardpoint'
   const hardpoints = [];
   let hpId = 1;
   for (const v of voxList) {
-    if (v[3] === 'hardpoint') {
-      hardpoints.push({ id: hpId++, position: [v[0], v[1], v[2]], facing: 'y+' });
-    }
+    if (v[3] === 'hardpoint') hardpoints.push({ id: hpId++, position: [v[0], v[1], v[2]], facing: 'y+' });
   }
-  // Derived mass
-  let derived_mass_kg = 0;
+  let mass = 0;
   for (const v of voxList) {
     const m = MATERIAL_BY_ID[v[3]];
-    if (m) derived_mass_kg += m.density * CELL_VOLUME_M3;
+    if (m) mass += m.density * CELL_VOLUME_M3;
   }
   return {
     format: 'sparse_grid_v1',
     grid_size: [GRID_SIZE, GRID_SIZE, GRID_SIZE],
     cell_size_m: CELL_SIZE_M,
-    origin: [Math.round((minX + maxX) / 2), minY, Math.round((minZ + maxZ) / 2)],
     bounding_box: voxList.length > 0 ? { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] } : null,
-    derived_mass_kg: Math.round(derived_mass_kg),
+    derived_mass_kg: Math.round(mass),
     voxel_count: voxList.length,
     voxels: voxList,
     materials,
@@ -740,15 +654,13 @@ function exportJSON() {
 function loadJSON(data) {
   clearAll();
   if (!data || !Array.isArray(data.voxels)) {
-    alert('Invalid voxel JSON: expected a `voxels` array.');
+    alert('Invalid voxel JSON: expected `voxels` array.');
     return;
   }
   for (const v of data.voxels) {
     if (Array.isArray(v) && v.length >= 4) {
       const [x, y, z, mat] = v;
-      if (MATERIAL_BY_ID[mat]) {
-        addVoxel(x, y, z, mat, false);
-      }
+      if (MATERIAL_BY_ID[mat]) addVoxel(x, y, z, mat, false);
     }
   }
 }
@@ -767,59 +679,52 @@ document.getElementById('btn-save').onclick = () => {
   URL.revokeObjectURL(url);
 };
 
-document.getElementById('btn-load').onclick = () => {
-  document.getElementById('file-input').click();
-};
-
+document.getElementById('btn-load').onclick = () => document.getElementById('file-input').click();
 document.getElementById('file-input').onchange = (event) => {
   const file = event.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = (e) => {
-    try {
-      const data = JSON.parse(e.target.result);
-      loadJSON(data);
-    } catch (err) {
-      alert('Could not parse JSON: ' + err.message);
-    }
+    try { loadJSON(JSON.parse(e.target.result)); }
+    catch (err) { alert('Could not parse JSON: ' + err.message); }
   };
   reader.readAsText(file);
   event.target.value = '';
 };
 
 // ============================================================
-// Bootstrap: seed with a small starter unit so the canvas isn't empty
+// Seed starter tank so the canvas isn't empty on first load
 // ============================================================
 function seedStarterUnit() {
-  // Simple symmetric "tank" — 7×3×4 hull on a 6×1×8 base
   const seed = [
-    // Base treads (hull, 2 rows)
-    [2, 0, 4, 'hull'], [3, 0, 4, 'hull'], [4, 0, 4, 'hull'], [5, 0, 4, 'hull'], [6, 0, 4, 'hull'], [7, 0, 4, 'hull'], [8, 0, 4, 'hull'], [9, 0, 4, 'hull'],
-    [2, 0, 5, 'hull'], [3, 0, 5, 'hull'], [4, 0, 5, 'hull'], [5, 0, 5, 'hull'], [6, 0, 5, 'hull'], [7, 0, 5, 'hull'], [8, 0, 5, 'hull'], [9, 0, 5, 'hull'],
-    [2, 0, 6, 'hull'], [3, 0, 6, 'hull'], [4, 0, 6, 'hull'], [5, 0, 6, 'hull'], [6, 0, 6, 'hull'], [7, 0, 6, 'hull'], [8, 0, 6, 'hull'], [9, 0, 6, 'hull'],
-    [2, 0, 7, 'hull'], [3, 0, 7, 'hull'], [4, 0, 7, 'hull'], [5, 0, 7, 'hull'], [6, 0, 7, 'hull'], [7, 0, 7, 'hull'], [8, 0, 7, 'hull'], [9, 0, 7, 'hull'],
-    // Armored body
-    [3, 1, 5, 'armor'], [4, 1, 5, 'armor'], [5, 1, 5, 'armor'], [6, 1, 5, 'armor'], [7, 1, 5, 'armor'], [8, 1, 5, 'armor'],
-    [3, 1, 6, 'armor'], [4, 1, 6, 'armor'], [5, 1, 6, 'armor'], [6, 1, 6, 'armor'], [7, 1, 6, 'armor'], [8, 1, 6, 'armor'],
-    [3, 2, 5, 'armor'], [4, 2, 5, 'armor'], [5, 2, 5, 'armor'], [6, 2, 5, 'armor'], [7, 2, 5, 'armor'], [8, 2, 5, 'armor'],
-    [3, 2, 6, 'armor'], [4, 2, 6, 'armor'], [5, 2, 6, 'armor'], [6, 2, 6, 'armor'], [7, 2, 6, 'armor'], [8, 2, 6, 'armor'],
-    // Turret base (accent)
-    [5, 3, 5, 'accent'], [6, 3, 5, 'accent'], [7, 3, 5, 'accent'],
-    [5, 3, 6, 'accent'], [6, 3, 6, 'accent'], [7, 3, 6, 'accent'],
-    // Turret top (armor)
-    [5, 4, 5, 'armor'], [6, 4, 5, 'armor'], [7, 4, 5, 'armor'],
-    [5, 4, 6, 'armor'], [6, 4, 6, 'armor'], [7, 4, 6, 'armor'],
-    // Engine glow at rear
-    [3, 1, 4, 'engine'], [3, 1, 7, 'engine'],
-    // Glass cockpit
-    [6, 4, 4, 'glass'], [6, 4, 7, 'glass'],
-    // Hardpoint (where the main gun goes)
-    [8, 4, 5, 'hardpoint'], [8, 4, 6, 'hardpoint']
+    // Treads
+    [2,0,4,'hull'],[3,0,4,'hull'],[4,0,4,'hull'],[5,0,4,'hull'],[6,0,4,'hull'],[7,0,4,'hull'],[8,0,4,'hull'],[9,0,4,'hull'],
+    [2,0,5,'hull'],[3,0,5,'hull'],[4,0,5,'hull'],[5,0,5,'hull'],[6,0,5,'hull'],[7,0,5,'hull'],[8,0,5,'hull'],[9,0,5,'hull'],
+    [2,0,6,'hull'],[3,0,6,'hull'],[4,0,6,'hull'],[5,0,6,'hull'],[6,0,6,'hull'],[7,0,6,'hull'],[8,0,6,'hull'],[9,0,6,'hull'],
+    [2,0,7,'hull'],[3,0,7,'hull'],[4,0,7,'hull'],[5,0,7,'hull'],[6,0,7,'hull'],[7,0,7,'hull'],[8,0,7,'hull'],[9,0,7,'hull'],
+    // Body
+    [3,1,5,'armor'],[4,1,5,'armor'],[5,1,5,'armor'],[6,1,5,'armor'],[7,1,5,'armor'],[8,1,5,'armor'],
+    [3,1,6,'armor'],[4,1,6,'armor'],[5,1,6,'armor'],[6,1,6,'armor'],[7,1,6,'armor'],[8,1,6,'armor'],
+    [3,2,5,'armor'],[4,2,5,'armor'],[5,2,5,'armor'],[6,2,5,'armor'],[7,2,5,'armor'],[8,2,5,'armor'],
+    [3,2,6,'armor'],[4,2,6,'armor'],[5,2,6,'armor'],[6,2,6,'armor'],[7,2,6,'armor'],[8,2,6,'armor'],
+    // Turret base
+    [5,3,5,'accent'],[6,3,5,'accent'],[7,3,5,'accent'],
+    [5,3,6,'accent'],[6,3,6,'accent'],[7,3,6,'accent'],
+    // Turret top
+    [5,4,5,'armor'],[6,4,5,'armor'],[7,4,5,'armor'],
+    [5,4,6,'armor'],[6,4,6,'armor'],[7,4,6,'armor'],
+    // Engine glow
+    [3,1,4,'engine'],[3,1,7,'engine'],
+    // Glass
+    [6,4,4,'glass'],[6,4,7,'glass'],
+    // Hardpoint
+    [8,4,5,'hardpoint'],[8,4,6,'hardpoint']
   ];
-  for (const [x, y, z, mat] of seed) addVoxel(x, y, z, mat, false);
+  for (const [x,y,z,mat] of seed) addVoxel(x, y, z, mat, false);
 }
 seedStarterUnit();
 
+console.log('Voxel editor loaded successfully. THREE.js version:', THREE.REVISION);
 </script>
 
 </body>
