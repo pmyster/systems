@@ -146,6 +146,23 @@
       "type": "array",
       "items": { "type": "string" },
       "description": "Free-form tags for searching/categorizing."
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "scout",
+        "light_attack",
+        "main_battle",
+        "heavy_assault",
+        "artillery",
+        "support",
+        "air_fighter",
+        "gunship",
+        "naval",
+        "structure",
+        "elite"
+      ],
+      "description": "Tactical role. Used by the game AI for squad composition and target priority."
     }
   }
 }

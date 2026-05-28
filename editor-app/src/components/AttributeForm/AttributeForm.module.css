@@ -334,3 +334,20 @@
   padding: 6px 0;
   font-size: 12px;
 }
+
+.archetypeBtn {
+  background: #1e2535;
+  color: #c9a55c;
+  border: 1px solid #3a4150;
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.archetypeBtn:hover {
+  background: #252d3f;
+  border-color: #c9a55c;
+}

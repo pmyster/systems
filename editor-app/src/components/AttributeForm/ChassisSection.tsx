@@ -17,6 +17,7 @@
 
 import type { ReactNode } from "react";
 
+import { ARCHETYPES } from "../../lib/archetypes";
 import {
   ARMOR_MATERIALS,
   CHASSIS_CLASSES,
@@ -78,6 +79,30 @@ export function ChassisSection(props: ChassisSectionProps): ReactNode {
         Chassis
         <span className={styles.sectionBadge}>physical inputs only</span>
       </h3>
+
+      {/* Archetype quick-fill — sets role + all chassis fields in one click */}
+      <div className={styles.row}>
+        <label className={styles.label}>Archetype</label>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {ARCHETYPES.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              className={styles.archetypeBtn}
+              title={`Fill as ${a.label}`}
+              onClick={() => {
+                onUnitChange({
+                  ...unit,
+                  role: a.role,
+                  chassis: { ...c, ...a.chassis },
+                });
+              }}
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <SelectField<ChassisClass>
         label="Class"

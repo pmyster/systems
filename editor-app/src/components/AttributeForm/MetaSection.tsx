@@ -10,10 +10,10 @@
  * Lift source: tools/editor/index.html lines 156-177.
  */
 
-import type { ReactNode } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 
-import { FACTIONS, humanizeEnum } from "../../lib/enums";
-import type { Faction, UnitSchematic } from "../../types/unit";
+import { FACTIONS, ROLES, humanizeEnum } from "../../lib/enums";
+import type { Faction, UnitRole, UnitSchematic } from "../../types/unit";
 
 import { SelectField, TextAreaField, TextField, ReadonlyField } from "./fields";
 import styles from "./AttributeForm.module.css";
@@ -35,6 +35,8 @@ export function MetaSection(props: MetaSectionProps): ReactNode {
   const setDesigner = (designer: string) => onUnitChange({ ...unit, designer });
   const setDescription = (description: string) =>
     onUnitChange({ ...unit, description });
+  const setRole = (role: UnitRole | undefined) =>
+    onUnitChange({ ...unit, role });
 
   return (
     <section className={styles.section}>
@@ -62,6 +64,24 @@ export function MetaSection(props: MetaSectionProps): ReactNode {
         onChange={setFaction}
         labelFn={(f) => humanizeEnum(f)}
       />
+      <div className={styles.row}>
+        <label className={styles.label}>Role</label>
+        <select
+          className={styles.select}
+          value={unit.role ?? ""}
+          onChange={(e: ChangeEvent<HTMLSelectElement>) => {
+            const v = e.target.value;
+            setRole(v === "" ? undefined : (v as UnitRole));
+          }}
+        >
+          <option value="">(unassigned)</option>
+          {ROLES.map((r) => (
+            <option key={r} value={r}>
+              {humanizeEnum(r)}
+            </option>
+          ))}
+        </select>
+      </div>
       <TextField
         label="Designer"
         value={unit.designer ?? ""}

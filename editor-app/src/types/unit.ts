@@ -80,6 +80,19 @@ export type CompatibilityTag =
   | "amphibious"
   | "all_weather";
 
+export type UnitRole =
+  | "scout"
+  | "light_attack"
+  | "main_battle"
+  | "heavy_assault"
+  | "artillery"
+  | "support"
+  | "air_fighter"
+  | "gunship"
+  | "naval"
+  | "structure"
+  | "elite";
+
 // ---------------------------------------------------------------------------
 // Chassis — the body of the unit. Physical inputs only.
 // ---------------------------------------------------------------------------
@@ -176,6 +189,7 @@ export interface UnitSchematic extends UnitMeta {
   readonly tech_requirements?: readonly string[];
   readonly evolution?: readonly UnitEvolution[];
   readonly tags?: readonly string[];
+  readonly role?: UnitRole;
 }
 
 /**

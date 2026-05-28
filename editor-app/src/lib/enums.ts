@@ -24,6 +24,7 @@ import type {
   CompatibilityTag,
   EnergySource,
   Faction,
+  UnitRole,
 } from "../types/unit";
 import type {
   CommunicationsType,
@@ -96,6 +97,20 @@ export const COMPATIBILITY_TAGS: readonly CompatibilityTag[] = [
   "amphibious",
   "all_weather",
 ] as const satisfies readonly CompatibilityTag[];
+
+export const ROLES: readonly UnitRole[] = [
+  "scout",
+  "light_attack",
+  "main_battle",
+  "heavy_assault",
+  "artillery",
+  "support",
+  "air_fighter",
+  "gunship",
+  "naval",
+  "structure",
+  "elite",
+] as const satisfies readonly UnitRole[];
 
 // ---------------------------------------------------------------------------
 // Part-level enums.
