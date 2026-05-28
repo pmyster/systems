@@ -123,5 +123,3 @@ export function resolveRemoveCell(result: Intersect): CursorCell | null {
   const z = Math.floor(pos.z);
   return { x, y, z, inside: inBounds(x, y, z, GRID_SIZE) };
 }
-};
-}

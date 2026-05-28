@@ -2,16 +2,18 @@
 
 ## TL;DR
 
-- A separate companion application for designing units. Outputs JSON Schematics the game engine loads.
-- **Hybrid model:** voxel chassis sculpting + hardpoint-snapped functional parts.
-- Target platform for the full app: desktop/tablet (creative tool, not phone).
-- A **browser-based prototype editor** ships now (`tools/editor/index.html`) for early unit authoring while the full app is built. Form-based for now; voxel sculpting comes later.
+- A standalone creative platform for designing units, characters, and vehicles. Outputs JSON Schematics any game engine with the matching plugin can load.
+- **Mesh-first workflow:** players import, generate, or pick a mesh → auto-fill physics voxel interior → paint material zones with a free-color image → rig moving parts → define effects → export.
+- **Four-layer unit architecture:** Mesh (visual) → Rig (motion) → Effect layer (beams, shields) → Physics substrate (hidden voxels).
+- **Three creation tiers:** Express (5 min, anyone), Craft (30 min, engaged player), Architect (hours, creator/modder).
+- **Multi-game plugin architecture:** the core tool is game-agnostic; each game ships a schema plugin. Child of Light is the first plugin.
+- Target platform: desktop/tablet. Deep creative tool with no UI compromises.
 
 ## Scope
 
 This document owns:
 - The Editor App's vision and design
-- The hybrid voxel-chassis + hardpoint-parts model
+- The mesh-first creation pipeline and four-layer unit architecture
 - The current prototype editor's scope and workflow
 - The phased path from prototype to full app
 - The Schematic format the editor produces (formal schemas live in `schemas/`)
@@ -35,40 +37,164 @@ It does NOT own:
 
 ## The full Editor App vision
 
-The locked design decision: **hybrid voxel-chassis + hardpoint-snapped parts.**
+### Five design principles
 
-### Voxel chassis
+1. **Assembly first, sculpting second.** Start with templates and pre-built parts. Snap them together. See the unit in the battlefield preview immediately. Advanced users go deeper — nobody is forced to model from scratch.
+2. **AI handles the hard part.** Type a prompt or drop a photo. The tool generates the mesh, auto-voxelizes the interior, and proposes material zones. The player reviews and refines — they don't build from nothing.
+3. **Real-time feedback always.** Every change — voxel fill, material zone, part snap, turret arc — reflects instantly in the battlefield preview. The player never wonders "what does this look like in-game?"
+4. **Speed is a feature.** A complete, usable unit in under 5 minutes for a new user. If it takes longer, the tool has failed. Templates, smart defaults, and AI generation exist specifically to hit that bar.
+5. **Plugin schema for multiple games.** The core tool is game-agnostic. Schema plugins make it work for any engine.
 
-Players sculpt the *body* of a unit cell by cell. The voxel volume contributes:
-- **Visual identity** — silhouette, hand-built feel, the player's design language.
-- **Mass** (derived from voxel count × material density).
-- **Armor distribution** (per-region thickness).
-- **Compatibility tags** (e.g., a hull built with closed-cell voxels qualifies as `vacuum_rated`).
-- **Hardpoint placement** — players place hardpoints on their voxel chassis at specific positions.
+---
 
-### Hardpoint-snapped parts
+### The four-layer unit architecture
 
-Functional pieces (weapons, sensors, engines, utility modules) mount on engine-defined hardpoints. Each part is itself a Schematic with declared physical properties. The Editor App provides:
-- A part library (stock parts + community-created parts when marketplace is live)
-- A drag-and-drop interface to attach parts to hardpoints
-- Live validation: does this part fit this hardpoint? Does the unit have enough power for all parts running simultaneously?
-- Derived-stat preview: as the player adjusts inputs, the engine's formulas compute speed, range, cooldown, etc., and display them live.
+```
+Mesh        — visual surface (what players and the game see)
+Rig         — moving parts: pivot points, axes, constraint arcs, animation states
+Effect layer — beams, shields, translucent fields, cluster munition trees
+Physics substrate — hidden voxel grid; auto-filled from mesh interior; drives all derived stats
+```
+
+Every layer is optional. A simple ground vehicle uses Mesh + Physics substrate only. A laser cruiser with a rotating shield and a cluster missile launcher uses all four.
+
+---
+
+### Layer 1: Mesh
+
+**Three acquisition sources — all supported:**
+1. **Pre-built library** — the game ships templates (tank chassis, mech torso, naval hull, flyer body, walker leg, etc.) Players pick and customize.
+2. **Player import** — OBJ, GLB, FBX. Any mesh the player creates or downloads.
+3. **AI generation** — text prompt ("heavy tracked assault unit with sloped front armor") or photo input. The tool generates a mesh via AI, previews it, and the player accepts or regenerates.
+
+After acquisition, one button auto-voxelizes the mesh interior into the physics substrate. The mesh remains the visual surface; the voxels are hidden.
+
+---
+
+### Layer 2: Rig (moving parts)
+
+Three motion tiers:
+
+**Passive** — automatic. Wheels spin, tracks cycle, suspension compresses. Derived from chassis class and physics simulation. No authoring required.
+
+**Reactive** — player-defined pivot and constraint. In the editor, clicking a part and designating it as reactive shows:
+- A rotation axis visualizer
+- Two handles to drag the constraint arc (yaw: left-right sweep; pitch: elevation min/max)
+- A live fan/cone showing the sweep range in the preview pane
+
+Examples and their tactical implications:
+
+| Constraint | Design | Implication |
+|---|---|---|
+| Yaw ±180° | Full-rotation turret | Can engage any direction; slow to rotate |
+| Yaw ±60° | Forward arc cannon | Must face the enemy — flankable |
+| Yaw ±150° rear | Anti-missile system | Protects rear, blind in front |
+| Pitch 45°–80° fixed | Mortar | Arc fire only; cannot engage close targets |
+| Pitch 0°–15° | Sniper cannon | Flat trajectory; long range; can't arc |
+
+**Recoil is derived, never authored.** Recoil force = shell mass × muzzle velocity. The physics solver computes platform destabilization automatically from the projectile Schematic. A unit firing its heaviest gun while turning has degraded accuracy. No extra design work required.
+
+**Active** — animation state machine. Player defines states (idle, charging, firing, reloading, open, closed) and the engine triggers transitions. Fire sequences support single shot, salvo, and alternating barrel. Missile launchers define: launch hardpoints (click to place on mesh), linked projectile Schematic, and fire sequence.
+
+---
+
+### Layer 3: Effect layer
+
+**Projectiles — all are Schematics.** Shells, missiles, grenades, and beams each have a JSON Schematic declaring physical inputs. The engine derives kinetic energy, penetration depth, blast radius, and heat signature. No bare gameplay numbers at any level.
+
+**Cluster munitions** use a parent-child Schematic tree:
+```
+Parent missile
+  ├── Flight path
+  ├── Split trigger (altitude / proximity / timer)
+  ├── Spread pattern (angle, fragment count, direction bias)
+  └── Child Schematic (the fragment — lighter, simpler)
+        └── Can itself have a split event (recursive)
+```
+Parent mass = casing + (N × child mass). Children inherit parent velocity then add their spread vector.
+
+**Lasers** are continuous energy-delivery weapons. Physics: power draw (watts) → damage rate (heat per second to target). Beam width determines focus — narrow punches through armor, wide heats surface area. Heat generated in the firing unit is significant (Principle 3: high power, real cost). Range falls off with atmospheric dispersion.
+
+**Shields** are translucent mesh layers with independent physics:
+- Energy capacity (HP pool) + power draw (regeneration rate)
+- Three shapes: sphere (360°), directional (half-dome, cheaper), conformal (follows unit mesh)
+- Visual: Fresnel shader — nearly transparent face-on, opaque at edges, ripple on impact
+
+**Rendering by effect type:**
+
+| Effect | Rendering technique |
+|---|---|
+| Shields, forcefields | Alpha blend + Fresnel shader |
+| Lasers, plasma beams | Additive blending (adds light, never occludes) |
+| Glows, engine exhausts | Additive + bloom post-process |
+
+---
+
+### Layer 4: Physics substrate
+
+The hidden voxel grid auto-generated from the mesh interior. Each voxel cell has a material type assigned from the material authoring step. The engine derives all physical stats from cell composition:
+
+- **Mass** = sum of (voxel count × material density) per region
+- **Armor distribution** = material type and thickness per surface region
+- **Thermal capacity** = sum of material thermal properties
+- **Hardpoint positions** = cells marked during rig authoring
+
+The player sees none of this directly. The derived stats panel in the editor shows the outputs live. Writing derived numbers into the Schematic is not permitted (Principle 2).
+
+---
+
+### Material authoring — free-color image overlay
+
+Player paints or photographs a colored image and projects it onto the mesh surface:
+1. Import any image (hand-drawn sketch, photo, digital paint)
+2. The editor projects it onto the mesh (box projection or UV-fit)
+3. AI segments the image into color regions and infers material zones: dark grey → Hull, dark red → Heavy Armor, orange → Fuel Tank, bright blue → Energy System, yellow → Thermal Shielding
+4. The inferred zones appear as a color-coded overlay on the mesh
+5. Player taps any zone and corrects the assignment if the inference was wrong
+6. Confirm — the voxel substrate is re-materialized from the zone map
+
+The image serves two purposes simultaneously: it is the visual texture (the skin) and the physics material map. One authoring step, two outputs.
+
+---
+
+### Multi-game plugin architecture
+
+The core tool is game-agnostic. A schema plugin is a small JSON + code bundle that defines:
+- Which physical properties the game engine cares about (Child of Light: mass, thermal capacity, armor; another game might care about different properties)
+- What export format the engine expects (Schematic JSON schema, binary, etc.)
+- What asset references the renderer needs (mesh path, material atlas, rig skeleton)
+
+Child of Light ships the first plugin. Future projects publish new plugins without modifying the core tool. A player who designs units for Child of Light can switch the active plugin and export the same unit — reskinned and re-schematized — for a different game.
+
+---
+
+### Three-tier creation progression
+
+| Tier | Time | Who | Workflow |
+|---|---|---|---|
+| **Express** | 5 min | Anyone | Pick template → AI style from text or photo → auto-fill → export |
+| **Craft** | 30 min | Engaged player | Import or generate mesh → material paint → part assembly → rig turrets → physics tune → export |
+| **Architect** | Hours | Creator / modder | Full mesh authoring → custom parts → effect definition → fine physics → hardpoint declaration → multi-format export |
+
+No player is pushed up a tier. No capability is locked behind a tier. Express users who grow curious discover Craft naturally. The exit ramps are visible and celebrated.
+
+---
 
 ### Cross-platform output
 
-The Editor App produces a single JSON file per unit. The same JSON is:
-- Loaded by the game engine to build the unit
+The editor produces a unit package: a JSON Schematic (physics + part definitions + rig declarations) + a mesh asset reference + an optional material image. The same package is:
+- Loaded by the game engine to build and simulate the unit
 - Validated by the marketplace before listing
-- Shared via the async-design-sharing library
+- Shared via the async-design library
 - Salvaged in-match by Scientist units (with the original designer's signature preserved)
 
 ### Modder safety
 
-The Editor App is the modder seam. Players who can make a unit can extend the game. The constitution enforces:
+The Editor App is the modder seam. The constitution enforces at export:
 - No bare gameplay numbers (only physical inputs)
 - Validation against schema at upload
-- Equations limited to the additive catalog (per Invariance rule)
-- Constitution checks before any unit can enter PvP
+- Equations limited to the additive catalog (Invariance rule)
+- Constitution checks before any unit enters PvP
 
 ---
 
@@ -108,11 +234,12 @@ The full Editor App is a substantial application. While it's being built, player
 
 | Phase | Editor capability | Status |
 |---|---|---|
-| Prototype | Form-based authoring, live JSON, live derived stats | **Shipped now** |
-| Alpha | Add part library (browse and add stock parts) | Future |
-| Beta | Add voxel chassis sculpting | Future |
-| V1 | Full Editor App with hardpoint placement on voxel chassis | Tied to V1 launch |
-| V2 | Marketplace integration (publish, browse, buy) | V2 launch |
+| v0.1 | Three-pane shell: voxel sculptor (prototype), attribute form, battlefield preview. Save/load JSON. | **Shipped 2026-05-28** |
+| v0.2 | Mesh import pipeline. AI mesh generation. Auto-voxelize. Material image overlay + AI inference. Autosave recovery UI. Panel persistence. | Next |
+| v0.3 | Rigging layer: turret pivot + constraint arcs, recoil, animation states. Projectile Schematic authoring. Cluster munition tree. | Planned |
+| v0.4 | Effect layer: laser emitter definition, shield generator, translucent rendering. | Planned |
+| V1 | Plugin architecture. Multi-game export. Full Architect-tier capability. Marketplace integration ready. | V1 launch |
+| V2 | Marketplace live (publish, browse, buy). Real-time collaborative authoring. | V2 launch |
 
 The prototype's JSON format will evolve into the full app's format. Files created in the prototype today will load in the full app later (per the Invariance rule — old content always works).
 
@@ -173,10 +300,15 @@ Always include `physics_version`. For the prototype today, use `"1.0"`. The inva
 
 ## Open questions
 
-- OPEN[2026-05-27]: voxel grid resolution and per-unit voxel budget for mobile-rendering. blocks: full Editor App.
-- OPEN[2026-05-27]: hardpoint placement rules — fully free (any voxel face) or grid-constrained? blocks: full Editor App design.
-- OPEN[2026-05-27]: stock part library — how many parts at V1 launch, and authored by whom? blocks: V1 content plan.
-- OPEN[2026-05-27]: paint kit interaction with voxel chassis — does the player paint per-voxel or per-region? blocks: cosmetic identity layer.
+- RESOLVED [2026-05-28]: voxel chassis vs mesh-first — **mesh-first with auto-voxelized physics substrate.**
+- RESOLVED [2026-05-28]: hardpoint placement — **defined during rig authoring by clicking on the mesh surface.**
+- RESOLVED [2026-05-28]: material authoring approach — **free-color image overlay with AI material inference.**
+- RESOLVED [2026-05-28]: all-parts-player-sculpted — **confirmed. No locked pre-built parts library.**
+- OPEN[2026-05-28]: stock template library scope at v0.2 launch — how many chassis templates ship, and authored by whom? blocks: v0.2 content plan.
+- OPEN[2026-05-28]: AI mesh generation provider — Meshy, Tripo, or self-hosted model? blocks: v0.2 implementation.
+- OPEN[2026-05-28]: material image projection method — box projection (simple, no UV required) or UV-fit (better wrap, requires UV map)? blocks: v0.2 material authoring.
+- OPEN[2026-05-28]: plugin architecture format — JSON manifest + JS module, or fully compiled plugin? blocks: V1 multi-game export.
+- OPEN[2026-05-28]: voxel grid resolution for high-detail mesh imports — 16³ current max sufficient, or does mesh-first workflow demand higher resolution? blocks: v0.2 auto-voxelize implementation.
 
 ## Cross-references
 

@@ -36,11 +36,16 @@ This is the master contract. Every other doc is downstream. If two docs disagree
 - Tower-defense pacing inside an RTS shell.
 - Stances (Hold / Patrol / Attack-Move / Fire-at-Will / Guard) let a thumb run an army.
 
-### 4. Modular unit editor — separate companion app
-- Voxel/block-based unit construction. Specific block model: see open question (`docs/units.md`).
+### 4. Modular unit editor — standalone creative platform
+- **Mesh-first unit construction.** Players bring in a 3D mesh — from a pre-built library, an imported file (OBJ/GLB/FBX), or AI-generated from a photo or text prompt — and the editor auto-fills the interior with a physics voxel grid. The mesh is what players and the game see; the voxels are the hidden physics substrate.
+- **All parts are player-sculpted.** Wheels, weapons, sensors, engines, shields — there is no locked pre-built parts library. Every mechanical element is a mesh a player designs, imports, or generates.
+- **Material authoring via free-color image.** Players overlay a painted or photographed image onto the mesh surface. AI infers material zones (armor, hull, fuel, energy system, thermal shielding) from color regions and visual context, shows the inference, and lets the player correct any zone. The image is simultaneously the visual skin and the physics material map.
+- **Rigging layer for moving parts.** Turrets rotate on a defined axis with constraint arcs. Barrels pitch for elevation. Recoil is derived automatically from shell mass × muzzle velocity — no authoring needed. Missile launchers have animation states and fire sequences. Wheels and tracks animate passively from the physics simulation.
+- **Effect layer for energy weapons and fields.** Lasers are continuous energy-delivery beams rendered with additive blending. Shields are translucent Fresnel-shaded meshes with HP pools and regen rates. Cluster munitions use a parent-child Schematic tree with split triggers and spread patterns.
+- **Multi-game plugin architecture.** The tool is game-agnostic. Each game ships a schema plugin that defines which physical properties matter and what export format the engine expects. Child of Light is the first plugin.
 - Desktop or tablet app, not the phone. Deep creative tool with no UI compromises.
 - Outputs Schematic files the game loads. Cloud-synced. Optional marketplace.
-- This is *the* differentiation hook: viral creativity, community content, longevity.
+- This is *the* differentiation hook: viral creativity, community content, longevity — and a standalone platform reusable across future games and projects.
 
 ### 5. Asynchronous offline PvE
 - The Commander's base persists in the world.
@@ -128,6 +133,77 @@ Lean **hybrid** — variety across maps, replayability, naturally encourages dif
 
 Must be resolved before `docs/prototype-scope.md`. blocks: docs/prototype-scope.md
 
+### Unit editor: mesh-first with physics substrate *(locked 2026-05-28)*
+
+The editor uses a mesh-first workflow. The four-layer unit architecture:
+
+```
+Mesh        — visual surface (what players and the game see)
+Rig         — moving parts: pivot points, rotation axes, constraint arcs, animation states
+Effect layer — beams, shields, translucent fields, cluster munition trees
+Physics substrate — hidden voxel grid auto-filled from the mesh interior; drives all derived stats
+```
+
+**Mesh acquisition — three sources, all supported:**
+1. Pre-built asset library the game ships
+2. Player-imported file (OBJ, GLB, FBX)
+3. AI-generated from a photo or text prompt
+
+**Material authoring:** Player overlays a free-color image onto the mesh surface. AI infers material zones from color and visual context. Player reviews and corrects. The image is the visual skin and the physics material map simultaneously — one step, two outputs.
+
+**Why mesh-first:** Pure voxel sculpting is imprecise and produces visually blocky results that don't express creative intent. The physics constitution is fully preserved — the hidden voxel substrate still derives mass, armor, thermal capacity automatically from material composition. The player never sees the voxels but benefits from everything they provide.
+
+**What stays the same:** JSON Schematic format (`sparse_grid_v1` voxel data for physics), derived-stat discipline (Principle 2), invariance (Principle 4). The mesh is a separate asset reference alongside the voxel data.
+
+### Unit editor: rigging and motion *(locked 2026-05-28)*
+
+Moving parts are categorized in three tiers:
+
+- **Passive** — wheels rolling, tracks cycling, suspension compressing. Derived automatically from chassis class and physics simulation. No authoring required.
+- **Reactive** — turrets tracking targets, sensors rotating, antennae adjusting. Player defines: the pivot point, the rotation axis, the constraint arc (min/max degrees on yaw and pitch). The engine handles targeting logic. Constraint arcs create tactical blind spots — a unit's narrow-arc gun can be flanked.
+- **Active** — missile launchers, bomb bay doors, shell ejection. Player defines animation states (idle, firing, reloading) and the game engine triggers transitions. Fire sequences support single shot, salvo, and alternating.
+
+**Recoil is derived, not authored.** Recoil force = shell mass × muzzle velocity (Newton's third law). A unit firing its heaviest gun while turning has degraded accuracy because the platform destabilizes. The physics solver computes this from the projectile Schematic automatically.
+
+**Projectiles are Schematics.** Every shell, missile, and beam is its own JSON Schematic declaring physical inputs (mass, velocity, warhead type, energy draw). The engine derives kinetic energy, penetration depth, blast radius, and heat signature from those inputs. No bare gameplay numbers.
+
+**Cluster munitions** use a parent-child Schematic tree: the parent declares a split trigger (altitude, proximity, or timer), a spread pattern (angle and fragment count), and a reference to the child Schematic. Children inherit parent velocity then add their spread vector. Recursive splits (cluster releasing sub-clusters) are supported.
+
+### Unit editor: effect layer *(locked 2026-05-28)*
+
+Three categories of energy effect, each rendered differently:
+
+| Effect | Rendering | Examples |
+|---|---|---|
+| Shields, forcefields | Alpha blend + Fresnel shader | Bubble shields, directional barriers, conformal energy fields |
+| Lasers, plasma beams | Additive blending (adds light, never occludes) | Laser cannons, plasma arcs, tractor beams |
+| Glows, halos | Additive + bloom post-process | Emitter tips, engine exhausts, impact flashes |
+
+**Lasers** are continuous energy-delivery weapons. Physics: power draw (watts) → damage rate (heat delivered per second). Range falls off with atmospheric dispersion. Heat generated in the firing unit is significant — a large laser runs the emitter hot, creating a real trade-off (Principle 3). Beam width determines focus: narrow beams penetrate armor; wide beams heat surface area.
+
+**Shields** are translucent mesh layers with independent physics: energy capacity (HP pool) + power draw (regeneration rate). Three shapes: sphere (360° coverage), directional (half-dome, cheaper, leaves rear exposed), conformal (follows unit mesh surface). Visual: Fresnel shader — nearly transparent face-on, opaque at edges. Impact produces a ripple propagating from the hit point.
+
+**What stays the same:** All effect-layer weapons still declare physical inputs and the engine derives gameplay numbers. A laser's damage rate is not authored; it is derived from power draw and emitter efficiency. Principle 2 holds at the effect layer.
+
+### Unit editor: standalone multi-game platform *(locked 2026-05-28)*
+
+The editor is not a companion app for one game. It is a standalone creative platform with a plugin architecture. The core tool handles mesh authoring, rigging, effect definition, and physics substrate generation. Each game ships a schema plugin that defines:
+- Which physical properties the engine cares about
+- What export format the engine expects
+- What the in-game renderer needs from the asset
+
+Child of Light ships the first plugin. Future games — including future projects by this team — publish their own plugins without modifying the core tool.
+
+**Three-tier creation progression:**
+
+| Tier | Time | Who | Workflow |
+|---|---|---|---|
+| Express | 5 min | Anyone | Pick template → AI style from text or photo → auto-fill → export |
+| Craft | 30 min | Engaged player | Import or generate mesh → material paint → part assembly → physics tune → export |
+| Architect | Hours | Creator / modder | Full mesh authoring → custom parts → fine physics → hardpoint declaration → multi-format export |
+
+No player is pushed up a tier. No capability is locked behind a tier. The progression is voluntary.
+
 ### Meta progression
 The Commander persists; therefore so does:
 
@@ -184,7 +260,7 @@ Detail: `docs/campaign.md`.
 Pulled from across all docs for visibility. Each is OWNED by its detail doc.
 
 - OPEN: per-match win condition — **`DESIGN.md`** (this doc — resolve before prototype)
-- OPEN: editor app block model (pure voxel vs hardpoint-snapped) — `docs/units.md`, `docs/ui-ux.md`
+- RESOLVED [2026-05-28]: editor app block model — mesh-first with auto-voxelized physics substrate, rigging layer, effect layer, multi-game plugin architecture. See locked decisions above.
 - OPEN: meteor frequency and predictability — `docs/events.md`
 - OPEN: experimental units per faction — `docs/units.md`
 - OPEN: faction-locked tech vs universal — `docs/tech.md`
