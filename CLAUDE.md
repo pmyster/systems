@@ -2,6 +2,8 @@
 
 This file is auto-loaded by every Claude Code agent working in this repo. **Read it. Then read [DESIGN.md](DESIGN.md) before doing any work.**
 
+> **If you are picking this project up fresh** (especially if you're a local Claude Code instance starting on the user's laptop), **read [HANDOFF.md](HANDOFF.md) first.** It carries the full status, the ten constitution principles, the immediate priorities, and the bridge from the cloud session that designed everything. The full decision trail is in [docs/decision-history.md](docs/decision-history.md).
+
 ---
 
 ## Project
