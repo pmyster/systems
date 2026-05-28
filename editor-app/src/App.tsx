@@ -1,20 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 import "./App.css";
 
 import { AttributeForm } from "./components/AttributeForm";
 import { BattlefieldPreview } from "./components/BattlefieldPreview";
 import { MenuBar } from "./components/MenuBar";
-import { VoxelSculptor } from "./components/VoxelSculptor";
-import { startAutosave, type AutosaveHandle } from "./file-ops";
+import { MeshWorkspace } from "./components/MeshWorkspace";
+import { startAutosave, getAutosavePath, type AutosaveHandle } from "./file-ops";
 import {
   UnitStateProvider,
   useUnitState,
 } from "./state";
 import {
-  selectFaction,
   selectIsDirty,
-  selectMirrorX,
   selectUnit,
   selectVoxels,
   selectWindowTitle,
@@ -25,15 +24,34 @@ import type { UnitSchematic, VoxelMap } from "./types";
  * Child of Light Editor - root shell.
  *
  * Three-pane layout per docs/editor-app-tauri-brief.md:
- *   - Left: Voxel chassis sculptor (Three.js, sparse_grid_v1)
+ *   - Left: Mesh workspace (template gallery + Three.js viewer + voxelizer)
  *   - Center: Attribute form (physical inputs only, per DESIGN.md Principle 2)
  *   - Right: Battlefield preview (top-down Three.js, TA-style camera)
  *
  * All three panes consume the shared UnitState via the React Context
  * provider defined in src/state. App owns the side-effects: window
- * title, autosave timer, before-unload guard. Pure rendering and state
- * mutation live elsewhere.
+ * title, autosave timer, before-unload guard, and autosave recovery banner.
+ * Pure rendering and state mutation live elsewhere.
  */
+
+/** Shape of the JSON envelope written by the autosave job. */
+interface AutosaveEnvelope {
+  readonly _autosave: true;
+  readonly savedAt: string;
+  readonly sourcePath: string | null;
+  readonly sessionId: string;
+  readonly unit: UnitSchematic;
+}
+
+function isAutosaveEnvelope(v: unknown): v is AutosaveEnvelope {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    (v as Record<string, unknown>)["_autosave"] === true &&
+    typeof (v as Record<string, unknown>)["savedAt"] === "string" &&
+    typeof (v as Record<string, unknown>)["unit"] === "object"
+  );
+}
 
 function AppShell() {
   const { state, dispatch } = useUnitState();
@@ -41,26 +59,20 @@ function AppShell() {
   // Live selectors - recomputed each render, free.
   const unit: UnitSchematic = selectUnit(state);
   const voxels: VoxelMap = selectVoxels(state);
-  const mirrorX = selectMirrorX(state);
-  const faction = selectFaction(state);
   const isDirty = selectIsDirty(state);
   const windowTitle = selectWindowTitle(state);
 
   // Status notice surfaced by MenuBar (save errors, etc.).
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Autosave recovery — non-null while the banner is visible.
+  const [recoverData, setRecoverData] = useState<AutosaveEnvelope | null>(null);
+
   // --- Pane callbacks: thin wrappers around dispatch ---------------------
 
   const handleVoxelsChange = useCallback(
     (next: VoxelMap) => {
       dispatch({ type: "SetVoxels", voxels: next });
-    },
-    [dispatch],
-  );
-
-  const handleMirrorXChange = useCallback(
-    (next: boolean) => {
-      dispatch({ type: "SetMirrorX", mirrorX: next });
     },
     [dispatch],
   );
@@ -103,23 +115,76 @@ function AppShell() {
     };
   }, []);
 
+  // Store this session's autosave path in localStorage so the next
+  // session can offer recovery without needing its own sessionId.
+  useEffect(() => {
+    void getAutosavePath(state.sessionId).then((p) => {
+      localStorage.setItem("col_last_autosave", p);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally once — sessionId never changes mid-session
+
+  // --- Autosave recovery banner (runs once on mount) --------------------
+  useEffect(() => {
+    const savedPath = localStorage.getItem("col_last_autosave");
+    if (!savedPath) return;
+    invoke<string>("read_unit_file", { path: savedPath })
+      .then((raw) => {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          return;
+        }
+        if (isAutosaveEnvelope(parsed)) {
+          setRecoverData(parsed);
+        }
+      })
+      .catch(() => {
+        // No autosave file found — nothing to offer.
+      });
+  }, []);
+
+  // --- Recovery banner handlers -----------------------------------------
+  const handleRestore = useCallback(() => {
+    if (!recoverData) return;
+    dispatch({ type: "SetUnit", unit: recoverData.unit });
+    setRecoverData(null);
+  }, [dispatch, recoverData]);
+
+  const handleDismissRecover = useCallback(() => {
+    setRecoverData(null);
+  }, []);
+
   const overflowHidden: React.CSSProperties = { overflow: "hidden" };
 
   return (
     <div className="app-shell">
       <header className="app-header">
         <MenuBar notice={notice} setNotice={setNotice} />
+        {recoverData !== null && (
+          <div className="autosave-banner" role="alert">
+            <span>
+              {"Autosave found from "}
+              {new Date(recoverData.savedAt).toLocaleString()}
+              {". Restore?"}
+            </span>
+            <button type="button" onClick={handleRestore}>
+              Restore
+            </button>
+            <button type="button" onClick={handleDismissRecover}>
+              Dismiss
+            </button>
+          </div>
+        )}
       </header>
       <main className="workspace">
-        <section className="pane pane-left" aria-label="Voxel chassis sculptor">
-          <div className="pane-header">Voxel Sculptor</div>
+        <section className="pane pane-left" aria-label="Mesh workspace">
+          <div className="pane-header">Mesh Workspace</div>
           <div className="pane-body" style={overflowHidden}>
-            <VoxelSculptor
+            <MeshWorkspace
               voxels={voxels}
-              onVoxelsChange={handleVoxelsChange}
-              faction={faction}
-              mirrorX={mirrorX}
-              onMirrorXChange={handleMirrorXChange}
+              onVoxelsUpdated={handleVoxelsChange}
             />
           </div>
         </section>

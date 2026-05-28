@@ -103,3 +103,30 @@ body,
   color: #6f6f78;
   user-select: none;
 }
+
+.autosave-banner {
+  position: fixed;
+  top: 36px;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background-color: #1e2535;
+  border-bottom: 1px solid #c9a55c;
+  font-size: 12px;
+  color: #d8c89a;
+}
+
+.autosave-banner button {
+  padding: 3px 10px;
+  border-radius: 3px;
+  border: 1px solid #3a4150;
+  background: #232831;
+  color: #d8dde6;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+}

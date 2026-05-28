@@ -13,3 +13,4 @@ export * from "./voxel-stats";
 export * from "./voxel-renderer";
 export * from "./derive-stats";
 export * from "./zod-schemas";
+export { voxelizeMesh, voxelMapToGrid } from "./voxelizer";
