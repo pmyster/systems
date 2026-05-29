@@ -13,7 +13,7 @@
  * Mirrors HardpointSection's structure and reuses the same CSS classes
  * from AttributeForm.module.css.
  */
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import * as THREE from "three";
 
 import { RIG_MOTIONS, humanizeEnum } from "../../lib/enums";
@@ -48,10 +48,45 @@ function patchEntry(
   return rig.map((e, i) => (i === index ? { ...e, ...patch } : e));
 }
 
-/** Coerce a number input, falling back to the previous value when non-finite. */
-function coerce(raw: string, fallback: number): number {
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : fallback;
+/**
+ * A degree/number field that lets you type freely — including a leading "-"
+ * or a partial decimal — and only commits a parsed number on blur (or Enter).
+ * Coercing on every keystroke (the old behaviour) clobbered "-" to 0, so you
+ * could never type a negative value. Reverts to the last good value if the
+ * final text isn't a finite number.
+ */
+function DegField({
+  value,
+  onCommit,
+}: {
+  readonly value: number;
+  readonly onCommit: (n: number) => void;
+}): ReactNode {
+  const [text, setText] = useState<string>(String(value));
+  // Re-sync when the model value changes from outside (invert, unit load, etc.).
+  useEffect(() => {
+    setText(String(value));
+  }, [value]);
+
+  const commit = (): void => {
+    const n = Number(text);
+    if (Number.isFinite(n)) onCommit(n);
+    else setText(String(value));
+  };
+
+  return (
+    <input
+      className={styles.input}
+      type="text"
+      inputMode="numeric"
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+      }}
+    />
+  );
 }
 
 const DEFAULT_YAW: RigAxisConstraint = { min_deg: -90, max_deg: 90, rate_dps: 45 };
@@ -84,18 +119,18 @@ export function RigSection({ unit, onUnitChange }: RigSectionProps): ReactNode {
     update(rig.filter((_, i) => i !== index));
   }
 
-  function patchAxis(
+  /** Commit a parsed number to an axis field (called by DegField on blur). */
+  function setAxisNum(
     index: number,
     axis: "yaw" | "pitch",
     field: "min_deg" | "max_deg" | "rate_dps",
-    raw: string,
+    value: number,
   ): void {
     const entry = rig[index];
     if (!entry) return;
     const current: RigAxisConstraint =
       entry[axis] ?? (axis === "yaw" ? DEFAULT_YAW : DEFAULT_PITCH);
-    const fallback = current[field] ?? 0;
-    const nextAxis: RigAxisConstraint = { ...current, [field]: coerce(raw, fallback) };
+    const nextAxis: RigAxisConstraint = { ...current, [field]: value };
     update(patchEntry(rig, index, { [axis]: nextAxis }));
   }
 
@@ -206,23 +241,17 @@ export function RigSection({ unit, onUnitChange }: RigSectionProps): ReactNode {
                     </label>
                     {entry.yaw !== undefined && (
                       <div style={{ display: "flex", gap: 4 }}>
-                        <input
-                          className={styles.input}
-                          type="number"
+                        <DegField
                           value={entry.yaw.min_deg ?? 0}
-                          onChange={(e) => patchAxis(i, "yaw", "min_deg", e.target.value)}
+                          onCommit={(n) => setAxisNum(i, "yaw", "min_deg", n)}
                         />
-                        <input
-                          className={styles.input}
-                          type="number"
+                        <DegField
                           value={entry.yaw.max_deg ?? 0}
-                          onChange={(e) => patchAxis(i, "yaw", "max_deg", e.target.value)}
+                          onCommit={(n) => setAxisNum(i, "yaw", "max_deg", n)}
                         />
-                        <input
-                          className={styles.input}
-                          type="number"
+                        <DegField
                           value={entry.yaw.rate_dps ?? 0}
-                          onChange={(e) => patchAxis(i, "yaw", "rate_dps", e.target.value)}
+                          onCommit={(n) => setAxisNum(i, "yaw", "rate_dps", n)}
                         />
                         <label
                           className={styles.label}
@@ -251,23 +280,17 @@ export function RigSection({ unit, onUnitChange }: RigSectionProps): ReactNode {
                     </label>
                     {entry.pitch !== undefined && (
                       <div style={{ display: "flex", gap: 4 }}>
-                        <input
-                          className={styles.input}
-                          type="number"
+                        <DegField
                           value={entry.pitch.min_deg ?? 0}
-                          onChange={(e) => patchAxis(i, "pitch", "min_deg", e.target.value)}
+                          onCommit={(n) => setAxisNum(i, "pitch", "min_deg", n)}
                         />
-                        <input
-                          className={styles.input}
-                          type="number"
+                        <DegField
                           value={entry.pitch.max_deg ?? 0}
-                          onChange={(e) => patchAxis(i, "pitch", "max_deg", e.target.value)}
+                          onCommit={(n) => setAxisNum(i, "pitch", "max_deg", n)}
                         />
-                        <input
-                          className={styles.input}
-                          type="number"
+                        <DegField
                           value={entry.pitch.rate_dps ?? 0}
-                          onChange={(e) => patchAxis(i, "pitch", "rate_dps", e.target.value)}
+                          onCommit={(n) => setAxisNum(i, "pitch", "rate_dps", n)}
                         />
                         <label
                           className={styles.label}
