@@ -198,6 +198,15 @@ export interface UnitEvolution {
 }
 
 // ---------------------------------------------------------------------------
+// Mesh asset reference — records which mesh the unit uses so the editor can
+// reload it on open (rebuild a built-in template, or load the imported file).
+// ---------------------------------------------------------------------------
+
+export type MeshAssetRef =
+  | { readonly kind: "template"; readonly template_id: string }
+  | { readonly kind: "file"; readonly path: string };
+
+// ---------------------------------------------------------------------------
 // Top-level Unit Schematic.
 // ---------------------------------------------------------------------------
 
@@ -234,6 +243,7 @@ export interface UnitSchematic extends UnitMeta {
   readonly tags?: readonly string[];
   readonly rig?: readonly RigEntry[];
   readonly role?: UnitRole;
+  readonly mesh_asset?: MeshAssetRef;
 }
 
 /**

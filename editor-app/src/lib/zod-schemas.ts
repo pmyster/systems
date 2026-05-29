@@ -36,6 +36,7 @@ import type {
 } from "../types/part";
 import type {
   HardpointSlot,
+  MeshAssetRef,
   RigEntry,
   UnitChassis,
   UnitCosts,
@@ -393,6 +394,16 @@ const rigEntrySchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Mesh asset reference — which mesh the unit uses (template or imported file),
+// so the editor can reload it on open. Discriminated on `kind`.
+// ---------------------------------------------------------------------------
+
+const meshAssetRefSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("template"), template_id: z.string() }),
+  z.object({ kind: z.literal("file"), path: z.string() }),
+]);
+
+// ---------------------------------------------------------------------------
 // Top-level Unit Schematic.
 // ---------------------------------------------------------------------------
 
@@ -412,6 +423,7 @@ export const UnitSchematicSchema = z.object({
   evolution: z.array(evolutionSchema).optional(),
   tags: z.array(z.string()).optional(),
   rig: z.array(rigEntrySchema).optional(),
+  mesh_asset: meshAssetRefSchema.optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -461,6 +473,7 @@ type _AssertRigEntry = z.infer<typeof rigEntrySchema> extends RigEntry ? true : 
 type _AssertVoxelMaterial = z.infer<typeof voxelMaterialSpecSchema> extends VoxelMaterialSpec
   ? true
   : never;
+type _AssertMeshAssetRef = z.infer<typeof meshAssetRefSchema> extends MeshAssetRef ? true : never;
 
 // Touch the type aliases so unused-locals doesn't strip them.
 type _SyncChecks = [
@@ -480,5 +493,6 @@ type _SyncChecks = [
   _AssertHardpointSlot,
   _AssertRigEntry,
   _AssertVoxelMaterial,
+  _AssertMeshAssetRef,
 ];
 export type __EditorSchemaSyncChecks = _SyncChecks;

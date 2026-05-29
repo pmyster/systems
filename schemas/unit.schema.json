@@ -176,6 +176,16 @@
       "items": { "type": "string" },
       "description": "Free-form tags for searching/categorizing."
     },
+    "mesh_asset": {
+      "type": "object",
+      "description": "Reference to the visual mesh this unit uses, so the editor can reload it on open. Either a built-in template or an imported file path.",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["template", "file"] },
+        "template_id": { "type": "string" },
+        "path": { "type": "string" }
+      }
+    },
     "rig": {
       "type": "array",
       "description": "Moving-part definitions. Each entry rigs a named mesh node for motion: passive (auto-spin/roll), reactive (aim within yaw/pitch constraint arcs), or active (animation state machine). Recoil is derived from weapon physics, never authored here.",

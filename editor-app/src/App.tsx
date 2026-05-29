@@ -186,6 +186,8 @@ function AppShell() {
             <MeshWorkspace
               voxels={voxels}
               onVoxelsUpdated={handleVoxelsChange}
+              unit={unit}
+              onUnitChange={handleUnitChange}
             />
           </div>
         </section>

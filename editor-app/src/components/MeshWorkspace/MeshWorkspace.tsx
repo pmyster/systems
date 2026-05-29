@@ -28,6 +28,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { TEMPLATES } from "../../lib/templates";
 import { voxelizeMesh } from "../../lib/voxelizer";
 import { useMeshAssets } from "../../state/mesh-assets";
+import type { MeshAssetRef, UnitSchematic } from "../../types/unit";
 import type { MaterialId, MutableVoxelMap } from "../../types/voxel";
 import { loadGlbFromBuffer, loadMeshFromPath, SUPPORTED_MESH_EXTENSIONS } from "./mesh-loader";
 import { MaterialPainter } from "./MaterialPainter";
@@ -43,6 +44,10 @@ export interface MeshWorkspaceProps {
   onVoxelsUpdated: (voxels: Map<string, MaterialId>) => void;
   /** The current voxel map (needed by MaterialPainter). */
   voxels: ReadonlyMap<string, MaterialId>;
+  /** The unit being edited — its `mesh_asset` records which mesh to reload on open. */
+  readonly unit: UnitSchematic;
+  /** Persist a unit change (used to record `mesh_asset` when the mesh changes). */
+  readonly onUnitChange: (next: UnitSchematic) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,7 +142,12 @@ const S = {
 // Component.
 // ---------------------------------------------------------------------------
 
-export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
+export function MeshWorkspace({
+  onVoxelsUpdated,
+  voxels,
+  unit,
+  onUnitChange,
+}: MeshWorkspaceProps) {
   const [currentMesh, setCurrentMesh] = useState<THREE.Group | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [showPainter, setShowPainter] = useState(false);
@@ -156,6 +166,11 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
 
   // Keep a ref so the dispose effect can always reach the latest mesh.
   const currentMeshRef = useRef<THREE.Group | null>(null);
+  // JSON.stringify of the mesh_asset ref currently loaded. Guards the
+  // reload effect (Direction B): it only acts when the unit's incoming
+  // mesh_asset differs from what we already have — preventing a ping-pong
+  // with the handlers that WRITE the ref (Direction A).
+  const appliedAssetRef = useRef<string | null>(null);
   // Hidden file input for the "Apply Skin" image picker.
   const skinInputRef = useRef<HTMLInputElement | null>(null);
   // Hidden file input for the "AI Generate" photo picker.
@@ -189,6 +204,68 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
   }, [skinImage, publishSkin]);
 
   // -------------------------------------------------------------------------
+  // Direction B: a loaded unit's mesh_asset reloads the mesh (e.g. on Open).
+  //
+  // Keyed on the stringified ref. If it matches what we already have
+  // (appliedAssetRef) — the no-op case right after Direction A — we skip.
+  // Only a genuinely new ref (a different unit opened) triggers a reload.
+  // -------------------------------------------------------------------------
+  const meshAsset = unit.mesh_asset;
+  const meshAssetKey = meshAsset ? JSON.stringify(meshAsset) : null;
+  useEffect(() => {
+    if (meshAssetKey === null) return undefined;
+    if (meshAssetKey === appliedAssetRef.current) return undefined;
+    // A new ref arrived from outside (Open). Reload the mesh it points at.
+    // `meshAsset` is non-null here because meshAssetKey is non-null.
+    const ref = meshAsset as MeshAssetRef;
+    let cancelled = false;
+
+    if (ref.kind === "template") {
+      const tpl = TEMPLATES.find((t) => t.id === ref.template_id);
+      if (tpl) {
+        setCurrentMesh(tpl.buildGeometry());
+        setSelectedTemplateId(ref.template_id);
+        setSkinImage(null);
+        appliedAssetRef.current = meshAssetKey;
+      } else {
+        setImportError(
+          `Couldn't reload mesh — unknown template "${ref.template_id}".`,
+        );
+      }
+      return undefined;
+    }
+
+    // kind === "file": load asynchronously, guarding against unmount.
+    const path = ref.path;
+    void (async () => {
+      try {
+        const group = await loadMeshFromPath(path);
+        if (cancelled) {
+          disposeGroup(group);
+          return;
+        }
+        setCurrentMesh(group);
+        setSelectedTemplateId(null);
+        setSkinImage(null);
+        appliedAssetRef.current = meshAssetKey;
+      } catch (err) {
+        if (cancelled) return;
+        setImportError(
+          `Couldn't reload mesh from ${path} — the file may have moved. Re-import it.`,
+        );
+        // eslint-disable-next-line no-console
+        console.error("[MeshWorkspace] mesh reload failed:", err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // meshAsset is derived from meshAssetKey; keying on the string is enough.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meshAssetKey]);
+
+  // -------------------------------------------------------------------------
   // Template selection.
   // -------------------------------------------------------------------------
 
@@ -201,6 +278,12 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
     // buildGeometry() returns a fresh Group each call.
     const newGroup = tpl.buildGeometry();
     setCurrentMesh(newGroup);
+
+    // Direction A: record which mesh this unit now uses, and mark it applied
+    // so Direction B's reload effect sees a match and does NOT reload.
+    const ref: MeshAssetRef = { kind: "template", template_id: id };
+    appliedAssetRef.current = JSON.stringify(ref);
+    onUnitChange({ ...unit, mesh_asset: ref });
   };
 
   // -------------------------------------------------------------------------
@@ -231,6 +314,12 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
       setSelectedTemplateId(null); // clear template selection — mesh is now from file
       setSkinImage(null); // skin belongs to the old mesh — don't carry it over
       setCurrentMesh(group);
+
+      // Direction A: record the imported file as this unit's mesh, and mark it
+      // applied so Direction B's reload effect sees a match and does NOT reload.
+      const ref: MeshAssetRef = { kind: "file", path: picked };
+      appliedAssetRef.current = JSON.stringify(ref);
+      onUnitChange({ ...unit, mesh_asset: ref });
     } catch (err) {
       // Surface the failure — never silently drop an import the user asked for.
       const msg = err instanceof Error ? err.message : String(err);
