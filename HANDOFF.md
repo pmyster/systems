@@ -6,6 +6,42 @@
 
 ---
 
+## LATEST — 2026-05-29 session (read this first)
+
+Picks up after the v0.1 smoke test. The editor pivoted **voxel-first → mesh-first** and went far. All committed + pushed on branch `claude/mobile-rts-game-concept-7LbT0`. **Git is the source of truth — this chat is disposable.** `tsc --noEmit` is clean at every commit.
+
+**What now works, end to end:**
+- **Mesh import**: OBJ, GLB, GLTF, **STL** — read through Rust (`read_unit_file` for text, `read_binary_file` for binary), parsed by extension in `editor-app/src/components/MeshWorkspace/mesh-loader.ts`. GLB is the recommended format (single file, textured).
+- **9 procedural templates** + **Auto-Voxelize** (mesh → sparse_grid_v1 physics substrate).
+- **3D material painter** (brush + flood + shell/core + height-band) in `MaterialPainter.tsx` / `lib/material-ops.ts`.
+- **Box-projection photo skin** (`box-projection.ts`) — shows on mesh viewer AND battlefield.
+- **Battlefield preview**: renders the **skinned mesh** (deep-cloned), rotatable (left-drag), brighter lights, voxel fallback for mesh-less units.
+- **24 archetypes** + role + named **hardpoints** + tower tiers (Gun/Flak/Missile T1-3) + walls.
+- **v0.3 Rigging layer (reactive turrets)** — `RigSection.tsx` + rig animation in `BattlefieldPreview/unit-on-terrain.ts`:
+  - `rig[]` on the unit: target_node, motion, yaw/pitch arcs (min/max/rate/**invert**), **parent_rig**.
+  - parent_rig **re-parents nodes via `Object3D.attach`** at mount so flat/unparented meshes compose (body swivels → followers ride → barrel pitches).
+  - Pivot = the node's **own geometry** bbox centre (NOT setFromObject — that includes re-parented children).
+  - Pitch: **positive = up** (lateral axis is -X); per-axis **Invert** for opposite-facing models.
+  - Live gold **yaw fan** on the ground shows the arc.
+- **Save/load is self-contained**: unit JSON carries `mesh_asset` (`{kind:template,template_id}` | `{kind:file,path}`); editor auto-reloads the mesh on Open. (Units saved before this — e.g. an early `mk01.json` — have no mesh_asset; re-save once.)
+
+**TripoSR AI mesh-gen (photo → 3D): built but PARKED.** Lives in `triposr-server/` (FastAPI + PyTorch 2.3.0+cu121, PyMCubes patch, `setup.ps1`, `start-server.bat`). Verdict: TripoSR's single-image quality is poor on hard-surface mechanical models (RTX 3070 Ti 8GB can't run the better 12-16GB models). **Decision: rely on import + templates; AI-gen is parked, restartable.** The "AI Generate" button still works for rough/simple subjects.
+
+**Conventions / gotchas learned:**
+- Saved units → `units/player/`. Mesh files → `units/meshes/` (keep them put; `mesh_asset` stores the path). Stock units → `units/starter/`.
+- **HMR rule**: new UI (buttons/fields) hot-reloads instantly, but **battlefield-preview *behavior* changes (rotation/rig/pitch) need a Ctrl+R** (the 3D scene + animation live in long-lived refs). After many edits, Ctrl+R also clears HMR rot (caused a couple of blank-screen scares — always a fresh reload fixes it).
+- Smoke tests (no test runner yet): `editor-app/scripts/smoke-*.mts` via `npx tsx` — validate (24 archetypes), voxelize (9 templates), material-ops.
+- Editing-on-live-window workflow: dispatch focused agents, `tsc --noEmit` gate every commit, commit+push each slice.
+
+**NEXT TASK: projectiles (rigging slice 3).** Per `docs/editor-app.md` v0.3 plan:
+- Each shell/missile/beam = its own JSON Schematic with **physical inputs only** (mass, muzzle velocity, warhead type, energy draw) — engine derives KE / penetration / blast / heat (Principle 2). `PhysicsConstitution.cs` in `unity-game/` already has the kinetic equations.
+- Recoil ties back to the rigged turret (force = shell mass × muzzle velocity) — the rig layer from this session is the hook.
+- **Cluster munitions**: parent-child Schematic tree (split trigger: altitude/proximity/timer; spread pattern; child Schematic; recursive).
+- Likely needs: a `projectile.schema.json`, projectile authoring UI (probably a new section or a small sub-editor), and links from weapon parts → projectile schematic id.
+- Also pending (not blocking): rigging slice 2 (active states: idle/firing/reloading + recoil kick); wiring saved units into the Unity project (`unity-game/` has the scripts: SchematicLoader, UnitController, RTSCamera, fog-of-war, towers, walls — needs a Unity 6 project created via Hub + the 14 scripts dropped in).
+
+---
+
 ## Read this in 30 seconds
 
 A post-apocalyptic mobile RTS called **Child of Light**. Data-driven engine: every game rule is a JSON Schematic the engine reads at runtime. **Premium model** ($2.99 paid game after a free demo, ongoing diegetic-ad revenue, V2+ creator marketplace) — explicitly anti-pay-to-win. **Top-down 3D rendering in the Total Annihilation style** committed. **Three working browser tools** still live in `tools/`, but the project has moved past them: a complete **v0.1 Tauri 2 + React 19 + TypeScript desktop editor** now exists in `editor-app/` (roughly 12,000-15,000 lines of new source code, `tsc --noEmit` exits 0). Four new docs landed: `docs/editor-app-tauri-brief.md`, `docs/editor-app-tauri-lift-map.md`, `docs/overnight-build-log.md`, `docs/morning-runbook.md`. The user is about to follow the morning runbook (install Rust + MSVC Build Tools, `npm install`, `npm run tauri dev`, smoke-test the editor). That is **the next thing to do** when this session opens.
