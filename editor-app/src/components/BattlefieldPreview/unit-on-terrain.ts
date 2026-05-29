@@ -406,7 +406,11 @@ export function createUnitOnTerrain(
     tickRig(dt: number) {
       if (rigAnimators.length === 0) return; // no-op when nothing is rigged
       const up = new THREE.Vector3(0, 1, 0);
-      const lateral = new THREE.Vector3(1, 0, 0);
+      // Lateral is -X so that POSITIVE pitch elevates the barrel (up) — the
+      // intuitive convention. Pitch direction is ultimately model-dependent
+      // (barrels are authored facing different ways); a model that elevates
+      // the wrong way can be corrected with a negative pitch range.
+      const lateral = new THREE.Vector3(-1, 0, 0);
       for (const a of rigAnimators) {
         if (a.yaw) {
           a.yawAngle += a.yawDir * a.yaw.rateDps * dt;
