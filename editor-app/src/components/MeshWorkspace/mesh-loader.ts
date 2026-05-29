@@ -1,10 +1,11 @@
 /**
  * Mesh loading utilities for the Mesh Workspace viewer.
  *
- * Supports GLB / GLTF (Three.js GLTFLoader) and OBJ (OBJLoader). Files are
- * read through the Rust backend (read_unit_file for text, read_binary_file
- * for binary) rather than fetched by URL — a Tauri webview cannot fetch a
- * raw OS path, and dialog-picked paths are outside the fs-plugin scope.
+ * Supports GLB / GLTF (GLTFLoader), OBJ (OBJLoader), and STL (STLLoader —
+ * the format most wargaming / 3D-print models ship as). Files are read
+ * through the Rust backend (read_unit_file for text, read_binary_file for
+ * binary) rather than fetched by URL — a Tauri webview cannot fetch a raw
+ * OS path, and dialog-picked paths are outside the fs-plugin scope.
  *
  * Every entry point centres and normalises the returned group so any mesh
  * fits comfortably in the viewer (max dimension ≈ 8 units) and has vertex
@@ -15,6 +16,7 @@ import * as THREE from "three";
 import { invoke } from "@tauri-apps/api/core";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
+import { STLLoader } from "three/addons/loaders/STLLoader.js";
 
 // ---------------------------------------------------------------------------
 // Internal helpers.
@@ -74,6 +76,24 @@ export function loadObjFromText(text: string): THREE.Group {
 }
 
 /**
+ * Parse an STL ArrayBuffer (binary OR ASCII — STLLoader auto-detects) into a
+ * normalised group. STL is geometry-only with no materials, so we wrap it in
+ * a single mesh with a neutral default material; the user paints/skins it.
+ */
+export function loadStlFromBuffer(buffer: ArrayBuffer): THREE.Group {
+  const geom = new STLLoader().parse(buffer);
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xb5b5b5,
+    roughness: 0.75,
+    metalness: 0.1,
+  });
+  const mesh = new THREE.Mesh(geom, material);
+  const group = new THREE.Group();
+  group.add(mesh);
+  return normaliseGroup(group);
+}
+
+/**
  * Load a mesh from a raw ArrayBuffer (GLB, or self-contained GLTF).
  * Returns the root Group, centred and normalised to max 8 units.
  */
@@ -92,7 +112,7 @@ export async function loadGlbFromBuffer(buffer: ArrayBuffer): Promise<THREE.Grou
 // ---------------------------------------------------------------------------
 
 /** Supported import extensions. */
-export const SUPPORTED_MESH_EXTENSIONS = ["glb", "gltf", "obj"] as const;
+export const SUPPORTED_MESH_EXTENSIONS = ["glb", "gltf", "obj", "stl"] as const;
 
 /**
  * Load any supported mesh from an absolute file-path. Reads the file through
@@ -117,6 +137,12 @@ export async function loadMeshFromPath(path: string): Promise<THREE.Group> {
     const bytes = await invoke<number[]>("read_binary_file", { path });
     const buffer = new Uint8Array(bytes).buffer;
     return loadGlbFromBuffer(buffer);
+  }
+
+  if (ext === "stl") {
+    const bytes = await invoke<number[]>("read_binary_file", { path });
+    const buffer = new Uint8Array(bytes).buffer;
+    return loadStlFromBuffer(buffer);
   }
 
   throw new Error(
