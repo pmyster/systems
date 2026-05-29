@@ -73,8 +73,9 @@ export function RigSection({ unit, onUnitChange }: RigSectionProps): ReactNode {
         id: `rig_${rig.length + 1}`,
         target_node: nodeNames[0] ?? "",
         motion: "reactive",
+        // Yaw-only by default = a clean turret traverse. Add pitch explicitly
+        // for a barrel/elevation part (the pitch fields seed from DEFAULT_PITCH).
         yaw: { ...DEFAULT_YAW },
-        pitch: { ...DEFAULT_PITCH },
       },
     ]);
   }

@@ -55,6 +55,14 @@ interface RigAnimator {
   readonly node: THREE.Object3D;
   /** Node's local quaternion at mount time — the rest pose to compose against. */
   readonly baseQuat: THREE.Quaternion;
+  /** Node's local position at mount time (parent space) — the orbit start point. */
+  readonly basePos: THREE.Vector3;
+  /**
+   * Pivot the node rotates about, in PARENT-local space (the node's bbox
+   * centre by default). Rotating about this instead of the node's local
+   * origin keeps the part spinning in place rather than orbiting (0,0,0).
+   */
+  readonly pivot: THREE.Vector3;
   readonly yaw: { readonly minDeg: number; readonly maxDeg: number; readonly rateDps: number } | null;
   readonly pitch: { readonly minDeg: number; readonly maxDeg: number; readonly rateDps: number } | null;
   /** Current sweep angles (deg) + travel direction (+1/-1). */
@@ -315,9 +323,22 @@ export function createUnitOnTerrain(
               }
             : null;
 
+        // Pivot = the node's bounding-box centre, expressed in its PARENT's
+        // local space (same space as node.position). Rotating about this keeps
+        // the part spinning in place instead of orbiting the model origin.
+        const worldCentre = new THREE.Box3()
+          .setFromObject(targetNode)
+          .getCenter(new THREE.Vector3());
+        const pivotLocal =
+          targetNode.parent !== null
+            ? targetNode.parent.worldToLocal(worldCentre.clone())
+            : worldCentre.clone();
+
         rigAnimators.push({
           node: targetNode,
           baseQuat: targetNode.quaternion.clone(),
+          basePos: targetNode.position.clone(),
+          pivot: pivotLocal,
           yaw: yawState,
           pitch: pitchState,
           yawAngle: yawState ? (yawState.minDeg + yawState.maxDeg) / 2 : 0,
@@ -358,10 +379,12 @@ export function createUnitOnTerrain(
             a.pitchDir = 1;
           }
         }
-        // Yaw pre-multiplied (parent-space turret traverse), pitch
-        // post-multiplied (local-space barrel elevation), composed on the
-        // captured rest pose.
-        const q = a.baseQuat.clone();
+        // Build the combined rotation in PARENT space (yaw about up, pitch
+        // about lateral), then RIGIDLY rotate the node about its pivot:
+        //   newPos  = pivot + rot · (basePos − pivot)
+        //   newQuat = rot · baseQuat
+        // Rotating the position too (not just the orientation) is what keeps
+        // the part spinning in place instead of orbiting the model origin.
         const yawQ = new THREE.Quaternion().setFromAxisAngle(
           up,
           THREE.MathUtils.degToRad(a.yawAngle),
@@ -370,7 +393,10 @@ export function createUnitOnTerrain(
           lateral,
           THREE.MathUtils.degToRad(a.pitchAngle),
         );
-        a.node.quaternion.copy(yawQ).multiply(q).multiply(pitchQ);
+        const rot = yawQ.clone().multiply(pitchQ);
+        const offset = a.basePos.clone().sub(a.pivot).applyQuaternion(rot);
+        a.node.position.copy(a.pivot).add(offset);
+        a.node.quaternion.copy(rot).multiply(a.baseQuat);
       }
     },
     dispose() {
