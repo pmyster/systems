@@ -18,6 +18,34 @@
 import * as THREE from "three";
 
 // ---------------------------------------------------------------------------
+// Deep clone.
+// ---------------------------------------------------------------------------
+
+/**
+ * Deep-clone a group so the copy owns independent geometry + materials.
+ * Required when displaying the same source mesh in a second scene — a
+ * shallow clone(true) shares GPU resources and breaks on dispose.
+ */
+export function deepCloneGroup(group: THREE.Group): THREE.Group {
+  const clone = group.clone(true);
+  clone.traverse((node) => {
+    if (node instanceof THREE.Mesh) {
+      node.geometry = node.geometry.clone();
+      node.material = Array.isArray(node.material)
+        ? node.material.map((m) => m.clone())
+        : node.material.clone();
+      // THREE's clone() serialises userData via JSON — a saved
+      // __origMaterial (a Material reference) becomes a non-Material JSON
+      // blob. Restoring/disposing that blob later throws. The clone manages
+      // its own skin lifecycle, so drop the stale bookkeeping entirely.
+      const ud = node.userData as { __origMaterial?: unknown };
+      if ("__origMaterial" in ud) delete ud.__origMaterial;
+    }
+  });
+  return clone;
+}
+
+// ---------------------------------------------------------------------------
 // Material factory.
 // ---------------------------------------------------------------------------
 
@@ -181,17 +209,31 @@ export function applySkin(
     if (!(node instanceof THREE.Mesh)) return;
     const mesh = node;
 
-    // Skip meshes already wearing a skin (idempotent re-apply guard).
     const current = mesh.material;
     const currentIsSkin = Array.isArray(current)
       ? current.every(isSkinMaterial)
       : isSkinMaterial(current);
-    if (currentIsSkin) return;
 
-    // Preserve the original material so removeSkin can restore it.
-    mesh.userData.__origMaterial = current;
-
+    // Base tint survives whether `current` is an original material or a
+    // prior skin (both are MeshStandardMaterial carrying the colour).
     const baseColor = readBaseColor(current);
+
+    if (currentIsSkin) {
+      // This mesh is ALREADY wearing a skin — typically a clone of an
+      // already-skinned master. That stale skin's projection box was
+      // computed for the master's world position (e.g. the origin), so it
+      // would sample the wrong region once this group sits elsewhere (the
+      // battlefield slot at map-centre). Dispose the stale skin and build a
+      // fresh one for THIS group's world box. Do NOT overwrite any real
+      // original already saved in __origMaterial.
+      const stale = Array.isArray(current) ? current : [current];
+      for (const m of stale) m.dispose();
+    } else {
+      // First skin on a pristine mesh — preserve the true original so
+      // removeSkin can restore it.
+      mesh.userData.__origMaterial = current;
+    }
+
     const skinMat = makeBoxProjectedMaterial(texture, boxMin, boxSize, {
       color: baseColor,
     });
@@ -212,12 +254,21 @@ export function removeSkin(
 ): void {
   // Restore every mesh that has a saved original material — defensive even
   // when `applied` is null (e.g. a stale skin lingering on the group).
+  const isDisposableMaterial = (m: unknown): m is THREE.Material =>
+    !!m && typeof (m as THREE.Material).dispose === "function";
+
   group.traverse((node: THREE.Object3D) => {
     if (!(node instanceof THREE.Mesh)) return;
     const mesh = node;
-    const ud = mesh.userData as { __origMaterial?: THREE.Material | THREE.Material[] };
+    const ud = mesh.userData as { __origMaterial?: unknown };
     if (ud.__origMaterial !== undefined) {
-      mesh.material = ud.__origMaterial;
+      const orig = ud.__origMaterial;
+      // Only restore a genuine Material. A hot-reload can serialise the saved
+      // reference into a plain JSON blob; restoring that would crash the next
+      // dispose. Drop the blob silently and leave the current material.
+      if (Array.isArray(orig) ? orig.every(isDisposableMaterial) : isDisposableMaterial(orig)) {
+        mesh.material = orig as THREE.Material | THREE.Material[];
+      }
       delete ud.__origMaterial;
     }
   });

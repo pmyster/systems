@@ -36,6 +36,18 @@ fn write_unit_file(path: String, contents: String) -> Result<(), String> {
     std::fs::write(&path, contents).map_err(|e| format!("Failed to write {path}: {e}"))
 }
 
+/// Read an arbitrary file from an absolute path as raw bytes.
+///
+/// Needed for binary mesh assets (GLB, and self-contained GLTF) the user
+/// imports via the native dialog. Same scope rationale as `read_unit_file`
+/// — we bypass `tauri-plugin-fs` so dialog-picked paths open without a
+/// whitelist. Returned as a byte vector; the JS side wraps it in a
+/// Uint8Array for the Three.js loaders.
+#[tauri::command]
+fn read_binary_file(path: String) -> Result<Vec<u8>, String> {
+    std::fs::read(&path).map_err(|e| format!("Failed to read {path}: {e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -44,7 +56,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             read_unit_file,
-            write_unit_file
+            write_unit_file,
+            read_binary_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

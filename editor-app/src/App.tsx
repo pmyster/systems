@@ -12,6 +12,7 @@ import {
   UnitStateProvider,
   useUnitState,
 } from "./state";
+import { MeshAssetProvider } from "./state/mesh-assets";
 import {
   selectIsDirty,
   selectUnit,
@@ -216,7 +217,9 @@ function AppShell() {
 function App() {
   return (
     <UnitStateProvider>
-      <AppShell />
+      <MeshAssetProvider>
+        <AppShell />
+      </MeshAssetProvider>
     </UnitStateProvider>
   );
 }

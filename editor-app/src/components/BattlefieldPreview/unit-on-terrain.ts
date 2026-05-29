@@ -25,9 +25,22 @@ import {
   buildUnitMesh,
   disposeUnitMesh,
 } from "../../lib";
+import {
+  applySkin,
+  deepCloneGroup,
+  removeSkin,
+  type AppliedSkin,
+} from "../MeshWorkspace/box-projection";
 import type { UnitSchematic } from "../../types";
 
 import type { TerrainHandle } from "./terrain";
+
+/**
+ * Target footprint (largest dimension, meters) for a mesh-first unit dropped
+ * on the battlefield. Mesh sources arrive in arbitrary units, so we normalise
+ * the largest bbox dimension to this size before anchoring.
+ */
+const TARGET_UNIT_SIZE_M = 8;
 
 /** Handle for the preview's "active unit" slot. */
 export interface UnitOnTerrainHandle {
@@ -38,10 +51,41 @@ export interface UnitOnTerrainHandle {
    * empty (no voxel data).
    */
   current: THREE.Group | null;
-  /** Replace the active unit. Disposes the previous mesh first. */
+  /** Replace the active unit (voxel fallback). Disposes the previous mount first. */
   setUnit(unit: UnitSchematic): void;
+  /**
+   * Mount a mesh-first unit: a deep clone of `meshSource` (independent
+   * geometry + materials), recentred + scaled + anchored on the terrain, and
+   * optionally wrapped with a box-projected `skinImage`. Passing a null
+   * `meshSource` clears the slot (terrain stays visible). Clears any prior
+   * mount (voxel or mesh) first — one slot, one visible thing.
+   */
+  setMeshUnit(meshSource: THREE.Group | null, skinImage: HTMLImageElement | null): void;
   /** Tear down all GPU resources owned by the slot. */
   dispose(): void;
+}
+
+/**
+ * Dispose all geometries + materials owned by a deep-cloned mesh group, then
+ * detach it from its parent. Only call on clones this module created — never
+ * on the master mesh owned by MeshWorkspace.
+ */
+function disposeMeshClone(clone: THREE.Group): void {
+  clone.traverse((node: THREE.Object3D) => {
+    if (!(node instanceof THREE.Mesh)) return;
+    if (node.geometry && typeof node.geometry.dispose === "function") {
+      node.geometry.dispose();
+    }
+    const mats = Array.isArray(node.material) ? node.material : [node.material];
+    for (const mat of mats) {
+      // Defensive: a material reference can be left in a non-disposable
+      // state (e.g. a userData blob restored after a hot-reload). Never let
+      // a bad material crash the whole teardown.
+      if (mat && typeof (mat as THREE.Material).dispose === "function") {
+        (mat as THREE.Material).dispose();
+      }
+    }
+  });
 }
 
 /**
@@ -72,15 +116,36 @@ export function createUnitOnTerrain(
   parent.position.copy(anchor);
   scene.add(parent);
 
+  // Mesh-first mode bookkeeping. At most one of `handle.current` (voxel) or
+  // `currentMeshClone` (mesh) is mounted at a time — clearMounted enforces it.
+  let currentMeshClone: THREE.Group | null = null;
+  let currentSkin: AppliedSkin | null = null;
+
+  /**
+   * Tear down whatever is currently mounted — voxel mesh OR mesh clone (+ its
+   * skin) — leaving the parent empty. The single teardown path used by
+   * setUnit, setMeshUnit, and dispose so no mode leaks across a swap.
+   */
+  function clearMounted(): void {
+    if (handle.current) {
+      parent.remove(handle.current);
+      disposeUnitMesh(handle.current);
+      handle.current = null;
+    }
+    if (currentMeshClone) {
+      removeSkin(currentMeshClone, currentSkin);
+      currentSkin = null;
+      parent.remove(currentMeshClone);
+      disposeMeshClone(currentMeshClone);
+      currentMeshClone = null;
+    }
+  }
+
   const handle: UnitOnTerrainHandle = {
     parent,
     current: null,
     setUnit(next: UnitSchematic) {
-      if (handle.current) {
-        parent.remove(handle.current);
-        disposeUnitMesh(handle.current);
-        handle.current = null;
-      }
+      clearMounted();
       const voxels = next.chassis.voxel_data;
       if (!voxels || voxels.voxels.length === 0) {
         // Empty unit: nothing to render. The terrain still shows so
@@ -102,12 +167,46 @@ export function createUnitOnTerrain(
       parent.add(mesh);
       handle.current = mesh;
     },
-    dispose() {
-      if (handle.current) {
-        parent.remove(handle.current);
-        disposeUnitMesh(handle.current);
-        handle.current = null;
+    setMeshUnit(meshSource: THREE.Group | null, skinImage: HTMLImageElement | null) {
+      clearMounted();
+      if (meshSource === null) {
+        // No mesh: leave the slot empty; terrain stays visible.
+        return;
       }
+
+      // Independent deep clone — the master mesh is parented to the left-pane
+      // scene and must never be re-parented or disposed from here.
+      const cloneGroup = deepCloneGroup(meshSource);
+
+      // Scale so the largest bbox dimension hits the target battlefield size.
+      const preBox = new THREE.Box3().setFromObject(cloneGroup);
+      const preSize = preBox.getSize(new THREE.Vector3());
+      const maxDim = Math.max(preSize.x, preSize.y, preSize.z);
+      const s = TARGET_UNIT_SIZE_M / Math.max(maxDim, 1e-4);
+      cloneGroup.scale.setScalar(s);
+
+      // Recompute the post-scale bbox, then offset so the group is centred on
+      // XZ and its base (min.y) rests at y=0 within the terrain-anchored parent.
+      const postBox = new THREE.Box3().setFromObject(cloneGroup);
+      const center = postBox.getCenter(new THREE.Vector3());
+      cloneGroup.position.x -= center.x;
+      cloneGroup.position.z -= center.z;
+      cloneGroup.position.y -= postBox.min.y;
+
+      // Parent FIRST, refresh world matrices, THEN skin. The box-projection
+      // shader samples by WORLD position, so applySkin's bounding box must be
+      // measured after the clone inherits the terrain anchor's offset (~map
+      // centre). Skinning before parenting measures the box at the origin, and
+      // the projection then slides off into edge-clamp streaks once the anchor
+      // shifts the mesh. (The left-pane MeshViewer is immune only because its
+      // mesh sits near the origin.)
+      parent.add(cloneGroup);
+      parent.updateMatrixWorld(true);
+      currentSkin = skinImage !== null ? applySkin(cloneGroup, skinImage) : null;
+      currentMeshClone = cloneGroup;
+    },
+    dispose() {
+      clearMounted();
       scene.remove(parent);
     },
   };

@@ -25,6 +25,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { useMeshAssets } from "../../state/mesh-assets";
 import type { UnitSchematic } from "../../types";
 
 import { attachControls, type ControlsHandle } from "./controls";
@@ -110,6 +111,16 @@ export function BattlefieldPreview({ unit }: BattlefieldPreviewProps): React.Rea
   // FPS is the only render-loop value surfaced to React state. Updating
   // it ~twice/sec is fine; the render loop itself never calls setState.
   const [fps, setFps] = useState<number>(0);
+
+  // Diagnostic — which path the preview rendered and whether a skin was
+  // attached. Surfaced in the HUD so rendering issues are visible without
+  // a debugger.
+  const [srcMode, setSrcMode] = useState<"mesh" | "voxel" | "empty">("empty");
+  const [skinOn, setSkinOn] = useState<boolean>(false);
+
+  // Mesh-first source + skin from the shared context. When a mesh is present
+  // the preview renders a deep clone of it; otherwise it falls back to voxels.
+  const { meshSource, skinImage } = useMeshAssets();
 
   // -------------------------------------------------------------------------
   // Mount: build scene + start render loop.
@@ -219,14 +230,22 @@ export function BattlefieldPreview({ unit }: BattlefieldPreviewProps): React.Rea
   }, []);
 
   // -------------------------------------------------------------------------
-  // Unit swap: rebuild only the unit mesh when the prop changes. Terrain
-  // and lights remain.
+  // Unit reconciliation: mesh-first when a mesh source exists (deep-cloned +
+  // skinned), voxel fallback otherwise. Terrain and lights remain.
   // -------------------------------------------------------------------------
   useEffect(() => {
     const slot = unitSlotRef.current;
     if (!slot) return;
-    slot.setUnit(unit);
-  }, [unit]);
+    if (meshSource) {
+      slot.setMeshUnit(meshSource, skinImage);
+      setSrcMode("mesh");
+      setSkinOn(skinImage !== null);
+    } else {
+      slot.setUnit(unit); // voxel fallback for mesh-less units
+      setSrcMode("voxel");
+      setSkinOn(false);
+    }
+  }, [unit, meshSource, skinImage]);
 
   // -------------------------------------------------------------------------
   // Render.
@@ -243,6 +262,14 @@ export function BattlefieldPreview({ unit }: BattlefieldPreviewProps): React.Rea
         <div style={hudRowStyle}>
           <span style={hudDimStyle}>UNIT</span>
           <span style={hudValueStyle}>{unit.name || unit.id || "—"}</span>
+        </div>
+        <div style={hudRowStyle}>
+          <span style={hudDimStyle}>SRC</span>
+          <span style={hudValueStyle}>{srcMode}</span>
+        </div>
+        <div style={hudRowStyle}>
+          <span style={hudDimStyle}>SKIN</span>
+          <span style={hudValueStyle}>{skinOn ? "on" : "off"}</span>
         </div>
       </div>
     </div>

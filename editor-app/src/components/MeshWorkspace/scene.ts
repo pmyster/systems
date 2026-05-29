@@ -62,10 +62,10 @@ export function createMeshScene(): MeshScene {
 
   // ----- Lighting (ambient + sun + rim) ------------------------------------
 
-  const ambient = new THREE.AmbientLight(0xb0b8c8, 0.5);
+  const ambient = new THREE.AmbientLight(0xc4ccda, 0.9);
   scene.add(ambient);
 
-  const sun = new THREE.DirectionalLight(0xfff0d8, 0.95);
+  const sun = new THREE.DirectionalLight(0xfff4e0, 1.8);
   sun.position.set(20, 30, 15);
   sun.castShadow = true;
   sun.shadow.mapSize.width = 1024;
@@ -78,7 +78,7 @@ export function createMeshScene(): MeshScene {
   sun.shadow.camera.bottom = -10;
   scene.add(sun);
 
-  const rim = new THREE.DirectionalLight(0x6b8eb3, 0.25);
+  const rim = new THREE.DirectionalLight(0x8aa6c8, 0.45);
   rim.position.set(-15, 10, -10);
   scene.add(rim);
 

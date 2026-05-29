@@ -27,8 +27,9 @@ import { open } from "@tauri-apps/plugin-dialog";
 
 import { TEMPLATES } from "../../lib/templates";
 import { voxelizeMesh } from "../../lib/voxelizer";
+import { useMeshAssets } from "../../state/mesh-assets";
 import type { MaterialId, MutableVoxelMap } from "../../types/voxel";
-import { loadGlbFromPath } from "./mesh-loader";
+import { loadMeshFromPath, SUPPORTED_MESH_EXTENSIONS } from "./mesh-loader";
 import { MaterialPainter } from "./MaterialPainter";
 import { MeshViewer } from "./MeshViewer";
 import { TemplateGallery } from "./TemplateGallery";
@@ -144,6 +145,12 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
   const [voxelizing, setVoxelizing] = useState(false);
   // Photo wrapped onto the mesh as a box-projected skin (null = no skin).
   const [skinImage, setSkinImage] = useState<HTMLImageElement | null>(null);
+  // Surfaced when an import fails — shown in the toolbar (loud, not silent).
+  const [importError, setImportError] = useState<string | null>(null);
+
+  // Publish mesh + skin to the shared context so the Battlefield Preview can
+  // render a deep-cloned copy. MeshViewer still owns/displays the master.
+  const { setMeshSource, setSkinImage: publishSkin } = useMeshAssets();
 
   // Keep a ref so the dispose effect can always reach the latest mesh.
   const currentMeshRef = useRef<THREE.Group | null>(null);
@@ -169,6 +176,14 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
     };
   }, []);
 
+  // Mirror local mesh + skin into the shared context for the preview pane.
+  useEffect(() => {
+    setMeshSource(currentMesh);
+  }, [currentMesh, setMeshSource]);
+  useEffect(() => {
+    publishSkin(skinImage);
+  }, [skinImage, publishSkin]);
+
   // -------------------------------------------------------------------------
   // Template selection.
   // -------------------------------------------------------------------------
@@ -190,19 +205,34 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
 
   const handleImport = async (): Promise<void> => {
     if (loading) return;
+    setImportError(null);
+    let picked: string | null = null;
     try {
-      const picked = await open({
-        filters: [{ name: "Mesh files", extensions: ["glb", "gltf", "obj"] }],
+      const result = await open({
+        filters: [
+          { name: "Mesh files", extensions: [...SUPPORTED_MESH_EXTENSIONS] },
+        ],
         multiple: false,
       });
-      if (typeof picked !== "string") return; // user cancelled or multiple selected unexpectedly
-      setLoading(true);
-      const group = await loadGlbFromPath(picked);
+      picked = typeof result === "string" ? result : null;
+    } catch {
+      // Dialog itself failed/cancelled — nothing to import.
+      return;
+    }
+    if (picked === null) return; // user cancelled
+
+    setLoading(true);
+    try {
+      const group = await loadMeshFromPath(picked);
       setSelectedTemplateId(null); // clear template selection — mesh is now from file
       setSkinImage(null); // skin belongs to the old mesh — don't carry it over
       setCurrentMesh(group);
-    } catch {
-      // Swallow — user cancelled or loader error; don't crash the pane.
+    } catch (err) {
+      // Surface the failure — never silently drop an import the user asked for.
+      const msg = err instanceof Error ? err.message : String(err);
+      setImportError(`Import failed: ${msg}`);
+      // eslint-disable-next-line no-console
+      console.error("[MeshWorkspace] import failed:", err);
     } finally {
       setLoading(false);
     }
@@ -395,6 +425,33 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
           onChange={handleSkinInputChange}
         />
       </div>
+
+      {/* Import error banner — surfaced, never silently dropped. */}
+      {importError !== null && (
+        <div
+          role="alert"
+          style={{
+            padding: "6px 10px",
+            background: "#3a1d1d",
+            borderTop: "1px solid #c0392b",
+            color: "#f0b8b8",
+            fontSize: 11,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <span>{importError}</span>
+          <button
+            type="button"
+            style={{ ...S.btn, padding: "2px 8px" }}
+            onClick={() => setImportError(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
     </div>
   );
 }
