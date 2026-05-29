@@ -14,7 +14,14 @@
  * MaterialPainter component.
  */
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type CSSProperties,
+} from "react";
 import * as THREE from "three";
 import { open } from "@tauri-apps/plugin-dialog";
 
@@ -135,9 +142,13 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
   const [showPainter, setShowPainter] = useState(false);
   const [loading, setLoading] = useState(false);
   const [voxelizing, setVoxelizing] = useState(false);
+  // Photo wrapped onto the mesh as a box-projected skin (null = no skin).
+  const [skinImage, setSkinImage] = useState<HTMLImageElement | null>(null);
 
   // Keep a ref so the dispose effect can always reach the latest mesh.
   const currentMeshRef = useRef<THREE.Group | null>(null);
+  // Hidden file input for the "Apply Skin" image picker.
+  const skinInputRef = useRef<HTMLInputElement | null>(null);
 
   // Dispose the OLD mesh whenever currentMesh changes, then update the ref.
   useEffect(() => {
@@ -167,6 +178,7 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
     if (!tpl) return;
 
     setSelectedTemplateId(id);
+    setSkinImage(null); // skin belongs to the old mesh — don't carry it over
     // buildGeometry() returns a fresh Group each call.
     const newGroup = tpl.buildGeometry();
     setCurrentMesh(newGroup);
@@ -187,6 +199,7 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
       setLoading(true);
       const group = await loadGlbFromPath(picked);
       setSelectedTemplateId(null); // clear template selection — mesh is now from file
+      setSkinImage(null); // skin belongs to the old mesh — don't carry it over
       setCurrentMesh(group);
     } catch {
       // Swallow — user cancelled or loader error; don't crash the pane.
@@ -227,6 +240,42 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
   };
 
   // -------------------------------------------------------------------------
+  // Apply / Remove Skin (box-projected photo wrap).
+  // -------------------------------------------------------------------------
+
+  const handleSkinClick = useCallback((): void => {
+    if (skinImage !== null) {
+      // Already skinned → this button is "Remove Skin".
+      setSkinImage(null);
+      return;
+    }
+    skinInputRef.current?.click();
+  }, [skinImage]);
+
+  const handleSkinFile = useCallback((file: File): void => {
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const dataUrl = evt.target?.result;
+      if (typeof dataUrl !== "string") return;
+      const img = new Image();
+      img.onload = () => {
+        setSkinImage(img);
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const handleSkinInputChange = useCallback(
+    (e: ChangeEvent<HTMLInputElement>): void => {
+      const file = e.target.files?.[0];
+      if (file) handleSkinFile(file);
+      e.target.value = ""; // allow re-picking the same file
+    },
+    [handleSkinFile],
+  );
+
+  // -------------------------------------------------------------------------
   // Derived flags.
   // -------------------------------------------------------------------------
 
@@ -250,7 +299,7 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
 
       {/* 3D viewer — grows to fill available space */}
       <div style={S.viewerWrapper}>
-        <MeshViewer mesh={currentMesh} />
+        <MeshViewer mesh={currentMesh} skinImage={skinImage} />
 
         {/* MaterialPainter overlay */}
         {showPainter && (
@@ -319,6 +368,32 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
         >
           Paint Materials
         </button>
+
+        {/* 5. Apply / Remove Skin (box-projected photo wrap) */}
+        <button
+          type="button"
+          style={{ ...S.btn, ...(!hasMesh ? S.btnDisabled : undefined) }}
+          disabled={!hasMesh}
+          onClick={handleSkinClick}
+          title={
+            hasMesh
+              ? skinImage !== null
+                ? "Remove the projected photo skin"
+                : "Wrap a photo onto the mesh (box projection)"
+              : "Load a mesh first"
+          }
+        >
+          {skinImage !== null ? "Remove Skin" : "Apply Skin"}
+        </button>
+
+        {/* Hidden picker for the skin image. */}
+        <input
+          ref={skinInputRef}
+          type="file"
+          accept=".jpg,.jpeg,.png,.webp"
+          style={{ display: "none" }}
+          onChange={handleSkinInputChange}
+        />
       </div>
     </div>
   );

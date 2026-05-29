@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 
+import { applySkin, removeSkin, type AppliedSkin } from "./box-projection";
 import {
   applyOrbit,
   clampDistance,
@@ -30,6 +31,12 @@ import { createMeshScene, type MeshScene } from "./scene";
 export interface MeshViewerProps {
   /** The current mesh to display. null = empty scene with prompt overlay. */
   mesh: THREE.Group | null;
+  /**
+   * Optional photo to wrap onto the mesh as a box-projected skin. When set
+   * (and a mesh is present) it projects onto every sub-mesh; clearing it (or
+   * swapping the mesh) restores the original materials. null = no skin.
+   */
+  skinImage?: HTMLImageElement | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -69,7 +76,7 @@ const styles = {
 // Component.
 // ---------------------------------------------------------------------------
 
-export function MeshViewer({ mesh }: MeshViewerProps) {
+export function MeshViewer({ mesh, skinImage = null }: MeshViewerProps) {
   // The div the renderer canvas is mounted inside.
   const containerRef = useRef<HTMLDivElement | null>(null);
   // Three.js scene bundle (created on mount, disposed on unmount).
@@ -78,6 +85,9 @@ export function MeshViewer({ mesh }: MeshViewerProps) {
   const orbitRef = useRef(createOrbitState());
   // Ref tracking the most-recently-added mesh so we can remove it.
   const prevMeshRef = useRef<THREE.Group | null>(null);
+  // Handle to the currently-applied box-projection skin (texture + materials)
+  // so we can dispose its GPU resources and restore originals on change.
+  const skinRef = useRef<AppliedSkin | null>(null);
   // Canvas state drives the render-loop and resize-observer effects.
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
 
@@ -94,6 +104,11 @@ export function MeshViewer({ mesh }: MeshViewerProps) {
     applyOrbit(sceneBundle.camera, orbitRef.current);
 
     return () => {
+      // Dispose any applied skin before tearing the scene down (no GPU leak).
+      if (prevMeshRef.current && skinRef.current) {
+        removeSkin(prevMeshRef.current, skinRef.current);
+      }
+      skinRef.current = null;
       if (sceneBundle.renderer.domElement.parentNode === container) {
         container.removeChild(sceneBundle.renderer.domElement);
       }
@@ -110,8 +125,13 @@ export function MeshViewer({ mesh }: MeshViewerProps) {
     const sceneBundle = sceneRef.current;
     if (!sceneBundle) return;
 
-    // Remove previous mesh.
+    // Remove previous mesh — first strip any skin so its texture/materials
+    // are disposed and the original materials restored.
     if (prevMeshRef.current) {
+      if (skinRef.current) {
+        removeSkin(prevMeshRef.current, skinRef.current);
+        skinRef.current = null;
+      }
       sceneBundle.meshGroup.remove(prevMeshRef.current);
       prevMeshRef.current = null;
     }
@@ -122,6 +142,29 @@ export function MeshViewer({ mesh }: MeshViewerProps) {
       prevMeshRef.current = mesh;
     }
   }, [mesh]);
+
+  // ----- Sync skinImage prop → box-projection skin -------------------------
+
+  useEffect(() => {
+    // Apply to the SAME group instance MeshViewer added to its scene.
+    const group = prevMeshRef.current;
+    if (!group) return undefined;
+
+    if (skinImage) {
+      // Replace any prior skin first (defensive — normally already null).
+      if (skinRef.current) {
+        removeSkin(group, skinRef.current);
+      }
+      skinRef.current = applySkin(group, skinImage);
+    }
+
+    return () => {
+      if (skinRef.current) {
+        removeSkin(group, skinRef.current);
+        skinRef.current = null;
+      }
+    };
+  }, [mesh, skinImage]);
 
   // ----- Render loop (rAF, paused while hidden) ----------------------------
 
