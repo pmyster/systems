@@ -122,6 +122,7 @@ export interface RigAxisConstraint {
   readonly min_deg: number;
   readonly max_deg: number;
   readonly rate_dps?: number;
+  readonly invert?: boolean;
 }
 
 export interface RigEntry {

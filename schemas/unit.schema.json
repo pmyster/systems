@@ -218,7 +218,8 @@
             "properties": {
               "min_deg": { "type": "number" },
               "max_deg": { "type": "number" },
-              "rate_dps": { "type": "number", "minimum": 0, "description": "Traverse speed in degrees/second." }
+              "rate_dps": { "type": "number", "minimum": 0, "description": "Traverse speed in degrees/second." },
+              "invert": { "type": "boolean", "description": "Reverse the rotation direction for this axis (for models authored facing the opposite way)." }
             }
           },
           "pitch": {
@@ -227,7 +228,8 @@
             "properties": {
               "min_deg": { "type": "number" },
               "max_deg": { "type": "number" },
-              "rate_dps": { "type": "number", "minimum": 0 }
+              "rate_dps": { "type": "number", "minimum": 0 },
+              "invert": { "type": "boolean", "description": "Reverse the rotation direction for this axis (for models authored facing the opposite way)." }
             }
           },
           "parent_rig": {

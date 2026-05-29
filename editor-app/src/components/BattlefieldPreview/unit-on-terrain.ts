@@ -63,8 +63,18 @@ interface RigAnimator {
    * origin keeps the part spinning in place rather than orbiting (0,0,0).
    */
   readonly pivot: THREE.Vector3;
-  readonly yaw: { readonly minDeg: number; readonly maxDeg: number; readonly rateDps: number } | null;
-  readonly pitch: { readonly minDeg: number; readonly maxDeg: number; readonly rateDps: number } | null;
+  readonly yaw: {
+    readonly minDeg: number;
+    readonly maxDeg: number;
+    readonly rateDps: number;
+    readonly invert: boolean;
+  } | null;
+  readonly pitch: {
+    readonly minDeg: number;
+    readonly maxDeg: number;
+    readonly rateDps: number;
+    readonly invert: boolean;
+  } | null;
   /** Current sweep angles (deg) + travel direction (+1/-1). */
   yawAngle: number;
   yawDir: number;
@@ -348,6 +358,7 @@ export function createUnitOnTerrain(
                 minDeg: entry.yaw.min_deg,
                 maxDeg: entry.yaw.max_deg,
                 rateDps: entry.yaw.rate_dps ?? DEFAULT_YAW_RATE_DPS,
+                invert: entry.yaw.invert ?? false,
               }
             : null;
         const pitchState =
@@ -356,6 +367,7 @@ export function createUnitOnTerrain(
                 minDeg: entry.pitch.min_deg,
                 maxDeg: entry.pitch.max_deg,
                 rateDps: entry.pitch.rate_dps ?? DEFAULT_PITCH_RATE_DPS,
+                invert: entry.pitch.invert ?? false,
               }
             : null;
 
@@ -438,13 +450,20 @@ export function createUnitOnTerrain(
         //   newQuat = rot · baseQuat
         // Rotating the position too (not just the orientation) is what keeps
         // the part spinning in place instead of orbiting the model origin.
+        // The ping-pong above sweeps yawAngle/pitchAngle through the authored
+        // positive ranges; `invert` flips the SIGN of the angle fed into the
+        // rotation so a model authored facing the opposite way reverses without
+        // needing negative ranges. Layered on top of the lateral = (-1,0,0)
+        // convention, never replacing it.
+        const yawSign = a.yaw?.invert ? -1 : 1;
+        const pitchSign = a.pitch?.invert ? -1 : 1;
         const yawQ = new THREE.Quaternion().setFromAxisAngle(
           up,
-          THREE.MathUtils.degToRad(a.yawAngle),
+          THREE.MathUtils.degToRad(a.yawAngle * yawSign),
         );
         const pitchQ = new THREE.Quaternion().setFromAxisAngle(
           lateral,
-          THREE.MathUtils.degToRad(a.pitchAngle),
+          THREE.MathUtils.degToRad(a.pitchAngle * pitchSign),
         );
         const rot = yawQ.clone().multiply(pitchQ);
         const offset = a.basePos.clone().sub(a.pivot).applyQuaternion(rot);

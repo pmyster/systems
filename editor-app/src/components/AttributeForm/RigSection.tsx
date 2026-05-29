@@ -87,7 +87,7 @@ export function RigSection({ unit, onUnitChange }: RigSectionProps): ReactNode {
   function patchAxis(
     index: number,
     axis: "yaw" | "pitch",
-    field: keyof RigAxisConstraint,
+    field: "min_deg" | "max_deg" | "rate_dps",
     raw: string,
   ): void {
     const entry = rig[index];
@@ -103,6 +103,14 @@ export function RigSection({ unit, onUnitChange }: RigSectionProps): ReactNode {
   function toggleAxis(index: number, axis: "yaw" | "pitch", enabled: boolean): void {
     const seed = axis === "yaw" ? DEFAULT_YAW : DEFAULT_PITCH;
     update(patchEntry(rig, index, { [axis]: enabled ? { ...seed } : undefined }));
+  }
+
+  /** Set an axis's `invert` flag immutably, seeding the axis from its default when absent. */
+  function setAxisInvert(index: number, axis: "yaw" | "pitch", invert: boolean): void {
+    const entry = rig[index];
+    if (!entry) return;
+    const current = entry[axis] ?? (axis === "yaw" ? DEFAULT_YAW : DEFAULT_PITCH);
+    update(patchEntry(rig, index, { [axis]: { ...current, invert } }));
   }
 
   /** Set (or clear) a rig's parent_rig immutably. */
@@ -216,6 +224,17 @@ export function RigSection({ unit, onUnitChange }: RigSectionProps): ReactNode {
                           value={entry.yaw.rate_dps ?? 0}
                           onChange={(e) => patchAxis(i, "yaw", "rate_dps", e.target.value)}
                         />
+                        <label
+                          className={styles.label}
+                          style={{ display: "flex", alignItems: "center", gap: 4 }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={entry.yaw.invert === true}
+                            onChange={(e) => setAxisInvert(i, "yaw", e.target.checked)}
+                          />
+                          Invert
+                        </label>
                       </div>
                     )}
                   </div>
@@ -250,6 +269,17 @@ export function RigSection({ unit, onUnitChange }: RigSectionProps): ReactNode {
                           value={entry.pitch.rate_dps ?? 0}
                           onChange={(e) => patchAxis(i, "pitch", "rate_dps", e.target.value)}
                         />
+                        <label
+                          className={styles.label}
+                          style={{ display: "flex", alignItems: "center", gap: 4 }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={entry.pitch.invert === true}
+                            onChange={(e) => setAxisInvert(i, "pitch", e.target.checked)}
+                          />
+                          Invert
+                        </label>
                       </div>
                     )}
                   </div>

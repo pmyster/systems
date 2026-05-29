@@ -381,6 +381,7 @@ const rigAxisConstraintSchema = z.object({
   min_deg: z.number(),
   max_deg: z.number(),
   rate_dps: z.number().nonnegative().optional(),
+  invert: z.boolean().optional(),
 });
 
 const rigEntrySchema = z.object({
