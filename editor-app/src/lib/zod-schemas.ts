@@ -36,6 +36,7 @@ import type {
 } from "../types/part";
 import type {
   HardpointSlot,
+  RigEntry,
   UnitChassis,
   UnitCosts,
   UnitEvolution,
@@ -190,6 +191,8 @@ const materialIdSchema = z.enum([
   "engine",
   "hardpoint",
 ]);
+
+const rigMotionSchema = z.enum(["passive", "reactive", "active"]);
 
 const hardpointFacingSchema = z.enum(["x+", "x-", "y+", "y-", "z+", "z-"]);
 
@@ -370,6 +373,26 @@ const evolutionSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Rigging — moving-part definitions (yaw/pitch constraint arcs).
+// ---------------------------------------------------------------------------
+
+const rigAxisConstraintSchema = z.object({
+  min_deg: z.number(),
+  max_deg: z.number(),
+  rate_dps: z.number().nonnegative().optional(),
+});
+
+const rigEntrySchema = z.object({
+  id: z.string(),
+  target_node: z.string(),
+  motion: rigMotionSchema,
+  pivot: z.tuple([z.number(), z.number(), z.number()]).optional(),
+  yaw: rigAxisConstraintSchema.optional(),
+  pitch: rigAxisConstraintSchema.optional(),
+  parent_rig: z.string().optional(),
+});
+
+// ---------------------------------------------------------------------------
 // Top-level Unit Schematic.
 // ---------------------------------------------------------------------------
 
@@ -388,6 +411,7 @@ export const UnitSchematicSchema = z.object({
   tech_requirements: z.array(z.string()).optional(),
   evolution: z.array(evolutionSchema).optional(),
   tags: z.array(z.string()).optional(),
+  rig: z.array(rigEntrySchema).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -433,6 +457,7 @@ type _AssertUnit = z.infer<typeof UnitSchematicSchema> extends UnitSchematic ? t
 type _AssertGrid = z.infer<typeof VoxelGridSchema> extends VoxelGrid ? true : never;
 type _AssertHardpoint = z.infer<typeof hardpointSchema> extends Hardpoint ? true : never;
 type _AssertHardpointSlot = z.infer<typeof hardpointSlotSchema> extends HardpointSlot ? true : never;
+type _AssertRigEntry = z.infer<typeof rigEntrySchema> extends RigEntry ? true : never;
 type _AssertVoxelMaterial = z.infer<typeof voxelMaterialSpecSchema> extends VoxelMaterialSpec
   ? true
   : never;
@@ -453,6 +478,7 @@ type _SyncChecks = [
   _AssertGrid,
   _AssertHardpoint,
   _AssertHardpointSlot,
+  _AssertRigEntry,
   _AssertVoxelMaterial,
 ];
 export type __EditorSchemaSyncChecks = _SyncChecks;

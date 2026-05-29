@@ -25,6 +25,7 @@ import type {
   EnergySource,
   Faction,
   HardpointSlotType,
+  RigMotion,
   StructureType,
   UnitRole,
 } from "../types/unit";
@@ -122,6 +123,10 @@ export const STRUCTURE_TYPES: readonly StructureType[] = [
 export const HARDPOINT_SLOT_TYPES: readonly HardpointSlotType[] = [
   "heavy_gun", "light_gun", "missile", "flak", "aux", "shield", "sensor", "gate",
 ] as const satisfies readonly HardpointSlotType[];
+
+export const RIG_MOTIONS: readonly RigMotion[] = [
+  "passive", "reactive", "active",
+] as const satisfies readonly RigMotion[];
 
 // ---------------------------------------------------------------------------
 // Part-level enums.

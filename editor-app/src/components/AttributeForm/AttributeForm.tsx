@@ -38,6 +38,7 @@ import { DerivedStatsPanel } from "./DerivedStatsPanel";
 import { HardpointSection } from "./HardpointSection";
 import { MetaSection } from "./MetaSection";
 import { PartsSection } from "./PartsSection";
+import { RigSection } from "./RigSection";
 import { ValidationPanel } from "./ValidationPanel";
 import styles from "./AttributeForm.module.css";
 
@@ -58,6 +59,7 @@ export function AttributeForm(props: AttributeFormProps): ReactNode {
       <MetaSection unit={unit} onUnitChange={onUnitChange} />
       <ChassisSection unit={unit} onUnitChange={onUnitChange} />
       <HardpointSection unit={unit} onUnitChange={onUnitChange} />
+      <RigSection unit={unit} onUnitChange={onUnitChange} />
       <PartsSection unit={unit} onUnitChange={onUnitChange} />
       <CostsSection unit={unit} onUnitChange={onUnitChange} />
       <DerivedStatsPanel unit={unit} />

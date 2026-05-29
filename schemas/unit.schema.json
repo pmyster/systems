@@ -176,6 +176,57 @@
       "items": { "type": "string" },
       "description": "Free-form tags for searching/categorizing."
     },
+    "rig": {
+      "type": "array",
+      "description": "Moving-part definitions. Each entry rigs a named mesh node for motion: passive (auto-spin/roll), reactive (aim within yaw/pitch constraint arcs), or active (animation state machine). Recoil is derived from weapon physics, never authored here.",
+      "items": {
+        "type": "object",
+        "required": ["id", "target_node", "motion"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique rig id within the unit (e.g. 'main_turret', 'barrel')."
+          },
+          "target_node": {
+            "type": "string",
+            "description": "Name of the mesh node / sub-object this rig moves."
+          },
+          "motion": {
+            "type": "string",
+            "enum": ["passive", "reactive", "active"]
+          },
+          "pivot": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "Local pivot point [x,y,z] the node rotates about. Defaults to the node's bounding-box centre when omitted."
+          },
+          "yaw": {
+            "type": "object",
+            "description": "Horizontal traverse constraint (rotation about the up axis).",
+            "properties": {
+              "min_deg": { "type": "number" },
+              "max_deg": { "type": "number" },
+              "rate_dps": { "type": "number", "minimum": 0, "description": "Traverse speed in degrees/second." }
+            }
+          },
+          "pitch": {
+            "type": "object",
+            "description": "Vertical elevation constraint (barrel up/down).",
+            "properties": {
+              "min_deg": { "type": "number" },
+              "max_deg": { "type": "number" },
+              "rate_dps": { "type": "number", "minimum": 0 }
+            }
+          },
+          "parent_rig": {
+            "type": "string",
+            "description": "Optional id of a parent rig whose motion this one composes onto (e.g. a barrel's parent_rig is the turret)."
+          }
+        }
+      }
+    },
     "role": {
       "type": "string",
       "enum": [

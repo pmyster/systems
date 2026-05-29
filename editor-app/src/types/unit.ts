@@ -108,6 +108,33 @@ export type UnitRole =
   | "elite";
 
 // ---------------------------------------------------------------------------
+// Rigging — moving-part definitions (turrets, barrels, etc.).
+//
+// A rig binds a named mesh node to a motion mode. `reactive` rigs aim within
+// the yaw/pitch constraint arcs; `passive` rigs auto-spin/roll; `active` rigs
+// drive an animation state machine. Recoil is derived from weapon physics —
+// never authored here.
+// ---------------------------------------------------------------------------
+
+export type RigMotion = "passive" | "reactive" | "active";
+
+export interface RigAxisConstraint {
+  readonly min_deg: number;
+  readonly max_deg: number;
+  readonly rate_dps?: number;
+}
+
+export interface RigEntry {
+  readonly id: string;
+  readonly target_node: string;
+  readonly motion: RigMotion;
+  readonly pivot?: readonly [number, number, number];
+  readonly yaw?: RigAxisConstraint;
+  readonly pitch?: RigAxisConstraint;
+  readonly parent_rig?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Chassis — the body of the unit. Physical inputs only.
 // ---------------------------------------------------------------------------
 
@@ -205,6 +232,7 @@ export interface UnitSchematic extends UnitMeta {
   readonly tech_requirements?: readonly string[];
   readonly evolution?: readonly UnitEvolution[];
   readonly tags?: readonly string[];
+  readonly rig?: readonly RigEntry[];
   readonly role?: UnitRole;
 }
 

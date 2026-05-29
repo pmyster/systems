@@ -31,7 +31,7 @@ import {
   removeSkin,
   type AppliedSkin,
 } from "../MeshWorkspace/box-projection";
-import type { UnitSchematic } from "../../types";
+import type { RigEntry, UnitSchematic } from "../../types";
 
 import type { TerrainHandle } from "./terrain";
 
@@ -41,6 +41,59 @@ import type { TerrainHandle } from "./terrain";
  * the largest bbox dimension to this size before anchoring.
  */
 const TARGET_UNIT_SIZE_M = 8;
+
+/** Default sweep rate (deg/s) when a reactive rig omits `rate_dps`. */
+const DEFAULT_YAW_RATE_DPS = 30;
+const DEFAULT_PITCH_RATE_DPS = 15;
+
+/**
+ * Per-node animation state for a reactive rig. Drives a ping-pong sweep of the
+ * authored yaw/pitch arcs on the mesh clone, layered on top of the node's
+ * captured rest pose (`baseQuat`) so authoring offsets survive.
+ */
+interface RigAnimator {
+  readonly node: THREE.Object3D;
+  /** Node's local quaternion at mount time — the rest pose to compose against. */
+  readonly baseQuat: THREE.Quaternion;
+  readonly yaw: { readonly minDeg: number; readonly maxDeg: number; readonly rateDps: number } | null;
+  readonly pitch: { readonly minDeg: number; readonly maxDeg: number; readonly rateDps: number } | null;
+  /** Current sweep angles (deg) + travel direction (+1/-1). */
+  yawAngle: number;
+  yawDir: number;
+  pitchAngle: number;
+  pitchDir: number;
+}
+
+/**
+ * A flat translucent sector laid on the ground, centred at the unit footprint,
+ * spanning a reactive rig's yaw min→max so the operator can see the arc the
+ * turret sweeps. Added under the terrain-anchored parent (not the scaled
+ * clone) so it stays in true world units.
+ */
+function makeYawFan(minDeg: number, maxDeg: number, radius: number): THREE.Mesh {
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0);
+  const a0 = THREE.MathUtils.degToRad(minDeg);
+  const a1 = THREE.MathUtils.degToRad(maxDeg);
+  const seg = 32;
+  for (let i = 0; i <= seg; i++) {
+    const a = a0 + (a1 - a0) * (i / seg);
+    shape.lineTo(Math.cos(a) * radius, Math.sin(a) * radius);
+  }
+  shape.lineTo(0, 0);
+  const geo = new THREE.ShapeGeometry(shape);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xc9a55c,
+    transparent: true,
+    opacity: 0.18,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI / 2; // lay flat on the ground (XZ plane)
+  mesh.position.y = 0.05; // just above the terrain anchor
+  return mesh;
+}
 
 /** Handle for the preview's "active unit" slot. */
 export interface UnitOnTerrainHandle {
@@ -60,7 +113,13 @@ export interface UnitOnTerrainHandle {
    * `meshSource` clears the slot (terrain stays visible). Clears any prior
    * mount (voxel or mesh) first — one slot, one visible thing.
    */
-  setMeshUnit(meshSource: THREE.Group | null, skinImage: HTMLImageElement | null): void;
+  setMeshUnit(
+    meshSource: THREE.Group | null,
+    skinImage: HTMLImageElement | null,
+    rig: readonly RigEntry[],
+  ): void;
+  /** Advance rig animations (reactive yaw/pitch ping-pong). Call once per frame. */
+  tickRig(dt: number): void;
   /** Tear down all GPU resources owned by the slot. */
   dispose(): void;
 }
@@ -121,6 +180,12 @@ export function createUnitOnTerrain(
   let currentMeshClone: THREE.Group | null = null;
   let currentSkin: AppliedSkin | null = null;
 
+  // Reactive-rig animation state for the current mesh clone. Empty when the
+  // mounted unit has no reactive rigs (tickRig then no-ops). Yaw fans are
+  // tracked separately so they can be detached + GPU-disposed on a swap.
+  let rigAnimators: RigAnimator[] = [];
+  let yawFans: THREE.Mesh[] = [];
+
   /**
    * Tear down whatever is currently mounted — voxel mesh OR mesh clone (+ its
    * skin) — leaving the parent empty. The single teardown path used by
@@ -139,6 +204,15 @@ export function createUnitOnTerrain(
       disposeMeshClone(currentMeshClone);
       currentMeshClone = null;
     }
+    // Drop rig state and tear down any yaw fans (own geometry + material).
+    rigAnimators = [];
+    for (const fan of yawFans) {
+      parent.remove(fan);
+      fan.geometry.dispose();
+      const mats = Array.isArray(fan.material) ? fan.material : [fan.material];
+      for (const mat of mats) mat.dispose();
+    }
+    yawFans = [];
   }
 
   const handle: UnitOnTerrainHandle = {
@@ -167,7 +241,11 @@ export function createUnitOnTerrain(
       parent.add(mesh);
       handle.current = mesh;
     },
-    setMeshUnit(meshSource: THREE.Group | null, skinImage: HTMLImageElement | null) {
+    setMeshUnit(
+      meshSource: THREE.Group | null,
+      skinImage: HTMLImageElement | null,
+      rig: readonly RigEntry[],
+    ) {
       clearMounted();
       if (meshSource === null) {
         // No mesh: leave the slot empty; terrain stays visible.
@@ -204,6 +282,96 @@ export function createUnitOnTerrain(
       parent.updateMatrixWorld(true);
       currentSkin = skinImage !== null ? applySkin(cloneGroup, skinImage) : null;
       currentMeshClone = cloneGroup;
+
+      // Build reactive-rig animators + their ground fans. Reactive rigs sweep
+      // on their own; passive/active rigs are driven elsewhere (or not at all)
+      // and are intentionally skipped here.
+      const fanRadius = TARGET_UNIT_SIZE_M * 0.9;
+      for (const entry of rig) {
+        if (entry.motion !== "reactive") continue;
+        if (!entry.yaw && !entry.pitch) continue;
+
+        let node: THREE.Object3D | null = null;
+        cloneGroup.traverse((n: THREE.Object3D) => {
+          if (n.name === entry.target_node) node = n;
+        });
+        if (node === null) continue;
+        const targetNode: THREE.Object3D = node;
+
+        const yawState =
+          entry.yaw != null
+            ? {
+                minDeg: entry.yaw.min_deg,
+                maxDeg: entry.yaw.max_deg,
+                rateDps: entry.yaw.rate_dps ?? DEFAULT_YAW_RATE_DPS,
+              }
+            : null;
+        const pitchState =
+          entry.pitch != null
+            ? {
+                minDeg: entry.pitch.min_deg,
+                maxDeg: entry.pitch.max_deg,
+                rateDps: entry.pitch.rate_dps ?? DEFAULT_PITCH_RATE_DPS,
+              }
+            : null;
+
+        rigAnimators.push({
+          node: targetNode,
+          baseQuat: targetNode.quaternion.clone(),
+          yaw: yawState,
+          pitch: pitchState,
+          yawAngle: yawState ? (yawState.minDeg + yawState.maxDeg) / 2 : 0,
+          yawDir: 1,
+          pitchAngle: pitchState ? (pitchState.minDeg + pitchState.maxDeg) / 2 : 0,
+          pitchDir: 1,
+        });
+
+        if (yawState) {
+          const fan = makeYawFan(yawState.minDeg, yawState.maxDeg, fanRadius);
+          parent.add(fan);
+          yawFans.push(fan);
+        }
+      }
+    },
+    tickRig(dt: number) {
+      if (rigAnimators.length === 0) return; // no-op when nothing is rigged
+      const up = new THREE.Vector3(0, 1, 0);
+      const lateral = new THREE.Vector3(1, 0, 0);
+      for (const a of rigAnimators) {
+        if (a.yaw) {
+          a.yawAngle += a.yawDir * a.yaw.rateDps * dt;
+          if (a.yawAngle >= a.yaw.maxDeg) {
+            a.yawAngle = a.yaw.maxDeg;
+            a.yawDir = -1;
+          } else if (a.yawAngle <= a.yaw.minDeg) {
+            a.yawAngle = a.yaw.minDeg;
+            a.yawDir = 1;
+          }
+        }
+        if (a.pitch) {
+          a.pitchAngle += a.pitchDir * a.pitch.rateDps * dt;
+          if (a.pitchAngle >= a.pitch.maxDeg) {
+            a.pitchAngle = a.pitch.maxDeg;
+            a.pitchDir = -1;
+          } else if (a.pitchAngle <= a.pitch.minDeg) {
+            a.pitchAngle = a.pitch.minDeg;
+            a.pitchDir = 1;
+          }
+        }
+        // Yaw pre-multiplied (parent-space turret traverse), pitch
+        // post-multiplied (local-space barrel elevation), composed on the
+        // captured rest pose.
+        const q = a.baseQuat.clone();
+        const yawQ = new THREE.Quaternion().setFromAxisAngle(
+          up,
+          THREE.MathUtils.degToRad(a.yawAngle),
+        );
+        const pitchQ = new THREE.Quaternion().setFromAxisAngle(
+          lateral,
+          THREE.MathUtils.degToRad(a.pitchAngle),
+        );
+        a.node.quaternion.copy(yawQ).multiply(q).multiply(pitchQ);
+      }
     },
     dispose() {
       clearMounted();

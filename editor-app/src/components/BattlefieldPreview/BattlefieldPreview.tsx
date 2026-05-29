@@ -180,6 +180,7 @@ export function BattlefieldPreview({ unit }: BattlefieldPreviewProps): React.Rea
       lastTime = now;
 
       controlsRef.current?.tickKeys(dt);
+      unitSlotRef.current?.tickRig(dt);
 
       battlefield.renderer.render(battlefield.scene, battlefield.camera.camera);
 
@@ -237,7 +238,7 @@ export function BattlefieldPreview({ unit }: BattlefieldPreviewProps): React.Rea
     const slot = unitSlotRef.current;
     if (!slot) return;
     if (meshSource) {
-      slot.setMeshUnit(meshSource, skinImage);
+      slot.setMeshUnit(meshSource, skinImage, unit.rig ?? []);
       setSrcMode("mesh");
       setSkinOn(skinImage !== null);
     } else {
