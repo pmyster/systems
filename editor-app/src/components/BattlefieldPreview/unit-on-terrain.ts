@@ -359,16 +359,29 @@ export function createUnitOnTerrain(
               }
             : null;
 
-        // Pivot = the node's bounding-box centre, expressed in its PARENT's
-        // local space (same space as node.position). Rotating about this keeps
-        // the part spinning in place instead of orbiting the model origin.
-        const worldCentre = new THREE.Box3()
-          .setFromObject(targetNode)
-          .getCenter(new THREE.Vector3());
-        const pivotLocal =
-          targetNode.parent !== null
-            ? targetNode.parent.worldToLocal(worldCentre.clone())
-            : worldCentre.clone();
+        // Pivot = the node's OWN geometry centre, in its PARENT's local space
+        // (same space as node.position). Use the node's own geometry, NOT
+        // setFromObject(node): once parent_rig re-attaches followers, that
+        // would include all the children and place the pivot at the whole
+        // assembly's centre — making the part orbit a far point instead of
+        // spinning in place. geometry.boundingBox is in node-local space;
+        // node.matrix (local→parent) maps its centre into parent space.
+        let pivotLocal: THREE.Vector3;
+        if (targetNode instanceof THREE.Mesh && targetNode.geometry) {
+          targetNode.geometry.computeBoundingBox();
+          const bb = targetNode.geometry.boundingBox;
+          if (bb) {
+            targetNode.updateMatrix();
+            pivotLocal = bb
+              .getCenter(new THREE.Vector3())
+              .applyMatrix4(targetNode.matrix);
+          } else {
+            pivotLocal = targetNode.position.clone();
+          }
+        } else {
+          // Group / no geometry: fall back to the node's own origin.
+          pivotLocal = targetNode.position.clone();
+        }
 
         rigAnimators.push({
           node: targetNode,
