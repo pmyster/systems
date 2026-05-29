@@ -29,7 +29,7 @@ import { TEMPLATES } from "../../lib/templates";
 import { voxelizeMesh } from "../../lib/voxelizer";
 import { useMeshAssets } from "../../state/mesh-assets";
 import type { MaterialId, MutableVoxelMap } from "../../types/voxel";
-import { loadMeshFromPath, SUPPORTED_MESH_EXTENSIONS } from "./mesh-loader";
+import { loadGlbFromBuffer, loadMeshFromPath, SUPPORTED_MESH_EXTENSIONS } from "./mesh-loader";
 import { MaterialPainter } from "./MaterialPainter";
 import { MeshViewer } from "./MeshViewer";
 import { TemplateGallery } from "./TemplateGallery";
@@ -143,6 +143,8 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
   const [showPainter, setShowPainter] = useState(false);
   const [loading, setLoading] = useState(false);
   const [voxelizing, setVoxelizing] = useState(false);
+  // AI Generate is in flight (POSTing the photo → TripoSR server → GLB).
+  const [generating, setGenerating] = useState(false);
   // Photo wrapped onto the mesh as a box-projected skin (null = no skin).
   const [skinImage, setSkinImage] = useState<HTMLImageElement | null>(null);
   // Surfaced when an import fails — shown in the toolbar (loud, not silent).
@@ -156,6 +158,8 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
   const currentMeshRef = useRef<THREE.Group | null>(null);
   // Hidden file input for the "Apply Skin" image picker.
   const skinInputRef = useRef<HTMLInputElement | null>(null);
+  // Hidden file input for the "AI Generate" photo picker.
+  const aiInputRef = useRef<HTMLInputElement>(null);
 
   // Dispose the OLD mesh whenever currentMesh changes, then update the ref.
   useEffect(() => {
@@ -306,6 +310,75 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
   );
 
   // -------------------------------------------------------------------------
+  // AI Generate (photo → local TripoSR server → GLB).
+  // -------------------------------------------------------------------------
+
+  const handleGenerate = useCallback(
+    async (file: File): Promise<void> => {
+      setImportError(null);
+      setGenerating(true);
+      try {
+        const form = new FormData();
+        form.append("image", file);
+        const res = await fetch("http://127.0.0.1:8008/generate", {
+          method: "POST",
+          body: form,
+        });
+        if (!res.ok) {
+          // Try to read the JSON error; fall back to status text.
+          let detail = res.statusText;
+          try {
+            const j: unknown = await res.json();
+            if (
+              j !== null &&
+              typeof j === "object" &&
+              "error" in j &&
+              typeof (j as { error: unknown }).error === "string"
+            ) {
+              detail = (j as { error: string }).error;
+            }
+          } catch {
+            /* not json */
+          }
+          if (res.status === 503) {
+            setImportError(
+              "AI model is still warming up — wait a few seconds and try again.",
+            );
+          } else {
+            setImportError(`AI generation failed: ${detail}`);
+          }
+          return;
+        }
+        const buf = await res.arrayBuffer();
+        const group = await loadGlbFromBuffer(buf);
+        setSelectedTemplateId(null);
+        setSkinImage(null);
+        setCurrentMesh(group);
+      } catch (err) {
+        // fetch throws (TypeError) when the server isn't running / unreachable.
+        setImportError(
+          "Can't reach the AI server. Start it: run triposr-server\\start-server.bat, " +
+            "then try again. (Server must be listening on http://127.0.0.1:8008)",
+        );
+        // eslint-disable-next-line no-console
+        console.error("[MeshWorkspace] AI generate failed:", err);
+      } finally {
+        setGenerating(false);
+      }
+    },
+    [setImportError, setSelectedTemplateId, setSkinImage, setCurrentMesh],
+  );
+
+  const handleAiInputChange = useCallback(
+    (e: ChangeEvent<HTMLInputElement>): void => {
+      const file = e.target.files?.[0];
+      if (file) void handleGenerate(file);
+      e.target.value = ""; // allow re-picking the same file
+    },
+    [handleGenerate],
+  );
+
+  // -------------------------------------------------------------------------
   // Derived flags.
   // -------------------------------------------------------------------------
 
@@ -366,15 +439,15 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
           {loading ? "Loading…" : "Import Mesh"}
         </button>
 
-        {/* 2. AI Generate — disabled, v0.2b */}
+        {/* 2. AI Generate — photo → local TripoSR server → GLB */}
         <button
           type="button"
-          style={{ ...S.btn, ...S.btnDisabled }}
-          disabled
-          title="Coming in v0.2b"
-          aria-disabled
+          style={{ ...S.btn, ...(generating ? S.btnDisabled : undefined) }}
+          disabled={generating}
+          onClick={() => aiInputRef.current?.click()}
+          title="Generate a 3D mesh from a photo (local TripoSR server)"
         >
-          AI Generate
+          {generating ? "Generating…" : "AI Generate"}
         </button>
 
         {/* 3. Auto-Voxelize */}
@@ -423,6 +496,15 @@ export function MeshWorkspace({ onVoxelsUpdated, voxels }: MeshWorkspaceProps) {
           accept=".jpg,.jpeg,.png,.webp"
           style={{ display: "none" }}
           onChange={handleSkinInputChange}
+        />
+
+        {/* Hidden picker for the AI Generate source photo. */}
+        <input
+          ref={aiInputRef}
+          type="file"
+          accept=".jpg,.jpeg,.png,.webp"
+          style={{ display: "none" }}
+          onChange={handleAiInputChange}
         />
       </div>
 
