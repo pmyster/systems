@@ -99,6 +99,17 @@ export function RigSection({ unit, onUnitChange }: RigSectionProps): ReactNode {
     update(patchEntry(rig, index, { [axis]: nextAxis }));
   }
 
+  /** Toggle an axis on/off: seed from its default when enabled, drop when off. */
+  function toggleAxis(index: number, axis: "yaw" | "pitch", enabled: boolean): void {
+    const seed = axis === "yaw" ? DEFAULT_YAW : DEFAULT_PITCH;
+    update(patchEntry(rig, index, { [axis]: enabled ? { ...seed } : undefined }));
+  }
+
+  /** Set (or clear) a rig's parent_rig immutably. */
+  function setParent(index: number, value: string): void {
+    update(patchEntry(rig, index, { parent_rig: value === "" ? undefined : value }));
+  }
+
   return (
     <section className={styles.section}>
       <h3 className={styles.sectionHeader}>
@@ -138,6 +149,26 @@ export function RigSection({ unit, onUnitChange }: RigSectionProps): ReactNode {
                 ))}
               </select>
 
+              {/* Parent — re-attach this part under another rig's node so it
+                  rides along (e.g. barrel parented to body). Excludes self. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <label className={styles.label}>Parent</label>
+                <select
+                  className={styles.select}
+                  value={entry.parent_rig ?? ""}
+                  onChange={(e) => setParent(i, e.target.value)}
+                >
+                  <option value="">(none)</option>
+                  {rig
+                    .filter((other) => other.id !== entry.id)
+                    .map((other) => (
+                      <option key={other.id} value={other.id}>
+                        {other.target_node} ({other.id})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
               {/* Motion */}
               <select
                 className={styles.select}
@@ -155,54 +186,72 @@ export function RigSection({ unit, onUnitChange }: RigSectionProps): ReactNode {
 
               {entry.motion === "reactive" && (
                 <>
-                  {/* Yaw arc */}
+                  {/* Yaw arc — only when enabled. */}
                   <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                    <label className={styles.label}>Yaw (min° / max° / rate °/s)</label>
-                    <div style={{ display: "flex", gap: 4 }}>
+                    <label className={styles.label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       <input
-                        className={styles.input}
-                        type="number"
-                        value={entry.yaw?.min_deg ?? 0}
-                        onChange={(e) => patchAxis(i, "yaw", "min_deg", e.target.value)}
+                        type="checkbox"
+                        checked={entry.yaw !== undefined}
+                        onChange={(e) => toggleAxis(i, "yaw", e.target.checked)}
                       />
-                      <input
-                        className={styles.input}
-                        type="number"
-                        value={entry.yaw?.max_deg ?? 0}
-                        onChange={(e) => patchAxis(i, "yaw", "max_deg", e.target.value)}
-                      />
-                      <input
-                        className={styles.input}
-                        type="number"
-                        value={entry.yaw?.rate_dps ?? 0}
-                        onChange={(e) => patchAxis(i, "yaw", "rate_dps", e.target.value)}
-                      />
-                    </div>
+                      Yaw (min° / max° / rate °/s)
+                    </label>
+                    {entry.yaw !== undefined && (
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <input
+                          className={styles.input}
+                          type="number"
+                          value={entry.yaw.min_deg ?? 0}
+                          onChange={(e) => patchAxis(i, "yaw", "min_deg", e.target.value)}
+                        />
+                        <input
+                          className={styles.input}
+                          type="number"
+                          value={entry.yaw.max_deg ?? 0}
+                          onChange={(e) => patchAxis(i, "yaw", "max_deg", e.target.value)}
+                        />
+                        <input
+                          className={styles.input}
+                          type="number"
+                          value={entry.yaw.rate_dps ?? 0}
+                          onChange={(e) => patchAxis(i, "yaw", "rate_dps", e.target.value)}
+                        />
+                      </div>
+                    )}
                   </div>
 
-                  {/* Pitch arc */}
+                  {/* Pitch arc — only when enabled. */}
                   <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                    <label className={styles.label}>Pitch (min° / max° / rate °/s)</label>
-                    <div style={{ display: "flex", gap: 4 }}>
+                    <label className={styles.label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       <input
-                        className={styles.input}
-                        type="number"
-                        value={entry.pitch?.min_deg ?? 0}
-                        onChange={(e) => patchAxis(i, "pitch", "min_deg", e.target.value)}
+                        type="checkbox"
+                        checked={entry.pitch !== undefined}
+                        onChange={(e) => toggleAxis(i, "pitch", e.target.checked)}
                       />
-                      <input
-                        className={styles.input}
-                        type="number"
-                        value={entry.pitch?.max_deg ?? 0}
-                        onChange={(e) => patchAxis(i, "pitch", "max_deg", e.target.value)}
-                      />
-                      <input
-                        className={styles.input}
-                        type="number"
-                        value={entry.pitch?.rate_dps ?? 0}
-                        onChange={(e) => patchAxis(i, "pitch", "rate_dps", e.target.value)}
-                      />
-                    </div>
+                      Pitch (min° / max° / rate °/s)
+                    </label>
+                    {entry.pitch !== undefined && (
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <input
+                          className={styles.input}
+                          type="number"
+                          value={entry.pitch.min_deg ?? 0}
+                          onChange={(e) => patchAxis(i, "pitch", "min_deg", e.target.value)}
+                        />
+                        <input
+                          className={styles.input}
+                          type="number"
+                          value={entry.pitch.max_deg ?? 0}
+                          onChange={(e) => patchAxis(i, "pitch", "max_deg", e.target.value)}
+                        />
+                        <input
+                          className={styles.input}
+                          type="number"
+                          value={entry.pitch.rate_dps ?? 0}
+                          onChange={(e) => patchAxis(i, "pitch", "rate_dps", e.target.value)}
+                        />
+                      </div>
+                    )}
                   </div>
                 </>
               )}

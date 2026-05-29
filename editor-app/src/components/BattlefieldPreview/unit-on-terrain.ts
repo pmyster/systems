@@ -291,6 +291,42 @@ export function createUnitOnTerrain(
       currentSkin = skinImage !== null ? applySkin(cloneGroup, skinImage) : null;
       currentMeshClone = cloneGroup;
 
+      // Build a map of rig id -> its node in the clone, so parent_rig can
+      // re-attach flat parts into a hierarchy (the body's swivel then carries
+      // its followers via the scene graph; the barrel adds its own pitch on top).
+      const nodeByRigId = new Map<string, THREE.Object3D>();
+      for (const entry of rig) {
+        let n: THREE.Object3D | null = null;
+        cloneGroup.traverse((o) => {
+          if (o.name === entry.target_node) n = o;
+        });
+        if (n !== null) nodeByRigId.set(entry.id, n);
+      }
+      // Re-parent each child under its parent_rig's node. THREE's attach()
+      // preserves world transform, so the parts don't jump. Guard self,
+      // missing nodes, and cycles (skip if the prospective parent is a
+      // descendant of the child — that would create a degenerate graph).
+      for (const entry of rig) {
+        if (!entry.parent_rig) continue;
+        const child = nodeByRigId.get(entry.id);
+        const parentNode = nodeByRigId.get(entry.parent_rig);
+        if (!child || !parentNode || child === parentNode) continue;
+        // Cycle guard: walk parentNode's ancestor chain; if we reach child,
+        // attaching would loop the graph back on itself — skip it.
+        let ancestor: THREE.Object3D | null = parentNode.parent;
+        let wouldCycle = false;
+        while (ancestor !== null) {
+          if (ancestor === child) {
+            wouldCycle = true;
+            break;
+          }
+          ancestor = ancestor.parent;
+        }
+        if (wouldCycle) continue;
+        parentNode.attach(child);
+      }
+      cloneGroup.updateMatrixWorld(true);
+
       // Build reactive-rig animators + their ground fans. Reactive rigs sweep
       // on their own; passive/active rigs are driven elsewhere (or not at all)
       // and are intentionally skipped here.
