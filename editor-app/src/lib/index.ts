@@ -14,3 +14,6 @@ export * from "./voxel-renderer";
 export * from "./derive-stats";
 export * from "./zod-schemas";
 export { voxelizeMesh, voxelMapToGrid } from "./voxelizer";
+export {
+  paintBrush, floodFill, assignShellCore, assignHeightBands, swapMaterial,
+} from "./material-ops";
