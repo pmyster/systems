@@ -39,20 +39,34 @@ import { buildTerrain, disposeTerrain, type TerrainHandle } from "./terrain";
 // Camera rig.
 // ---------------------------------------------------------------------------
 
-/** Fixed azimuth — locked per the brief's "TA-style fixed-axis camera". */
-const CAM_AZIMUTH = -Math.PI / 4;
+/**
+ * Default azimuth — the camera's initial yaw on load. Historically this
+ * was a locked constant ("TA-style fixed-axis camera"); the camera is now
+ * freely orbitable (left-drag), so this only seeds the starting angle so
+ * the unit looks identical to before on first render.
+ *
+ * The historic position used `x = cos(AZ)*h, z = sin(AZ)*h` with
+ * AZ = -π/4. The orbit formula is `x = sin(yaw)*h, z = cos(yaw)*h`, so the
+ * yaw that reproduces the exact same world offset (x = +0.707h, z = -0.707h)
+ * is 3π/4 — hence the seed below keeps the on-load view pixel-identical.
+ */
+const DEFAULT_YAW = (3 * Math.PI) / 4;
 
 export interface CameraRig {
   readonly camera: THREE.PerspectiveCamera;
   readonly target: THREE.Vector3;
   /** Current pitch, clamped to [CAM_PITCH_MIN, CAM_PITCH_MAX]. */
   pitch: number;
+  /** Horizontal orbit angle in radians, free 0..2π. */
+  yaw: number;
   /** Current zoom, clamped to [ZOOM_MIN, ZOOM_MAX]. */
   zoom: number;
-  /** Recompute world-space camera position from pitch + zoom + target. */
+  /** Recompute world-space camera position from pitch + yaw + zoom + target. */
   update(): void;
   /** Clamp pitch to the allowed band and apply. */
   setPitch(pitch: number): void;
+  /** Set the horizontal orbit angle (unclamped; normalized to 0..2π) and apply. */
+  setYaw(yaw: number): void;
   /** Clamp zoom to the allowed band and apply. */
   setZoom(zoom: number): void;
 }
@@ -64,19 +78,24 @@ function makeCameraRig(): CameraRig {
     camera,
     target,
     pitch: CAM_PITCH_DEFAULT,
+    yaw: DEFAULT_YAW,
     zoom: ZOOM_DEFAULT,
     update() {
       const horizontal = rig.zoom * Math.cos(rig.pitch);
       const vertical = rig.zoom * Math.sin(rig.pitch);
       camera.position.set(
-        target.x + Math.cos(CAM_AZIMUTH) * horizontal,
+        target.x + horizontal * Math.sin(rig.yaw),
         target.y + vertical,
-        target.z + Math.sin(CAM_AZIMUTH) * horizontal,
+        target.z + horizontal * Math.cos(rig.yaw),
       );
       camera.lookAt(target);
     },
     setPitch(pitch: number) {
       rig.pitch = Math.max(CAM_PITCH_MIN, Math.min(CAM_PITCH_MAX, pitch));
+      rig.update();
+    },
+    setYaw(yaw: number) {
+      rig.yaw = yaw % (Math.PI * 2);
       rig.update();
     },
     setZoom(zoom: number) {

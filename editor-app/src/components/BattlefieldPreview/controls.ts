@@ -7,6 +7,8 @@
  *
  * Inputs (all relative to the renderer's canvas):
  *   - Mouse wheel        → strategic zoom (camera distance).
+ *   - Left-drag          → orbit the camera: horizontal = yaw (free
+ *                          360°), vertical = tilt-clamped pitch.
  *   - Middle-drag        → orbit the sun azimuth (preview lighting from
  *                          different angles).
  *   - Q / E              → tilt-clamped pitch (held-key driven; the
@@ -63,37 +65,69 @@ export function attachControls(
     cameraRig.setZoom(cameraRig.zoom + e.deltaY * 0.05);
   };
 
+  // ---- Left-drag: orbit the camera -----------------------------------------
+  // Dragging horizontally spins the camera yaw (free 360°); vertically
+  // tilts the pitch. setPitch clamps to the allowed band; setYaw wraps.
+  let orbitDragging = false;
+  let orbitDragX = 0;
+  let orbitDragY = 0;
+
   // ---- Middle-drag: orbit the sun ------------------------------------------
   // Dragging horizontally rotates the sun's azimuth; vertically tilts
   // its elevation. The lighting handle clamps elevation away from the
   // horizon/zenith to keep shadows readable.
+  //
+  // The two drag modes (orbit vs sun) use independent boolean flags so a
+  // left-drag and a middle-drag never interfere with one another.
   let sunDragging = false;
   let sunDragX = 0;
   let sunDragY = 0;
 
   const onPointerDown = (e: PointerEvent) => {
-    if (e.button !== 1) return; // middle button only
-    sunDragging = true;
-    sunDragX = e.clientX;
-    sunDragY = e.clientY;
-    canvas.setPointerCapture(e.pointerId);
-    e.preventDefault();
+    if (e.button === 0) {
+      // Left button: orbit the camera.
+      orbitDragging = true;
+      orbitDragX = e.clientX;
+      orbitDragY = e.clientY;
+      canvas.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      return;
+    }
+    if (e.button === 1) {
+      // Middle button: orbit the sun.
+      sunDragging = true;
+      sunDragX = e.clientX;
+      sunDragY = e.clientY;
+      canvas.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    }
   };
 
   const onPointerMove = (e: PointerEvent) => {
-    if (!sunDragging) return;
-    const dx = e.clientX - sunDragX;
-    const dy = e.clientY - sunDragY;
-    sunDragX = e.clientX;
-    sunDragY = e.clientY;
-    const az = lighting.getSunAzimuth() + dx * 0.01;
-    const elevRaw = lighting.getSunElevation() - dy * 0.005;
-    const elev = Math.max(0.12, Math.min(Math.PI / 2 - 0.05, elevRaw));
-    lighting.setSunDirection(az, elev);
+    if (orbitDragging) {
+      const dx = e.clientX - orbitDragX;
+      const dy = e.clientY - orbitDragY;
+      orbitDragX = e.clientX;
+      orbitDragY = e.clientY;
+      cameraRig.setYaw(cameraRig.yaw + dx * 0.01);
+      cameraRig.setPitch(cameraRig.pitch + dy * 0.005);
+      return;
+    }
+    if (sunDragging) {
+      const dx = e.clientX - sunDragX;
+      const dy = e.clientY - sunDragY;
+      sunDragX = e.clientX;
+      sunDragY = e.clientY;
+      const az = lighting.getSunAzimuth() + dx * 0.01;
+      const elevRaw = lighting.getSunElevation() - dy * 0.005;
+      const elev = Math.max(0.12, Math.min(Math.PI / 2 - 0.05, elevRaw));
+      lighting.setSunDirection(az, elev);
+    }
   };
 
   const onPointerUp = (e: PointerEvent) => {
-    if (!sunDragging) return;
+    if (!orbitDragging && !sunDragging) return;
+    orbitDragging = false;
     sunDragging = false;
     if (canvas.hasPointerCapture(e.pointerId)) {
       canvas.releasePointerCapture(e.pointerId);
