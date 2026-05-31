@@ -31,6 +31,11 @@ import {
   removeSkin,
   type AppliedSkin,
 } from "../MeshWorkspace/box-projection";
+import {
+  colorArrow,
+  createHardpointArrow,
+  type HardpointArrow,
+} from "../MeshWorkspace/HardpointVisuals";
 import type { MeshHardpoint, MuzzleForwardAxis, RigEntry, UnitSchematic } from "../../types";
 
 import type { TerrainHandle } from "./terrain";
@@ -291,6 +296,17 @@ export interface UnitOnTerrainHandle {
   /** List the ids of all hardpoints currently mounted on this unit. */
   listHardpointIds(): string[];
   /**
+   * Update which hardpoints are highlighted (cyan) for the Fire-Test
+   * bar's selection. Pass a fresh Set each call — the function does NOT
+   * snapshot or copy; it stores the reference for use by subsequent
+   * remounts. Arrows for ids in the set are tinted cyan; arrows for
+   * ids absent from the set fall back to orange.
+   *
+   * Safe to call before any mount — the saved set is consulted by the
+   * mount pass and applied to freshly-built arrows.
+   */
+  setHardpointHighlight(ids: ReadonlySet<string>): void;
+  /**
    * Re-synchronise the mounted hardpoint Object3Ds against the document.
    *
    * Hardpoint Object3Ds are mounted once per unit (see setMeshUnit /
@@ -438,6 +454,17 @@ export function createUnitOnTerrain(
   // is specified. World transforms are read fresh per fire (the rig tick
   // refreshes matrices before we ever ask for `getWorldPosition`).
   let hardpointsById: Map<string, THREE.Object3D> = new Map();
+  // Parallel map of per-hardpoint arrow visuals (shaft + head + floating
+  // id label sprite). The arrow's Group is added as a CHILD of the
+  // hardpoint Object3D, so it inherits the hardpoint's local transform
+  // — meaning rig animation propagates through the same chain. The
+  // arrow's identity is owned here so the highlight tint and disposal
+  // can be controlled without disturbing the hardpoint transform node.
+  let hardpointArrowsById: Map<string, HardpointArrow> = new Map();
+  // Set of hardpoint ids currently highlighted (cyan) for the fire-test
+  // selection. Updated by `setHardpointHighlight` from React; consumed
+  // by the arrow factory on mount and the explicit recolour pass.
+  let highlightedHardpointIds: ReadonlySet<string> = new Set<string>();
   // Cached rig parent map + rest poses for the current mount — needed by
   // updateHardpointData() so it can re-mount individual hardpoints under
   // the same rig hierarchy without rebuilding the whole unit. Cleared by
@@ -755,10 +782,20 @@ export function createUnitOnTerrain(
     // Detach every hardpoint Object3D from its scene parent. The Object3Ds
     // themselves carry no GPU resources (no geometry/material) — they're
     // pure transform nodes — so removing the parent reference is enough.
+    // The arrow visuals (which DO own GPU resources) are disposed below.
     for (const obj of hardpointsById.values()) {
       if (obj.parent) obj.parent.remove(obj);
     }
     hardpointsById = new Map();
+    // Dispose every arrow visual's geometry/material/texture. The arrow's
+    // Group was a child of the hardpoint Object3D; removing the parent
+    // detaches it from the scene graph, but the GPU resources still need
+    // an explicit dispose() to release VRAM.
+    for (const arrow of hardpointArrowsById.values()) {
+      if (arrow.group.parent) arrow.group.parent.remove(arrow.group);
+      arrow.dispose();
+    }
+    hardpointArrowsById = new Map();
     hardpointMissWarned.clear();
     mountedUnitRoot = null;
     mountedRigNodeById = new Map();
@@ -927,6 +964,20 @@ export function createUnitOnTerrain(
         console.log(`[Hardpoint mount] id="${h.id}" parent_rig="${h.parent_rig_id}" rig.local Euler=`, eulerDeg(rigParentNode.quaternion), `hp.local pos=`, obj.position.toArray().map((v: number) => v.toFixed(3)), `hp.local Euler=`, eulerDeg(obj.quaternion), `hp.world pos=`, obj.getWorldPosition(new THREE.Vector3()).toArray().map((v: number) => v.toFixed(3)), `hp.world Euler=`, eulerDeg(obj.getWorldQuaternion(new THREE.Quaternion())));
       }
       hardpointsById.set(h.id, obj);
+
+      // Mount the visual arrow + floating id label as a child of the
+      // hardpoint Object3D. Inheriting the hardpoint's local transform
+      // means rig animation propagates through the same scene-graph
+      // chain — the arrow rides the hardpoint everywhere it goes. The
+      // arrow's own +Z is the hardpoint's local +Z, which is also the
+      // direction `getWorldDirection()` returns for the firing solution.
+      const arrow = createHardpointArrow(h.id);
+      obj.add(arrow.group);
+      hardpointArrowsById.set(h.id, arrow);
+      // Apply the current highlight selection — a re-mount during a
+      // session must respect whatever the user had checked in the
+      // fire-test bar before the unit swap / hardpoint edit.
+      colorArrow(arrow, highlightedHardpointIds.has(h.id) ? "highlight" : "default");
     }
 
     // ----- Restore rest-pose snapshot ----------------------------------
@@ -1442,16 +1493,11 @@ export function createUnitOnTerrain(
       // space. Matches the artist's authoring intent (the arrow points along
       // local +Z), so no axis-guessing band-aid is needed.
       obj.getWorldDirection(scratchHpDir);
-      // getWorldDirection returns a normalised vector; copy out the
-      // components so the returned tuple doesn't alias the scratch.
-      const direction: [string, string, string] = [
-        scratchHpDir.x.toFixed(3),
-        scratchHpDir.y.toFixed(3),
-        scratchHpDir.z.toFixed(3),
-      ];
-      const hpParent: THREE.Object3D | null = obj.parent;
-      // eslint-disable-next-line no-console
-      console.log(`[Hardpoint getAim] id="${id}" hp.parent.world Euler=`, hpParent !== null ? eulerDeg(hpParent.getWorldQuaternion(new THREE.Quaternion())) : ["<no parent>"], `hp.local Euler=`, eulerDeg(obj.quaternion), `hp.world Euler=`, eulerDeg(obj.getWorldQuaternion(new THREE.Quaternion())), `direction=`, direction);
+      // Note: a per-call console.log used to live here. It was a
+      // diagnostic to verify hardpoint world Euler under the gizmo —
+      // removed because this getter is called by Fire and the HUD
+      // refresh paths and the noise drowned the console. Re-add a
+      // gated log here only if you guard it behind a debug flag.
       return {
         position: [scratchHpPos.x, scratchHpPos.y, scratchHpPos.z],
         direction: [scratchHpDir.x, scratchHpDir.y, scratchHpDir.z],
@@ -1460,6 +1506,17 @@ export function createUnitOnTerrain(
     },
     listHardpointIds(): string[] {
       return [...hardpointsById.keys()];
+    },
+    setHardpointHighlight(ids: ReadonlySet<string>) {
+      // Store the latest selection so a subsequent mount honours it
+      // (e.g., the user edits a hardpoint, which re-runs
+      // updateHardpointData / mountHardpoints, and we want the new
+      // arrow to come up with the correct tint without an extra round
+      // trip through React).
+      highlightedHardpointIds = ids;
+      for (const [id, arrow] of hardpointArrowsById) {
+        colorArrow(arrow, ids.has(id) ? "highlight" : "default");
+      }
     },
     updateHardpointData(hardpoints: readonly MeshHardpoint[]) {
       // No mount yet (called before setUnit/setMeshUnit). Loud-over-silent

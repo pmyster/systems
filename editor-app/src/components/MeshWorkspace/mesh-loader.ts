@@ -168,64 +168,145 @@ function bakeNodeScales(root: THREE.Object3D): void {
  */
 function normaliseGroup(group: THREE.Group): THREE.Group {
   // Wash: bake all interior per-node scales into geometry. After this, every
-  // node inside the hierarchy has scale (1,1,1) — only `group.scale` is
-  // momentarily set below before being baked too.
+  // node inside the hierarchy has scale (1,1,1) — only `group.scale` itself
+  // still carries a (potentially non-unit) factor that we'll fold into the
+  // entire subtree below.
   bakeNodeScales(group);
+
   ensureNormals(group);
 
-  // Compute bbox before any transform on the group (starts at identity).
+  // ---------------------------------------------------------------------
+  // Compute the combined "fold this into geometry" factor.
+  //
+  // Two things need to be baked into every geometry + every position in the
+  // subtree so the rendered shape is identical but `group.scale === (1,1,1)`
+  // and every downstream coordinate is in world meters:
+  //
+  //   1. `rootScale` — the root group's own incoming scale (e.g. glTF
+  //      Blender exports default to 0.0625 for unit conversion). After
+  //      `bakeNodeScales`, every INTERIOR node has scale (1,1,1), but the
+  //      ROOT still carries whatever the loader handed us — and that scale
+  //      chains through every world transform.
+  //
+  //   2. `s` — the normalize factor `NORMALIZE_TARGET_M / maxDim` so the
+  //      longest bbox axis ends up exactly NORMALIZE_TARGET_M meters.
+  //
+  // We measure the bbox in WORLD space (i.e. with `group.scale` applied)
+  // before any bake: `Box3.setFromObject` walks each mesh's world matrix,
+  // so `size.x` is already in the same units as `rootScale × geometry`. The
+  // normalize factor is therefore `NORMALIZE_TARGET_M / maxDim` directly —
+  // no compensation for `rootScale` needed, because the bbox already
+  // includes it.
+  //
+  // The combined factor `totalScale = rootScale × s` is what we fold into
+  // every geometry vertex AND every descendant's local position. Setting
+  // `group.scale = (1,1,1)` at the end leaves the world transform of every
+  // node mathematically unchanged (three.js scale is inherited
+  // multiplicatively: by scaling every position and every geometry by the
+  // factor we're removing from the chain, the product `parent_scale ×
+  // local_position` and `parent_scale × geometry_vertex` stay constant).
+  //
+  // PREVIOUS BUG (depth-2+): the old code only multiplied IMMEDIATE
+  // children's positions by `s`, leaving grandchildren untouched. That
+  // worked for a flat hierarchy but blew apart any nested rig — e.g. a
+  // turret whose barrel is a grandchild of the root drifted by (1 - s) ×
+  // grandparent-rotation × grandchild.position in the source frame
+  // (hundreds of mm). The fix: walk the WHOLE tree with `traverse()`.
+  // ---------------------------------------------------------------------
+
+  // Warn (but proceed) on non-uniform root scale — the mesh may shear.
+  if (
+    group.scale.x !== group.scale.y ||
+    group.scale.x !== group.scale.z
+  ) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[normaliseGroup] non-uniform root scale (${group.scale.x}, ${group.scale.y}, ${group.scale.z}) — baking each axis independently. Mesh may distort if the loader expected uniform scale.`,
+    );
+  }
+  const rsx = group.scale.x;
+  const rsy = group.scale.y;
+  const rsz = group.scale.z;
+
+  // Compute bbox in WORLD units (Box3.setFromObject applies world matrices,
+  // so this already includes `group.scale`).
   const box = new THREE.Box3().setFromObject(group);
   if (box.isEmpty()) {
     // Even an empty bbox needs the bookkeeping so downstream code can rely
-    // on these fields being present.
+    // on these fields being present. Reset the root scale anyway so the
+    // invariant "downstream-of-group is in world meters" still holds.
+    group.scale.set(1, 1, 1);
     group.userData.normalizeScale = 1;
     group.userData.normalizedSizeM = NORMALIZE_TARGET_M;
     return group;
   }
 
-  const centre = new THREE.Vector3();
-  box.getCenter(centre);
-
   const size = new THREE.Vector3();
   box.getSize(size);
   const maxDim = Math.max(size.x, size.y, size.z);
+  // Note: `size` is in world units (bbox includes group.scale), so `s`
+  // alone is what shrinks the WORLD size to NORMALIZE_TARGET_M. The factor
+  // we need to fold into vertices/positions to make `group.scale = 1`
+  // produce that same world size is `rootScale × s` — that combined
+  // product preserves every world transform when the root scale is reset.
   const s = maxDim > 0 ? NORMALIZE_TARGET_M / maxDim : 1;
+  const totalX = rsx * s;
+  const totalY = rsy * s;
+  const totalZ = rsz * s;
 
-  if (s !== 1) {
-    // Bake `s` into every mesh's geometry vertices. We CLONE first because
-    // GLTF often instances one BufferGeometry across multiple meshes; in-place
-    // mutation would scale every reference. Walking the whole tree is fine
-    // — bakeNodeScales already ensured each interior node carries identity
-    // scale, so the only remaining scale chain is the one we're collapsing
-    // here.
+  if (totalX !== 1 || totalY !== 1 || totalZ !== 1) {
+    // Clone-once per shared BufferGeometry so instanced parts share their
+    // post-bake clone (cheap + correct — GLTF commonly references one
+    // BufferGeometry from multiple meshes).
+    const cloneByOriginal = new Map<THREE.BufferGeometry, THREE.BufferGeometry>();
     group.traverse((node) => {
       if (
         node instanceof THREE.Mesh &&
         node.geometry instanceof THREE.BufferGeometry
       ) {
-        node.geometry = node.geometry.clone();
-        node.geometry.scale(s, s, s);
+        const original = node.geometry;
+        let scaled = cloneByOriginal.get(original);
+        if (scaled === undefined) {
+          scaled = original.clone();
+          scaled.scale(totalX, totalY, totalZ);
+          cloneByOriginal.set(original, scaled);
+        }
+        node.geometry = scaled;
+      }
+      // Multiply EVERY descendant's local position by the same factor.
+      // Skip the root itself — its position is reset below for centering.
+      // Three.js scale is inherited multiplicatively, so scaling every
+      // position by the factor we're removing from the chain preserves
+      // each node's world translation contribution exactly.
+      if (node !== group) {
+        node.position.set(
+          node.position.x * totalX,
+          node.position.y * totalY,
+          node.position.z * totalZ,
+        );
       }
     });
-    // Push `s` through each IMMEDIATE child's parent-space position so the
-    // world position is preserved once the group's own scale is reset.
-    // Interior descendants were already handled by bakeNodeScales (their
-    // positions are in their parent's local frame — and that parent's scale
-    // has been baked into ITS geometry, which doesn't affect child positions).
-    for (const child of group.children) {
-      child.position.multiplyScalar(s);
-    }
   }
+
   // Explicit: no parent scale chain remains. Downstream coordinates are
   // in world meters.
-  group.scale.setScalar(1);
+  group.scale.set(1, 1, 1);
 
-  // Centre + floor in the now-baked (meters) frame. The original box was
-  // measured BEFORE the bake, so its values are in pre-bake units — multiply
-  // by `s` to express the offset in the post-bake (meters) frame.
-  group.position.set(-s * centre.x, -s * box.min.y, -s * centre.z);
+  // Re-measure the bbox AFTER the bake — the geometry + positions are now
+  // in world meters with the root at identity scale, so this bbox is the
+  // accurate one for centering/flooring. No `× s` compensation needed:
+  // the bake already pushed every coordinate into the post-bake frame.
+  const finalBox = new THREE.Box3().setFromObject(group);
+  if (!finalBox.isEmpty()) {
+    const finalCentre = new THREE.Vector3();
+    finalBox.getCenter(finalCentre);
+    group.position.set(-finalCentre.x, -finalBox.min.y, -finalCentre.z);
+  }
 
-  // Stash bookkeeping so consumers know how to migrate / scale.
+  // Stash bookkeeping so consumers know how to migrate / scale. We expose
+  // `s` (the pure normalize factor) — NOT `totalX` — because that's the
+  // multiplier applied to pre-bake hardpoint coordinates authored in the
+  // bbox-of-world-units frame, which is the frame `s` was computed in.
   group.userData.normalizeScale = s;
   group.userData.normalizedSizeM = NORMALIZE_TARGET_M;
   return group;

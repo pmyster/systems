@@ -260,7 +260,7 @@ export function MeshHardpointSection({
           >
             <label className={styles.label}>#{i + 1}</label>
             <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-              {/* ID */}
+              {/* ID + unparented warning */}
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 <label className={styles.label}>ID</label>
                 <input
@@ -272,6 +272,22 @@ export function MeshHardpointSection({
                     if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                   }}
                 />
+                {(h.parent_rig_id === null || h.parent_rig_id === "") && (
+                  <span
+                    title="Hardpoint has no parent rig — it cannot fire. Pick a rig from the Parent dropdown below."
+                    style={{
+                      display: "inline-block",
+                      padding: "1px 6px",
+                      borderRadius: 10,
+                      fontSize: 10,
+                      color: "#f08080",
+                      background: "rgba(240, 80, 80, 0.10)",
+                      border: "1px solid rgba(240, 80, 80, 0.45)",
+                    }}
+                  >
+                    ⚠ no parent — cannot fire
+                  </span>
+                )}
               </div>
 
               {/* Parent rig */}

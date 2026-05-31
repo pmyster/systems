@@ -31,7 +31,7 @@ import { getEffectiveTarget } from "../../lib/fire-test/simulator";
 import type { FireTestRequest } from "../../lib/fire-test/types";
 import { MAP_SIZE_M } from "../../lib";
 import { useMeshAssets } from "../../state/mesh-assets";
-import type { ProjectileSchematic, UnitSchematic } from "../../types";
+import type { MeshHardpoint, ProjectileSchematic, UnitSchematic } from "../../types";
 
 import { attachControls, type ControlsHandle } from "./controls";
 import { FireTestController } from "./FireTestController";
@@ -143,6 +143,13 @@ interface HpHudSnapshot {
   readonly dir: readonly [number, number, number] | null;
   readonly pitchDeg: number | null;
   readonly yawDeg: number | null;
+  /** Which event last refreshed the HUD — surfaced in the overlay so the
+   *  user can see at a glance that the HUD is at rest, not live. */
+  readonly lastEvent: string | null;
+  /** Count of hardpoints currently checked in the fire-test bar. */
+  readonly selectedCount: number;
+  /** Total mounted hardpoints on the unit. */
+  readonly totalCount: number;
 }
 
 const HP_HUD_EMPTY: HpHudSnapshot = {
@@ -151,6 +158,9 @@ const HP_HUD_EMPTY: HpHudSnapshot = {
   dir: null,
   pitchDeg: null,
   yawDeg: null,
+  lastEvent: null,
+  selectedCount: 0,
+  totalCount: 0,
 };
 
 /** Format a triple to fixed-decimal display. Returns "—" when null. */
@@ -212,7 +222,35 @@ export function BattlefieldPreview({ unit }: BattlefieldPreviewProps): React.Rea
 
   // Mesh-first source + skin from the shared context. When a mesh is present
   // the preview renders a deep clone of it; otherwise it falls back to voxels.
-  const { meshSource, skinImage } = useMeshAssets();
+  //
+  // The fire-test selection (which hardpoints are checked in the bar) also
+  // lives in the shared context — both viewers (Mesh Workspace + this one)
+  // read it to tint arrows cyan. The controller pushes updates here via
+  // the setter; the slot is bridged through a useEffect below.
+  const {
+    meshSource,
+    skinImage,
+    fireSelectedHardpointIds,
+    setFireSelectedHardpointIds,
+  } = useMeshAssets();
+
+  // Ref so the long-lived callbacks (handleFire, handleAimChange) always
+  // see the latest selection without re-creating themselves on every
+  // toggle. Same pattern as `unitRef` above.
+  const fireSelectedHardpointIdsRef = useRef<ReadonlySet<string>>(
+    fireSelectedHardpointIds,
+  );
+  useEffect(() => {
+    fireSelectedHardpointIdsRef.current = fireSelectedHardpointIds;
+  }, [fireSelectedHardpointIds]);
+
+  // Track which hardpoint was LAST FIRED so the HUD can show its details
+  // (per brief). Held as state because the HUD re-reads it on every refresh.
+  const [lastFiredHpId, setLastFiredHpId] = useState<string | null>(null);
+  const lastFiredHpIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    lastFiredHpIdRef.current = lastFiredHpId;
+  }, [lastFiredHpId]);
 
   // HP DEBUG HUD live snapshot. Updated by a RAF tick that polls the first
   // hardpoint's world transform each frame and only re-renders React when
@@ -364,6 +402,116 @@ export function BattlefieldPreview({ unit }: BattlefieldPreviewProps): React.Rea
   }, [unit, meshSource, skinImage]);
 
   // -------------------------------------------------------------------------
+  // HP DEBUG HUD: EVENT-DRIVEN snapshot of the FIRST hardpoint's world aim.
+  //
+  // Previously this was a per-frame RAF poll. That was wrong — it called
+  // `getHardpointAim` (which calls `updateMatrixWorld(true)` and reads
+  // world transforms) ~60 times per second, indefinitely, even when the
+  // unit was idle. World transforms only change on actual events, so the
+  // HUD now refreshes only when those events fire:
+  //
+  //   • the hardpoint document changes (form edit) — see useEffect below
+  //   • the user clicks Fire — see handleFire
+  //   • the user changes aim parameters — see handleAimChange
+  //   • snap-aim-to-target runs (covered by handleFire)
+  //
+  // Industry standard (Unreal sockets, Unity attach-points): the world
+  // position of an attach point is computed only when requested. We
+  // honour that here. The HUD label below tags the last event so the
+  // user can see at a glance that the value is "at rest", not live.
+  //
+  // Declared above the useEffects that depend on it (the React hook-deps
+  // closure can't forward-reference a callback).
+  // -------------------------------------------------------------------------
+  const refreshHpHud = useCallback((eventLabel: string): void => {
+    const slot = unitSlotRef.current;
+    const currentUnit = unitRef.current;
+    const hardpoints: readonly MeshHardpoint[] = currentUnit.hardpoints ?? [];
+    const selectedIds = fireSelectedHardpointIdsRef.current;
+    const lastFired = lastFiredHpIdRef.current;
+    const totalCount = hardpoints.length;
+    const selectedCount = (() => {
+      let n = 0;
+      for (const h of hardpoints) if (selectedIds.has(h.id)) n++;
+      return n;
+    })();
+
+    // Pick the HP whose details we show in the detail block. Per brief:
+    // last-fired wins, else first selected, else nothing.
+    let detailId: string | null = null;
+    if (lastFired !== null && hardpoints.some((h) => h.id === lastFired)) {
+      detailId = lastFired;
+    } else {
+      for (const h of hardpoints) {
+        if (selectedIds.has(h.id)) {
+          detailId = h.id;
+          break;
+        }
+      }
+    }
+
+    if (!slot || detailId === null) {
+      setHpHud({
+        ...HP_HUD_EMPTY,
+        lastEvent: eventLabel,
+        selectedCount,
+        totalCount,
+      });
+      return;
+    }
+
+    const aim = slot.getHardpointAim(detailId);
+    if (!aim) {
+      setHpHud({
+        ...HP_HUD_EMPTY,
+        lastEvent: eventLabel,
+        selectedCount,
+        totalCount,
+      });
+      return;
+    }
+
+    const round3 = (n: number): number => Math.round(n * 1000) / 1000;
+    const px = round3(aim.position[0]);
+    const py = round3(aim.position[1]);
+    const pz = round3(aim.position[2]);
+    const dx = round3(aim.direction[0]);
+    const dy = round3(aim.direction[1]);
+    const dz = round3(aim.direction[2]);
+
+    // Derive pitch + yaw from the unit direction vector (XYZ Euler).
+    // Roll cannot be recovered from a direction alone — the HUD shows "—".
+    // Clamp y to [-1,1] before asin to guard against any tiny numerical
+    // drift that would otherwise produce NaN.
+    hpHudScratchDir.set(dx, dy, dz);
+    const dyClamped = Math.max(-1, Math.min(1, hpHudScratchDir.y));
+    const pitchDeg = (Math.asin(dyClamped) * 180) / Math.PI;
+    const yawDeg =
+      (Math.atan2(hpHudScratchDir.x, hpHudScratchDir.z) * 180) / Math.PI;
+
+    setHpHud({
+      id: detailId,
+      pos: [px, py, pz],
+      dir: [dx, dy, dz],
+      pitchDeg,
+      yawDeg,
+      lastEvent: eventLabel,
+      selectedCount,
+      totalCount,
+    });
+  }, []);
+
+  // Bridge selection state to the scene's arrow tint + refresh the HUD.
+  // The slot's setHardpointHighlight is a Three.js mutation (recolours
+  // arrow materials); React owns the React state, so this useEffect is
+  // the seam between them. Runs on every selection change and also on
+  // mount-mode swaps (the new mount needs the current selection painted).
+  useEffect(() => {
+    unitSlotRef.current?.setHardpointHighlight(fireSelectedHardpointIds);
+    refreshHpHud("selection-change");
+  }, [fireSelectedHardpointIds, meshSource, skinImage, refreshHpHud]);
+
+  // -------------------------------------------------------------------------
   // Live-sync hardpoint Object3Ds with `unit.hardpoints`.
   //
   // The unit's mesh is mounted once per (unit, meshSource, skinImage)
@@ -382,116 +530,19 @@ export function BattlefieldPreview({ unit }: BattlefieldPreviewProps): React.Rea
   // -------------------------------------------------------------------------
   useEffect(() => {
     unitSlotRef.current?.updateHardpointData(unit.hardpoints ?? []);
-  }, [unit.hardpoints]);
+    // The slot just re-mounted hardpoint Object3Ds — their world
+    // transforms changed, so refresh the HUD. This is the event-driven
+    // replacement for the previous RAF poll: the HUD now updates only
+    // when the document changes (form edit, file open, etc.).
+    refreshHpHud("hardpoints-change");
+  }, [unit.hardpoints, refreshHpHud]);
 
-  // -------------------------------------------------------------------------
-  // HP DEBUG HUD: per-frame poll of the FIRST hardpoint's world aim.
-  //
-  // The user cannot open DevTools; this overlay is the only window into
-  // whether the hardpoint's pos/dir is actually tracking the document. A
-  // RAF loop reads `getHardpointAim` each frame and only commits to React
-  // state when at least one tracked value has changed at display precision
-  // (3 decimals for pos/dir). This caps re-renders at a few per second
-  // during gizmo drags and to zero when the unit is idle.
-  // -------------------------------------------------------------------------
+  // On (re)mount of the mesh source, the hardpoints attach to a new
+  // mesh hierarchy — pull a fresh HUD reading so the overlay isn't
+  // showing stale values from the previous mesh.
   useEffect(() => {
-    let raf = 0;
-    let running = true;
-
-    // Last snapshot we PUSHED to React. We compare next-frame values
-    // against this rounded representation to throttle re-renders.
-    let lastId: string | null = null;
-    let lastPx = NaN;
-    let lastPy = NaN;
-    let lastPz = NaN;
-    let lastDx = NaN;
-    let lastDy = NaN;
-    let lastDz = NaN;
-
-    const round3 = (n: number): number => Math.round(n * 1000) / 1000;
-
-    const sample = () => {
-      if (!running) return;
-      raf = requestAnimationFrame(sample);
-
-      const slot = unitSlotRef.current;
-      const currentUnit = unitRef.current;
-      const firstHp = currentUnit.hardpoints?.[0];
-
-      if (!slot || !firstHp) {
-        if (lastId !== null) {
-          lastId = null;
-          lastPx = lastPy = lastPz = NaN;
-          lastDx = lastDy = lastDz = NaN;
-          setHpHud(HP_HUD_EMPTY);
-        }
-        return;
-      }
-
-      const aim = slot.getHardpointAim(firstHp.id);
-      if (!aim) {
-        if (lastId !== null) {
-          lastId = null;
-          lastPx = lastPy = lastPz = NaN;
-          lastDx = lastDy = lastDz = NaN;
-          setHpHud(HP_HUD_EMPTY);
-        }
-        return;
-      }
-
-      const px = round3(aim.position[0]);
-      const py = round3(aim.position[1]);
-      const pz = round3(aim.position[2]);
-      const dx = round3(aim.direction[0]);
-      const dy = round3(aim.direction[1]);
-      const dz = round3(aim.direction[2]);
-
-      if (
-        firstHp.id === lastId &&
-        px === lastPx &&
-        py === lastPy &&
-        pz === lastPz &&
-        dx === lastDx &&
-        dy === lastDy &&
-        dz === lastDz
-      ) {
-        return;
-      }
-
-      lastId = firstHp.id;
-      lastPx = px;
-      lastPy = py;
-      lastPz = pz;
-      lastDx = dx;
-      lastDy = dy;
-      lastDz = dz;
-
-      // Derive pitch + yaw from the unit direction vector (XYZ Euler).
-      // Roll cannot be recovered from a direction alone — the HUD shows "—".
-      // Clamp y to [-1,1] before asin to guard against any tiny numerical
-      // drift that would otherwise produce NaN.
-      hpHudScratchDir.set(dx, dy, dz);
-      const dyClamped = Math.max(-1, Math.min(1, hpHudScratchDir.y));
-      const pitchDeg = (Math.asin(dyClamped) * 180) / Math.PI;
-      const yawDeg =
-        (Math.atan2(hpHudScratchDir.x, hpHudScratchDir.z) * 180) / Math.PI;
-
-      setHpHud({
-        id: firstHp.id,
-        pos: [px, py, pz],
-        dir: [dx, dy, dz],
-        pitchDeg,
-        yawDeg,
-      });
-    };
-
-    raf = requestAnimationFrame(sample);
-
-    return () => {
-      running = false;
-      cancelAnimationFrame(raf);
-    };
-  }, []);
+    refreshHpHud("mesh-mount");
+  }, [meshSource, skinImage, refreshHpHud]);
 
   // -------------------------------------------------------------------------
   // Fire-test handlers — keep the aim marker live as the author tweaks
@@ -511,12 +562,30 @@ export function BattlefieldPreview({ unit }: BattlefieldPreviewProps): React.Rea
     const currentUnit = unitRef.current;
 
     // Priority 1: explicit hardpoint authoring beats every legacy path.
-    // We pick the first hardpoint whose id is currently mounted on the
-    // slot — typically the only one a single-weapon unit has. A future
-    // FireTestController slice can surface a picker for multi-hardpoint
-    // units; until then "first" is enough to validate the placement.
+    // Multi-HP units: the FIRST SELECTED hardpoint drives the live aim
+    // marker (Front/Side/Rear/Top + Range produce one shared target);
+    // each individual barrel still fires from its own muzzle in
+    // handleFire's per-HP loop. When nothing is selected (or none of
+    // the selected ids are mounted) we fall through to the first
+    // mounted hardpoint, then the legacy rig/bbox fallback. This keeps
+    // single-HP units working exactly as before AND lets a multi-HP
+    // user see the shared target preview update without having to
+    // tick a specific "marker driver" toggle.
     const hardpoints = currentUnit.hardpoints ?? [];
+    const selected = fireSelectedHardpointIdsRef.current;
     if (slot && hardpoints.length > 0) {
+      for (const h of hardpoints) {
+        if (!selected.has(h.id)) continue;
+        const aim = slot.getHardpointAim(h.id);
+        if (aim) {
+          return {
+            spawn: [aim.position[0], aim.position[1], aim.position[2]],
+            direction: [aim.direction[0], aim.direction[1], aim.direction[2]],
+          };
+        }
+      }
+      // No SELECTED hardpoint resolved — try the first mounted hardpoint
+      // so the marker still appears for an unchecked-but-mounted unit.
       for (const h of hardpoints) {
         const aim = slot.getHardpointAim(h.id);
         if (aim) {
@@ -572,18 +641,52 @@ export function BattlefieldPreview({ unit }: BattlefieldPreviewProps): React.Rea
       // muzzle rigs slew their yaw/pitch toward it. The rig animation
       // tick consumes this each frame; passive/non-muzzle rigs ignore it.
       unitSlotRef.current?.setAimTarget(target);
+      // Event-driven HUD refresh — projectile/range changed, so the
+      // aim that the HUD reflects may have shifted (no rig slew yet,
+      // but the computeAim path was just exercised).
+      refreshHpHud("aim-change");
     },
-    [computeAim],
+    [computeAim, refreshHpHud],
   );
 
   const handleFire = useCallback(
     async (request: FireTestRequest): Promise<void> => {
       const fts = fireTestRef.current;
-      if (!fts) return;
+      const slot = unitSlotRef.current;
+      if (!fts || !slot) return;
       const currentUnit = unitRef.current;
+      const selectedIds = fireSelectedHardpointIdsRef.current;
+      // Resolve which hardpoints we'll fire from: every selected id that
+      // is mounted AND parented. The controller's disabled state already
+      // prevents firing when no HP is selected; we still defensively
+      // filter here so a transient race during a unit swap doesn't fire
+      // from a ghost id.
+      const hardpoints: readonly MeshHardpoint[] = currentUnit.hardpoints ?? [];
+      const firing: MeshHardpoint[] = hardpoints.filter(
+        (h) =>
+          selectedIds.has(h.id) &&
+          h.parent_rig_id !== null &&
+          h.parent_rig_id !== "",
+      );
+
+      if (firing.length === 0) {
+        // Loud-over-silent: if the button was somehow clicked with no
+        // valid hardpoints (e.g. race during a unit-swap), say so
+        // instead of silently doing nothing.
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[FireTest] handleFire invoked with no firable hardpoints — ` +
+            `selection had ${selectedIds.size} id(s), unit has ` +
+            `${hardpoints.length} hardpoint(s). Skipping.`,
+        );
+        return;
+      }
+
       // Match InteractionTester behaviour exactly — same fields, same
       // fallback. The brief requires identical outcome text for the
-      // same inputs.
+      // same inputs. The outcome doesn't depend on which hardpoint
+      // fires (it's a projectile-vs-target resolution), so we compute
+      // it once and reuse it for every concurrent shot.
       const outcome = resolveInteraction(
         request.projectile,
         {
@@ -593,45 +696,94 @@ export function BattlefieldPreview({ unit }: BattlefieldPreviewProps): React.Rea
         request.hitZone,
         request.range_m,
       );
-      // Re-aim the marker right before firing in case the controller's
-      // local state lagged the live broadcast (e.g. very rapid clicks).
-      // First pass uses the rig's CURRENT pose to project an initial target;
-      // we then push that target into the unit slot, snap the rig to it
-      // (skipping the rate-limited slew), and recompute spawn+direction
-      // from the now-on-target pose. This makes Fire feel instant — the
-      // projectile spawns from the would-be-when-arrived angle, even if
-      // the visible rig is still slewing into place.
-      const initial = computeAim();
-      const initialTarget = getEffectiveTarget(
-        initial.spawn,
-        initial.direction,
+
+      // Re-aim the rig(s) right before firing. We use the FIRST firing
+      // HP's spawn/direction to pick a shared aim target — Front/Side/Rear/
+      // Top yield ONE world point per click (convergent fire). Each
+      // hardpoint then fires from its OWN spawn toward that shared point.
+      const firstAim = slot.getHardpointAim(firing[0].id);
+      if (firstAim === null) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[FireTest] firing HP "${firing[0].id}" has no aim — ` +
+            `slot returned null. Skipping fire.`,
+        );
+        return;
+      }
+      const sharedTarget = getEffectiveTarget(
+        [firstAim.position[0], firstAim.position[1], firstAim.position[2]],
+        [firstAim.direction[0], firstAim.direction[1], firstAim.direction[2]],
         request.range_m,
         request.projectile.delivery_params.kind,
       );
-      unitSlotRef.current?.setAimTarget(initialTarget);
-      unitSlotRef.current?.snapAimToTarget();
-      // LIVE-READ: re-derive spawn+direction from the unit's CURRENT state
-      // immediately before the shot. Any hardpoint edit since the last
-      // aim-change is now visible — no cached aim ever leaks into fire().
-      const { spawn, direction } = computeAim();
-      const target = getEffectiveTarget(
-        spawn,
-        direction,
-        request.range_m,
-        request.projectile.delivery_params.kind,
+      // Push the shared target into the slot so reactive muzzle rigs slew
+      // toward it, then snap to skip the rate-limited slew. snapAimToTarget
+      // operates on every reactive muzzle rig in the unit — if the firing
+      // hardpoints share a single parent rig (common: rail-mounted twins),
+      // one snap covers them all; if they have independent parent rigs,
+      // every one snaps independently in the same pass. No extra loop
+      // needed on our side.
+      slot.setAimTarget(sharedTarget);
+      slot.snapAimToTarget();
+
+      // Mark the target visually (one ring at the shared aim point).
+      fts.setTargetMarker(
+        [firstAim.position[0], firstAim.position[1], firstAim.position[2]],
+        sharedTarget,
       );
-      // Marker visualisation only — fire() itself will use the fresh
-      // spawn/target we pass below, not anything cached here.
-      fts.setTargetMarker(spawn, target);
+
+      // Track the FIRST firing HP as "last fired" for the HUD details.
+      // (Picking the first keeps the HUD stable across re-fires; the
+      // brief specifies the LAST fired, and "last" in a simultaneous
+      // volley is ambiguous — first-in-iteration is the deterministic
+      // choice that matches the order the user sees in the form.)
+      setLastFiredHpId(firing[0].id);
+      // Event-driven HUD refresh — Fire is the canonical event that
+      // pulls a fresh aim.
+      refreshHpHud("fire");
 
       setFireBusy(true);
       try {
-        await fts.fire(request, outcome, spawn, target);
+        // Fire from EACH selected hardpoint. We collect the per-HP
+        // spawn/target tuples first (live-read against the now-snapped
+        // pose) so every barrel uses its OWN muzzle position. The
+        // shared target makes the beams converge naturally — exactly
+        // what real convergent-fire physics looks like.
+        //
+        // FireTestScene now supports a pool of active shots — multiple
+        // fire() calls each push their own ActiveShot onto the pool and
+        // the tick() loop animates them in parallel. Dispatching every
+        // shot at once and awaiting them as Promise.all gives true
+        // simultaneous visible beams (one per barrel).
+        const firePromises: Promise<void>[] = [];
+        for (const h of firing) {
+          const aim = slot.getHardpointAim(h.id);
+          if (aim === null) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `[FireTest] hardpoint "${h.id}" returned null aim post-snap — ` +
+                `skipping this barrel.`,
+            );
+            continue;
+          }
+          const shotSpawn: [number, number, number] = [
+            aim.position[0],
+            aim.position[1],
+            aim.position[2],
+          ];
+          const shotTarget: [number, number, number] = [
+            sharedTarget[0],
+            sharedTarget[1],
+            sharedTarget[2],
+          ];
+          firePromises.push(fts.fire(request, outcome, shotSpawn, shotTarget));
+        }
+        await Promise.all(firePromises);
       } finally {
         setFireBusy(false);
       }
     },
-    [computeAim],
+    [refreshHpHud],
   );
 
   // -------------------------------------------------------------------------
@@ -644,6 +796,8 @@ export function BattlefieldPreview({ unit }: BattlefieldPreviewProps): React.Rea
         onFire={handleFire}
         busy={fireBusy}
         onAimChange={handleAimChange}
+        hardpoints={unit.hardpoints ?? []}
+        onSelectedHardpointsChange={setFireSelectedHardpointIds}
       />
       <div style={hudStyle} aria-hidden>
         <div style={hudTitleStyle}>BATTLEFIELD PREVIEW</div>
@@ -666,8 +820,11 @@ export function BattlefieldPreview({ unit }: BattlefieldPreviewProps): React.Rea
       </div>
       <div style={hpHudStyle} data-testid="hp-debug-hud" aria-hidden>
         <div style={hpHudTitleStyle}>HP DEBUG</div>
+        <div>
+          {hpHud.selectedCount}/{hpHud.totalCount} selected
+        </div>
         {hpHud.id === null ? (
-          <div>no hardpoint</div>
+          <div style={hudDimStyle}>no hardpoint detail</div>
         ) : (
           <>
             <div>id: {hpHud.id}</div>
@@ -680,6 +837,9 @@ export function BattlefieldPreview({ unit }: BattlefieldPreviewProps): React.Rea
             <div style={hudDimStyle}>(pitch/yaw/roll)</div>
           </>
         )}
+        <div style={hudDimStyle}>
+          (at rest — last update: {hpHud.lastEvent ?? "—"})
+        </div>
       </div>
     </div>
   );

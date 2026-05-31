@@ -4,30 +4,20 @@
   "physics_version": "1.0",
   "name": "\"Mk1 Gun Towe",
   "faction": "reclaimer",
+  "description": "Defensive Rail Gun Laser Turret",
   "chassis": {
     "chassis_class": "static_structure",
     "mass_kg": 8000,
     "engine_kW": 0,
     "drivetrain_efficiency": 0,
-    "structure_type": "tower",
     "energy_source": "grid_tethered",
     "battery_capacity_MJ": 200,
     "battery_recharge_rate_MJs": 1,
-    "armor_material": "alloy_composite",
     "armor_thickness_mm": 80,
-    "thermal_capacity_MJ": 120,
+    "armor_material": "alloy_composite",
     "hardpoint_count": 2,
-    "hardpoints": [
-      {
-        "id": "main_gun",
-        "type": "heavy_gun"
-      },
-      {
-        "id": "aux_1",
-        "type": "aux"
-      }
-    ],
     "compatibility_tags": [],
+    "thermal_capacity_MJ": 120,
     "voxel_data": {
       "format": "sparse_grid_v1",
       "grid_size": [
@@ -643,8 +633,125 @@
         }
       },
       "hardpoints": []
-    }
+    },
+    "structure_type": "tower",
+    "hardpoints": [
+      {
+        "id": "main_gun",
+        "type": "heavy_gun"
+      },
+      {
+        "id": "aux_1",
+        "type": "aux"
+      }
+    ],
+    "hardpoint_units_version": "world_m"
   },
-  "role": "structure",
-  "description": "Defensive Rail Gun Laser Turret"
+  "parts": [
+    {
+      "id": "part_1",
+      "name": "mk01",
+      "mass_kg": 100,
+      "power_draw_kW": 5,
+      "category": "weapon",
+      "weapon_type": "beam",
+      "propellant_energy_MJ": 1,
+      "projectile_mass_kg": 0.5,
+      "projectile_id": "part_1_projectile",
+      "barrel_thermal_capacity_MJ": 50,
+      "per_shot_heat_MJ": 3,
+      "cooling_rate_MJs": 2,
+      "drag_coefficient": 0.3,
+      "elevation_range_deg": [
+        -10,
+        30
+      ]
+    }
+  ],
+  "rig": [
+    {
+      "id": "rig_2",
+      "target_node": "rail004_Bottom_0",
+      "motion": "reactive",
+      "parent_rig": "rig_1"
+    },
+    {
+      "id": "rig_3",
+      "target_node": "rail002_Body_0",
+      "motion": "reactive",
+      "pitch": {
+        "min_deg": 45,
+        "max_deg": 45,
+        "rate_dps": 20
+      },
+      "parent_rig": "rig_4"
+    },
+    {
+      "id": "rig_4",
+      "target_node": "rail005_Body_0",
+      "motion": "reactive",
+      "parent_rig": "rig_2"
+    },
+    {
+      "id": "rig_5",
+      "target_node": "rail001_Body_0",
+      "motion": "reactive",
+      "parent_rig": "rig_3"
+    },
+    {
+      "id": "rig_6",
+      "target_node": "rail001_Rail_0",
+      "motion": "reactive",
+      "parent_rig": "rig_5"
+    }
+  ],
+  "mesh_asset": {
+    "kind": "file",
+    "path": "C:\\dev\\Strategy Game\\units\\meshes\\railgun_turret.glb"
+  },
+  "hardpoints": [
+    {
+      "id": "hp_1",
+      "parent_rig_id": null,
+      "local_position": [
+        0,
+        0.012290949496418489,
+        0.009281706785898116
+      ],
+      "local_quaternion": [
+        0,
+        0,
+        0,
+        1
+      ]
+    }
+  ],
+  "vulnerability": {
+    "armor_zones": {
+      "front": {
+        "thickness_mm": 80,
+        "material": "steel"
+      },
+      "side": {
+        "thickness_mm": 80,
+        "material": "steel"
+      },
+      "rear": {
+        "thickness_mm": 80,
+        "material": "steel"
+      },
+      "top": {
+        "thickness_mm": 80,
+        "material": "steel"
+      }
+    },
+    "electronics": [],
+    "crew": {
+      "count": 2,
+      "exposure": "sealed"
+    },
+    "thermal_dissipation_kws": 12,
+    "mobility_redundancy": 0.5,
+    "structural_integrity_mj": 8
+  }
 }
