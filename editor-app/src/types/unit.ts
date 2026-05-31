@@ -167,6 +167,16 @@ export interface MeshHardpoint {
    * unit quaternion in (x, y, z, w) order matching THREE.Quaternion.
    */
   readonly local_quaternion: readonly [number, number, number, number];
+  /**
+   * Optional reference to a `parts[]` entry with `category === "weapon"`. When
+   * set, this hardpoint fires that weapon's projectile (and respects its
+   * timing model: charge → burst → cooldown). When absent or pointing to a
+   * deleted/non-weapon part, the hardpoint is "unarmed" and cannot fire —
+   * the fire-test bar shows a disabled checkbox and the form shows a
+   * warning chip. Loud-over-silent: a stale reference is surfaced, not
+   * dropped.
+   */
+  readonly weapon_part_id?: string;
 }
 
 export interface RigEntry {

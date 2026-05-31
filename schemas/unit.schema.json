@@ -310,6 +310,10 @@
             "minItems": 4,
             "maxItems": 4,
             "description": "Local-space unit quaternion [x,y,z,w] relative to the parent."
+          },
+          "weapon_part_id": {
+            "type": "string",
+            "description": "Optional reference to a parts[].id with category 'weapon'. When set, this hardpoint fires that weapon's projectile and respects its timing model (charge/fire_rate/burst/cooldown). Absent or stale references render the hardpoint as 'unarmed' (cannot fire)."
           }
         }
       }

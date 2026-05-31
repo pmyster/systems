@@ -31,6 +31,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import * as THREE from "three";
 
 import { useMeshAssets } from "../../state/mesh-assets";
+import { isWeapon } from "../../types/part";
 import type { MeshHardpoint, UnitSchematic } from "../../types/unit";
 
 import styles from "./AttributeForm.module.css";
@@ -138,6 +139,12 @@ export function MeshHardpointSection({
   const { selectedHardpointId, setSelectedHardpointId } = useMeshAssets();
   const hardpoints = unit.hardpoints ?? [];
   const rigs = unit.rig ?? [];
+  // Weapon parts available to assign to a hardpoint. Computed once per
+  // render — small lists in practice; the form rebuilds on every keystroke
+  // already, so no useMemo is justified. isWeapon narrows the union to
+  // WeaponPart so .id / .name are typed.
+  const weapons = (unit.parts ?? []).filter(isWeapon);
+  const weaponIds = new Set(weapons.map((w) => w.id));
 
   function update(next: readonly MeshHardpoint[]): void {
     onUnitChange({ ...unit, hardpoints: next });
@@ -358,6 +365,77 @@ export function MeshHardpointSection({
                   onCommit={(n) => setEulerComponent(h.id, "roll", n)}
                   title="Roll (rotation around Z), degrees"
                 />
+              </div>
+
+              {/* Weapon assignment — drives the projectile that this
+                  hardpoint fires AND the timing model (charge / burst /
+                  cooldown) the fire-test sequencer obeys. <None> clears
+                  the assignment; a stale reference (weapon deleted) is
+                  surfaced as a red chip — loud-over-silent, same pattern
+                  as the no-parent chip on the ID row.
+                  ---------------------------------------------------- */}
+              <div
+                style={{ display: "flex", alignItems: "center", gap: 4 }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <label className={styles.label}>Weapon</label>
+                <select
+                  className={styles.select}
+                  value={h.weapon_part_id ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    // Empty string maps back to `undefined` so the
+                    // serialized JSON omits the field entirely — matches
+                    // the "unset" convention used elsewhere (parent_rig_id
+                    // null path). React doesn't have native `delete` on a
+                    // patch object, so we apply the partial here.
+                    if (v === "") {
+                      // Strip weapon_part_id from the hardpoint by
+                      // rebuilding it without that field. patchById
+                      // applies the patch via spread, which CANNOT delete
+                      // a key — so we do the omit inline.
+                      update(
+                        hardpoints.map((x) =>
+                          x.id === h.id
+                            ? {
+                                id: x.id,
+                                parent_rig_id: x.parent_rig_id,
+                                local_position: x.local_position,
+                                local_quaternion: x.local_quaternion,
+                              }
+                            : x,
+                        ),
+                      );
+                    } else {
+                      patchById(h.id, { weapon_part_id: v });
+                    }
+                  }}
+                  title="Weapon (Part) this hardpoint fires. <None> = unarmed."
+                >
+                  <option value="">&lt;None&gt;</option>
+                  {weapons.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name || w.id}
+                    </option>
+                  ))}
+                </select>
+                {h.weapon_part_id !== undefined &&
+                !weaponIds.has(h.weapon_part_id) ? (
+                  <span
+                    title="The referenced weapon part no longer exists on this unit. Pick another weapon or set to <None>."
+                    style={{
+                      display: "inline-block",
+                      padding: "1px 6px",
+                      borderRadius: 10,
+                      fontSize: 10,
+                      color: "#f08080",
+                      background: "rgba(240, 80, 80, 0.10)",
+                      border: "1px solid rgba(240, 80, 80, 0.45)",
+                    }}
+                  >
+                    ⚠ weapon '{h.weapon_part_id}' missing
+                  </span>
+                ) : null}
               </div>
             </div>
             <button

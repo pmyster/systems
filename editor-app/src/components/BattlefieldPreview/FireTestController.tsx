@@ -4,20 +4,25 @@
  * Renders a floating, dark, glassy bar pinned to the bottom-centre of
  * the BattlefieldPreview pane. The bar lets the author:
  *
- *   - Pick a projectile (opens the existing ProjectilePicker modal)
+ *   - Check which armed hardpoints are firing this volley
+ *   - See a "Fires: hp_1 (Main Cannon), …" status line (one row per
+ *     checked HP) — replaces the legacy global Projectile dropdown
  *   - Pick a hit zone (front / side / rear / top)
  *   - Slide the range (50m → 3000m)
  *   - Pick time-dilation (1x / 10x / 100x / 1000x)
  *   - Hit Fire ▶ to launch
  *   - Hit Replay ↻ to repeat with the same inputs
  *
- * The controller is a pure presentational component — it only knows how
- * to gather inputs and shout `onFire(request)` at its parent. The parent
- * (`BattlefieldPreview`) loads the projectile, runs the resolver, and
- * drives the FireTestScene.
+ * The controller is a pure presentational component — it gathers bar
+ * inputs and shouts `onFire(bar request)` at its parent. The parent
+ * (`BattlefieldPreview`) resolves each checked HP to its weapon,
+ * LOADS the weapon's projectile file, runs the resolver, and drives
+ * the FireTestScene through a per-HP timing sequencer.
  *
- * Per the brief: when no projectile is selected, controls are greyed
- * out and a hint reads "Select a projectile to begin →".
+ * A hardpoint is "firable" iff it has a parent rig (spawn frame) AND
+ * a `weapon_part_id` that resolves to a `parts[]` entry with
+ * `category === "weapon"`. Unparented OR unarmed hardpoints get
+ * disabled checkboxes with explanatory tooltips — loud-over-silent.
  */
 
 import {
@@ -27,23 +32,24 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { join } from "@tauri-apps/api/path";
 
-import {
-  listProjectiles,
-  loadProjectile,
-  type ProjectileFileEntry,
-} from "../../file-ops/projectile-ops";
-import type { FireTestRequest } from "../../lib/fire-test/types";
 import { humanizeEnum } from "../../lib/enums";
-import type { MeshHardpoint, ProjectileSchematic } from "../../types";
+import { isWeapon } from "../../types/part";
+import type { MeshHardpoint, UnitSchematic } from "../../types";
 import type { ArmorZone } from "../../types/vulnerability";
 
-import { ProjectilePicker } from "../AttributeForm/ProjectilePicker";
-
-const PROJECTILES_DIR = "C:\\dev\\Strategy Game\\units\\projectiles";
-
 const ARMOR_ZONES: readonly ArmorZone[] = ["front", "side", "rear", "top"];
+
+/**
+ * Bar-level state sent on Fire. Per-HP projectile resolution lives in
+ * BattlefieldPreview.handleFire — each armed hardpoint loads ITS OWN
+ * weapon's projectile and obeys its OWN timing model.
+ */
+export interface FireTestBarRequest {
+  readonly hitZone: ArmorZone;
+  readonly range_m: number;
+  readonly time_dilation: number;
+}
 
 const DILATION_OPTIONS: readonly { value: number; label: string }[] = [
   { value: 1, label: "1x (real)" },
@@ -112,139 +118,133 @@ const segmentedActiveStyle: CSSProperties = {
   color: "#ffffff",
 };
 
-const chipStyle: CSSProperties = {
-  display: "inline-block",
-  padding: "1px 6px",
-  background: "rgba(255,255,255,0.08)",
-  border: "1px solid rgba(255,255,255,0.18)",
-  borderRadius: 10,
-  fontSize: 10,
-  color: "#cfd6dc",
-  marginLeft: 4,
-};
-
 const sliderStyle: CSSProperties = {
   width: 140,
   verticalAlign: "middle",
 };
 
-const modalOverlayStyle: CSSProperties = {
-  position: "absolute",
-  inset: 0,
-  background: "rgba(0,0,0,0.55)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 20,
-};
-
-const modalCardStyle: CSSProperties = {
-  width: "min(560px, 92%)",
-  maxHeight: "80%",
-  overflow: "auto",
-  background: "#1f1f23",
-  border: "1px solid #2a2a2f",
-  borderRadius: 6,
-  padding: 12,
-  boxShadow: "0 12px 28px rgba(0,0,0,0.55)",
-};
 
 // ---------------------------------------------------------------------------
 // Component.
 // ---------------------------------------------------------------------------
 
 export interface FireTestControllerProps {
-  readonly onFire: (request: FireTestRequest) => Promise<void>;
+  readonly onFire: (request: FireTestBarRequest) => Promise<void>;
   readonly busy: boolean;
   /**
-   * Called any time the user changes the projectile or range so the
-   * preview can update the target marker live (before Fire is pressed).
+   * Called any time hitZone or range_m changes so the preview can update
+   * the target marker live (before Fire is pressed). The active hit-zone
+   * is reflected on the world target sprite via this callback.
    */
-  readonly onAimChange?: (
-    projectile: ProjectileSchematic | null,
-    range_m: number,
-  ) => void;
+  readonly onAimChange?: (hitZone: ArmorZone, range_m: number) => void;
   /**
    * The unit's hardpoints — drives the per-hardpoint checkbox row. The
-   * controller is responsible for tracking which ids are checked
-   * (per-session state, NOT persisted) and broadcasting changes via
-   * `onSelectedHardpointsChange`. A hardpoint with `parent_rig_id ===
-   * null` is shown with a disabled checkbox + tooltip — it cannot fire
-   * without a parent rig because the runtime has no spawn frame for it.
-   *
-   * Passed as a readonly array so we can render checkbox UI in the same
-   * order the form shows them, top to bottom.
+   * controller tracks which ids are checked (per-session, NOT persisted)
+   * and broadcasts via `onSelectedHardpointsChange`. A hardpoint with no
+   * `parent_rig_id` (unparented) OR a missing/invalid `weapon_part_id`
+   * (unarmed) is shown with a disabled checkbox + tooltip — it cannot
+   * fire without both a parent rig (spawn frame) and a weapon
+   * (projectile + timing). Passed as a readonly array so the checkbox
+   * row matches the form's top-to-bottom order.
    */
   readonly hardpoints: readonly MeshHardpoint[];
   /**
+   * The unit — used to resolve per-HP `weapon_part_id` references to
+   * weapon parts (for the "Fires:" status line and the "armed" check).
+   * Passing the whole unit instead of a prefiltered weapon list keeps
+   * the controller a thin presentation layer.
+   */
+  readonly unit: UnitSchematic;
+  /**
    * Called whenever the user toggles a checkbox or hits All / None.
    * Receives the FULL current selection set (not a delta) so the parent
-   * can push it straight into shared state — easier to reason about
-   * than reconciling deltas.
+   * can push it straight into shared state.
    */
   readonly onSelectedHardpointsChange: (ids: ReadonlySet<string>) => void;
 }
 
 export function FireTestController(props: FireTestControllerProps): ReactNode {
-  const { onFire, busy, onAimChange, hardpoints, onSelectedHardpointsChange } =
-    props;
-
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [entries, setEntries] = useState<readonly ProjectileFileEntry[]>([]);
-  const [pickError, setPickError] = useState<string | null>(null);
-
-  const [selected, setSelected] = useState<ProjectileFileEntry | null>(null);
-  const [projectile, setProjectile] = useState<ProjectileSchematic | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const {
+    onFire,
+    busy,
+    onAimChange,
+    hardpoints,
+    unit,
+    onSelectedHardpointsChange,
+  } = props;
 
   const [hitZone, setHitZone] = useState<ArmorZone>("front");
   const [range_m, setRangeM] = useState<number>(500);
   const [dilation, setDilation] = useState<number>(100);
 
+  // Resolve weapon parts on the unit, keyed by id, for the "armed" check
+  // and the Fires status line. The map is derived per render — small
+  // lists, no memo justified. A hardpoint is "armed" iff its
+  // weapon_part_id is set AND that id resolves to a part with
+  // category === "weapon" (a non-weapon match counts as unarmed —
+  // loud-over-silent over "any part will do").
+  const weaponById = useMemo(() => {
+    const m = new Map<string, { id: string; name: string }>();
+    for (const p of unit.parts ?? []) {
+      if (isWeapon(p)) m.set(p.id, { id: p.id, name: p.name || p.id });
+    }
+    return m;
+  }, [unit.parts]);
+
+  function isArmed(h: MeshHardpoint): boolean {
+    if (h.weapon_part_id === undefined) return false;
+    return weaponById.has(h.weapon_part_id);
+  }
+
+  function isParented(h: MeshHardpoint): boolean {
+    return h.parent_rig_id !== null && h.parent_rig_id !== "";
+  }
+
+  function isFirable(h: MeshHardpoint): boolean {
+    return isParented(h) && isArmed(h);
+  }
+
   // -------------------------------------------------------------------------
   // Hardpoint selection — per-session, NOT persisted to the unit JSON.
   //
-  // Default: every PARENTED hardpoint is checked on a fresh load / unit
-  // swap / hardpoint list change. Unparented hardpoints (parent_rig_id ===
-  // null) cannot fire — they have no rig frame to spawn from — so the
-  // checkbox is disabled and they default to unchecked.
+  // Default: every FIRABLE hardpoint (parented AND armed) is checked on a
+  // fresh load / unit swap / shape change. Unparented OR unarmed HPs
+  // cannot fire — checkboxes are disabled with explanatory tooltips and
+  // default to unchecked.
   //
-  // The set is rebuilt whenever the hardpoint id set or parent_rig_id
-  // mapping changes shape. We don't rebuild on every render (or every
-  // arbitrary unit edit) — only when an id appears/disappears or a
-  // hardpoint switches between parented and unparented — so user
-  // toggles in the middle of a session survive form edits.
+  // The set is rebuilt only when the SHAPE changes — id set, parented?,
+  // armed? — not on every form keystroke.
   // -------------------------------------------------------------------------
   const [selectedHpIds, setSelectedHpIds] = useState<ReadonlySet<string>>(
     () => new Set<string>(),
   );
 
-  // Build a stable key from the hardpoints' (id, parented?) so the
-  // defaulting effect only fires when the SHAPE changes, not on every
-  // pos/rot tweak. Sorted to ignore reordering — order doesn't affect
-  // which hardpoints exist or which are parented.
+  // Stable key combining (id, parented?, armed?). When ANY of these
+  // change shape (HP added/removed, parent rig assigned, weapon
+  // assigned/cleared) we re-default the selection. Sorted to ignore
+  // reordering — order has no effect on which HPs exist.
   const hpShapeKey = useMemo(() => {
-    const rows = hardpoints.map(
-      (h) => `${h.id}:${h.parent_rig_id !== null && h.parent_rig_id !== "" ? "1" : "0"}`,
-    );
+    const rows = hardpoints.map((h) => {
+      const p = isParented(h) ? "1" : "0";
+      const a = isArmed(h) ? "1" : "0";
+      return `${h.id}:${p}${a}`;
+    });
     rows.sort();
     return rows.join("|");
-  }, [hardpoints]);
+    // weaponById is part of the shape — re-default when weapons change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hardpoints, weaponById]);
 
   // Re-default the selection when the hardpoint shape changes. "All
-  // parented HPs selected" is the default per the brief; we also drop any
-  // selected id that no longer exists so a deleted hardpoint doesn't
-  // linger as a phantom selection.
+  // firable HPs selected" is the default per the brief; drop any
+  // selected id that no longer exists OR is no longer firable.
   useEffect(() => {
     const next = new Set<string>();
     for (const h of hardpoints) {
-      const parented = h.parent_rig_id !== null && h.parent_rig_id !== "";
-      if (parented) next.add(h.id);
+      if (isFirable(h)) next.add(h.id);
     }
     setSelectedHpIds(next);
-    // Intentionally depend on hpShapeKey, not the full hardpoints array —
-    // see comment above. Including `hardpoints` would reset the selection
-    // on every form keystroke.
+    // Intentionally depend on hpShapeKey, not the full hardpoints array.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hpShapeKey]);
 
@@ -265,12 +265,10 @@ export function FireTestController(props: FireTestControllerProps): ReactNode {
     });
   }
 
-  function selectAllParented(): void {
+  function selectAllFirable(): void {
     const next = new Set<string>();
     for (const h of hardpoints) {
-      if (h.parent_rig_id !== null && h.parent_rig_id !== "") {
-        next.add(h.id);
-      }
+      if (isFirable(h)) next.add(h.id);
     }
     setSelectedHpIds(next);
   }
@@ -279,96 +277,44 @@ export function FireTestController(props: FireTestControllerProps): ReactNode {
     setSelectedHpIds(new Set<string>());
   }
 
-  // Load the projectile body when the selected entry changes.
+  // Live aim broadcast — hitZone + range together drive the world target
+  // marker AND the hit-zone label sprite.
   useEffect(() => {
-    if (!selected) {
-      setProjectile(null);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const p = await loadProjectile(selected.path);
-        if (!cancelled) {
-          setProjectile(p);
-          setLoadError(null);
-        }
-      } catch (e: unknown) {
-        if (!cancelled) {
-          setProjectile(null);
-          setLoadError(
-            `Failed to load projectile ${selected.id}: ${
-              e instanceof Error ? e.message : String(e)
-            }`,
-          );
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [selected]);
-
-  // Live aim broadcast.
-  useEffect(() => {
-    if (onAimChange) onAimChange(projectile, range_m);
-  }, [projectile, range_m, onAimChange]);
-
-  async function openPicker(): Promise<void> {
-    setPickError(null);
-    try {
-      void (await join(PROJECTILES_DIR, ""));
-      const rows = await listProjectiles(PROJECTILES_DIR);
-      setEntries(rows);
-      setPickerOpen(true);
-    } catch (e: unknown) {
-      setPickError(
-        `Failed to list projectiles: ${e instanceof Error ? e.message : String(e)}`,
-      );
-    }
-  }
-
-  function buildRequest(): FireTestRequest | null {
-    if (!projectile) return null;
-    return {
-      projectile,
-      hitZone,
-      range_m,
-      time_dilation: dilation,
-    };
-  }
+    if (onAimChange) onAimChange(hitZone, range_m);
+  }, [hitZone, range_m, onAimChange]);
 
   async function handleFire(): Promise<void> {
-    const req = buildRequest();
-    if (!req) return;
-    await onFire(req);
+    await onFire({ hitZone, range_m, time_dilation: dilation });
   }
 
-  // Fire is disabled when busy, when no projectile is picked, OR when no
-  // hardpoints are selected to fire from. The "no hardpoints selected"
-  // condition is new: a multi-hardpoint unit with everything unchecked
-  // would have no shots to fire, so we surface that as a disabled button
-  // rather than silently producing zero beams.
-  const fireDisabled = busy || !projectile || selectedHpIds.size === 0;
+  // Per-HP weapon resolution for the "Fires:" status line. Each currently
+  // CHECKED hp gets a row whether or not it's armed — an unarmed checked
+  // HP shouldn't be checkable in the first place (the checkbox is
+  // disabled), but if a race produces one we surface "— no weapon —" in
+  // muted text instead of dropping it silently.
+  const firesSummary: { readonly hpId: string; readonly weaponName: string | null }[] = [];
+  for (const h of hardpoints) {
+    if (!selectedHpIds.has(h.id)) continue;
+    const wid = h.weapon_part_id;
+    const w = wid !== undefined ? weaponById.get(wid) ?? null : null;
+    firesSummary.push({ hpId: h.id, weaponName: w !== null ? w.name : null });
+  }
+
+  // Fire is disabled when busy OR no checked HP exists OR no checked HP
+  // is firable (every checked one is missing a weapon — effectively no
+  // projectile to fire). The "no projectile" condition is preserved as
+  // an OR — equivalent to "no armed selected HP".
+  const anyCheckedFirable = (() => {
+    for (const h of hardpoints) {
+      if (selectedHpIds.has(h.id) && isFirable(h)) return true;
+    }
+    return false;
+  })();
+  const fireDisabled = busy || selectedHpIds.size === 0 || !anyCheckedFirable;
   const controlsDisabled = busy;
 
   return (
     <>
-      {pickerOpen ? (
-        <div style={modalOverlayStyle}>
-          <div style={modalCardStyle}>
-            <ProjectilePicker
-              projectiles={entries}
-              onSelect={(entry) => {
-                setSelected(entry);
-                setPickerOpen(false);
-              }}
-              onCancel={() => setPickerOpen(false)}
-            />
-          </div>
-        </div>
-      ) : null}
-
       <div style={barStyle}>
         {/* -------- Hardpoint checkbox row -------- */}
         {/*
@@ -398,48 +344,51 @@ export function FireTestController(props: FireTestControllerProps): ReactNode {
           >
             <span style={{ color: "#9aa3ad" }}>Hardpoints:</span>
             {hardpoints.map((h) => {
-              const parented =
-                h.parent_rig_id !== null && h.parent_rig_id !== "";
+              const parented = isParented(h);
+              const armed = isArmed(h);
+              const firable = parented && armed;
               const checked = selectedHpIds.has(h.id);
-              const label = (
+              // Distinct tooltip per failure mode so the author knows
+              // WHICH gate is closed. Compose for the multi-failure
+              // case (no parent AND no weapon).
+              const reasons: string[] = [];
+              if (!parented) reasons.push("Needs a parent rig to fire");
+              if (!armed) reasons.push("No weapon assigned");
+              const title = firable ? `Fire from ${h.id}` : reasons.join(" · ");
+              return (
                 <label
                   key={h.id}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
                     gap: 4,
-                    cursor: parented && !controlsDisabled ? "pointer" : "not-allowed",
-                    opacity: parented ? 1 : 0.45,
+                    cursor: firable && !controlsDisabled ? "pointer" : "not-allowed",
+                    opacity: firable ? 1 : 0.45,
                     color: checked ? "#00ffff" : "#e6e6e6",
                   }}
-                  title={
-                    parented
-                      ? `Fire from ${h.id}`
-                      : "Needs a parent rig to fire"
-                  }
+                  title={title}
                 >
                   <input
                     type="checkbox"
                     checked={checked}
-                    disabled={!parented || controlsDisabled}
+                    disabled={!firable || controlsDisabled}
                     onChange={() => toggleHp(h.id)}
                     style={{
                       cursor:
-                        parented && !controlsDisabled ? "pointer" : "not-allowed",
+                        firable && !controlsDisabled ? "pointer" : "not-allowed",
                     }}
                   />
                   {h.id}
                 </label>
               );
-              return label;
             })}
             <span style={{ color: "#6b7280" }}>|</span>
             <button
               type="button"
               style={controlsDisabled ? { ...buttonStyle, ...disabledStyle } : buttonStyle}
               disabled={controlsDisabled}
-              onClick={selectAllParented}
-              title="Check every hardpoint that has a parent rig"
+              onClick={selectAllFirable}
+              title="Check every hardpoint that is parented AND armed"
             >
               All
             </button>
@@ -455,39 +404,64 @@ export function FireTestController(props: FireTestControllerProps): ReactNode {
           </div>
         ) : null}
 
-        {/* -------- Projectile picker button -------- */}
-        <button
-          type="button"
-          style={controlsDisabled ? { ...buttonStyle, ...disabledStyle } : buttonStyle}
-          disabled={controlsDisabled}
-          onClick={() => {
-            void openPicker();
-          }}
-        >
-          {projectile
-            ? `${projectile.name} ▾`
-            : selected
-              ? `${selected.name} ▾`
-              : "Projectile ▾"}
-        </button>
-
-        {projectile ? (
-          <>
-            <span style={chipStyle}>
-              {humanizeEnum(projectile.delivery_params.kind)}
-            </span>
-            <span style={chipStyle}>
-              {humanizeEnum(projectile.effect_params.kind)}
-            </span>
-          </>
-        ) : (
+        {/* -------- "Fires" status line -------- */}
+        {/*
+          One status line per checked HP. The global projectile dropdown
+          is gone — each armed hardpoint fires ITS OWN weapon's
+          projectile and obeys its OWN timing model. An unarmed checked
+          HP (only possible via a transient race) is muted with
+          "— no weapon —". When nothing is checked, the line reads as
+          a hint to pick one.
+        */}
+        <span style={{ color: "#9aa3ad" }}>Fires:</span>
+        {firesSummary.length === 0 ? (
           <span style={{ color: "#9aa3ad", marginLeft: 4 }}>
-            Select a projectile to begin →
+            (pick a hardpoint above)
+          </span>
+        ) : (
+          <span
+            style={{
+              color: "#e6e6e6",
+              maxWidth: 380,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+            title={firesSummary
+              .map((r) =>
+                r.weaponName !== null
+                  ? `${r.hpId} (${r.weaponName})`
+                  : `${r.hpId} (no weapon)`,
+              )
+              .join(", ")}
+          >
+            {firesSummary.map((r, i) => (
+              <span key={r.hpId}>
+                {r.weaponName !== null ? (
+                  <span>
+                    {r.hpId} ({r.weaponName})
+                  </span>
+                ) : (
+                  <span style={{ color: "#9aa3ad" }}>
+                    {r.hpId} (— no weapon —)
+                  </span>
+                )}
+                {i < firesSummary.length - 1 ? ", " : ""}
+              </span>
+            ))}
           </span>
         )}
 
-        {/* -------- Zone segmented control -------- */}
-        <div style={{ display: "flex", gap: 2, marginLeft: 8 }}>
+        {/* -------- Hit Zone segmented control -------- */}
+        {/*
+          Labeled "Hit Zone:" so the row's purpose reads at a glance
+          (previously the buttons were unlabeled). The active zone is
+          rendered in `segmentedActiveStyle` — distinct background +
+          brighter text — so the current selection is unambiguous even
+          across re-mounts.
+        */}
+        <span style={{ color: "#9aa3ad", marginLeft: 8 }}>Hit Zone:</span>
+        <div style={{ display: "flex", gap: 2 }}>
           {ARMOR_ZONES.map((z) => (
             <button
               key={z}
@@ -501,6 +475,7 @@ export function FireTestController(props: FireTestControllerProps): ReactNode {
               }
               disabled={controlsDisabled}
               onClick={() => setHitZone(z)}
+              title={`Aim at the ${humanizeEnum(z)} zone`}
             >
               {humanizeEnum(z)}
             </button>
@@ -576,18 +551,6 @@ export function FireTestController(props: FireTestControllerProps): ReactNode {
           ↻ Replay
         </button>
 
-        {(pickError ?? loadError) ? (
-          <div
-            style={{
-              flexBasis: "100%",
-              color: "#f08080",
-              padding: "4px 0 0 0",
-              fontSize: 11,
-            }}
-          >
-            {pickError ?? loadError}
-          </div>
-        ) : null}
       </div>
     </>
   );

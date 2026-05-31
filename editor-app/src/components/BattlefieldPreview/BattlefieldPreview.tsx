@@ -25,16 +25,23 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
+import { join } from "@tauri-apps/api/path";
 
+import { loadProjectile } from "../../file-ops/projectile-ops";
 import { resolveInteraction } from "../../lib/resolve-interaction";
 import { getEffectiveTarget } from "../../lib/fire-test/simulator";
 import type { FireTestRequest } from "../../lib/fire-test/types";
 import { MAP_SIZE_M } from "../../lib";
 import { useMeshAssets } from "../../state/mesh-assets";
-import type { MeshHardpoint, ProjectileSchematic, UnitSchematic } from "../../types";
+import { isWeapon } from "../../types/part";
+import type { MeshHardpoint, ProjectileSchematic, UnitSchematic, WeaponPart } from "../../types";
+import type { ArmorZone } from "../../types/vulnerability";
 
 import { attachControls, type ControlsHandle } from "./controls";
-import { FireTestController } from "./FireTestController";
+import {
+  FireTestController,
+  type FireTestBarRequest,
+} from "./FireTestController";
 import {
   createFireTestScene,
   type FireTestSceneHandle,
@@ -44,6 +51,22 @@ import {
   createUnitOnTerrain,
   type UnitOnTerrainHandle,
 } from "./unit-on-terrain";
+
+/**
+ * Absolute on-disk directory for projectile schematics. Mirrors the
+ * constant in FireTestController + WeaponSubform — the editor is
+ * single-user and the path is stable across sessions, so the duplication
+ * is acceptable for now. A central constant would be the next refactor.
+ */
+const PROJECTILES_DIR = "C:\\dev\\Strategy Game\\units\\projectiles";
+
+/**
+ * Sleep helper used by the per-HP firing sequencer. A 0/negative ms wait
+ * resolves immediately so the burst loop doesn't queue a useless
+ * setTimeout(0) on the macrotask queue.
+ */
+const sleep = (ms: number): Promise<void> =>
+  ms <= 0 ? Promise.resolve() : new Promise<void>((r) => setTimeout(r, ms));
 
 interface BattlefieldPreviewProps {
   readonly unit: UnitSchematic;
@@ -618,94 +641,211 @@ export function BattlefieldPreview({ unit }: BattlefieldPreviewProps): React.Rea
     };
   }, []);
 
+  /**
+   * Resolve a weapon part on the unit by id, or return null if absent /
+   * not a weapon. Loud-over-silent: a stale `weapon_part_id` is reported
+   * once per (id, reason) via the warn cache.
+   */
+  const resolveWeaponPart = useCallback(
+    (weaponId: string | undefined): WeaponPart | null => {
+      if (weaponId === undefined) return null;
+      const u = unitRef.current;
+      const part = (u.parts ?? []).find((p) => p.id === weaponId) ?? null;
+      if (part === null) return null;
+      if (!isWeapon(part)) return null;
+      return part;
+    },
+    [],
+  );
+
+  /**
+   * Per-(weapon id) projectile cache keyed by projectile_id. Each load
+   * goes to disk; we cache for the lifetime of the component so a
+   * burst-fire HP doesn't re-read the same file every shot. The cache
+   * is cleared when the unit prop changes (a different unit may
+   * reference different projectiles, and stale entries don't help).
+   */
+  const projectileCacheRef = useRef<Map<string, ProjectileSchematic>>(
+    new Map(),
+  );
+  useEffect(() => {
+    // Cache is scoped to a single unit's lifetime — wipe on unit swap.
+    projectileCacheRef.current = new Map();
+  }, [unit.id]);
+
+  const loadProjectileForWeapon = useCallback(
+    async (weapon: WeaponPart): Promise<ProjectileSchematic | null> => {
+      const id = weapon.projectile_id;
+      if (id === null || id === undefined || id === "") return null;
+      const cached = projectileCacheRef.current.get(id);
+      if (cached !== undefined) return cached;
+      try {
+        const path = await join(PROJECTILES_DIR, `${id}.proj.json`);
+        const p = await loadProjectile(path);
+        projectileCacheRef.current.set(id, p);
+        return p;
+      } catch (e: unknown) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[FireTest] failed to load projectile "${id}" for weapon ` +
+            `"${weapon.id}": ${e instanceof Error ? e.message : String(e)}`,
+        );
+        return null;
+      }
+    },
+    [],
+  );
+
+  /**
+   * Last hitZone + range broadcast from the bar — used by handleAimChange
+   * + handleFire to compute the effective target consistently. Held in a
+   * ref so the callbacks (created once) always see the latest values
+   * without forcing re-creation.
+   */
+  const lastHitZoneRef = useRef<ArmorZone>("front");
+  const lastRangeRef = useRef<number>(500);
+
   const handleAimChange = useCallback(
-    (projectile: ProjectileSchematic | null, range_m: number): void => {
+    (hitZone: ArmorZone, range_m: number): void => {
+      lastHitZoneRef.current = hitZone;
+      lastRangeRef.current = range_m;
       const fts = fireTestRef.current;
       if (!fts) return;
-      if (!projectile) {
-        fts.reset();
-        // No projectile picked → no aim target → reactive muzzle rigs
-        // resume their default ping-pong sweep.
-        unitSlotRef.current?.setAimTarget(null);
-        return;
+
+      // Update the hit-zone label sprite first — it doesn't depend on
+      // having any armed HP and reads as a useful preview even before
+      // a weapon is assigned. (The brief calls this out as "rename the
+      // row label … and the active zone visually selected".)
+      fts.setHitZoneLabel(hitZone);
+
+      // Resolve the FIRST selected armed HP's weapon → projectile so the
+      // marker can use the correct delivery_kind. When no armed HP is
+      // selected, the marker still shows the bbox-derived aim (legacy
+      // behaviour); we use "ballistic" as the assumed kind for the
+      // straight-line aim projection — visually correct for the common
+      // case where no projectile-specific arc is in play.
+      const u = unitRef.current;
+      const selectedIds = fireSelectedHardpointIdsRef.current;
+      const hardpoints: readonly MeshHardpoint[] = u.hardpoints ?? [];
+      let firstArmedSelected: MeshHardpoint | null = null;
+      for (const h of hardpoints) {
+        if (!selectedIds.has(h.id)) continue;
+        const w = resolveWeaponPart(h.weapon_part_id);
+        if (w !== null) {
+          firstArmedSelected = h;
+          break;
+        }
       }
+
       const { spawn, direction } = computeAim();
-      const target = getEffectiveTarget(
-        spawn,
-        direction,
-        range_m,
-        projectile.delivery_params.kind,
-      );
+      // Default to ballistic for the no-projectile preview path.
+      // The straight-line projection is identical for ballistic / guided
+      // / beam, so this is correct for the three most common cases.
+      let kind: ProjectileSchematic["delivery_params"]["kind"] = "ballistic";
+      if (firstArmedSelected !== null) {
+        const w = resolveWeaponPart(firstArmedSelected.weapon_part_id);
+        if (w !== null) {
+          // Try the cache synchronously; if not yet loaded, kick off
+          // a load + refresh on resolve. The marker reads correctly
+          // either way — the worst case is one frame of "ballistic"
+          // projection before the loaded projectile flips it to placed
+          // or dropped (in which case the marker pins to feet anyway).
+          const id = w.projectile_id;
+          if (id !== null && id !== undefined && id !== "") {
+            const cached = projectileCacheRef.current.get(id);
+            if (cached !== undefined) {
+              kind = cached.delivery_params.kind;
+            } else {
+              // Fire-and-forget the load. When it lands we re-trigger
+              // an aim refresh by calling ourselves; the cache hit
+              // path then runs.
+              void loadProjectileForWeapon(w).then((p) => {
+                if (p !== null) {
+                  // Same hitZone/range — re-enter so the marker now
+                  // uses the correct delivery kind.
+                  handleAimChange(
+                    lastHitZoneRef.current,
+                    lastRangeRef.current,
+                  );
+                }
+              });
+            }
+          }
+        }
+      }
+      const target = getEffectiveTarget(spawn, direction, range_m, kind);
       fts.setTargetMarker(spawn, target);
-      // Push the world-space aim target into the unit slot so reactive
-      // muzzle rigs slew their yaw/pitch toward it. The rig animation
-      // tick consumes this each frame; passive/non-muzzle rigs ignore it.
       unitSlotRef.current?.setAimTarget(target);
-      // Event-driven HUD refresh — projectile/range changed, so the
-      // aim that the HUD reflects may have shifted (no rig slew yet,
-      // but the computeAim path was just exercised).
       refreshHpHud("aim-change");
     },
-    [computeAim, refreshHpHud],
+    [computeAim, refreshHpHud, resolveWeaponPart, loadProjectileForWeapon],
   );
 
   const handleFire = useCallback(
-    async (request: FireTestRequest): Promise<void> => {
+    async (barRequest: FireTestBarRequest): Promise<void> => {
       const fts = fireTestRef.current;
       const slot = unitSlotRef.current;
       if (!fts || !slot) return;
       const currentUnit = unitRef.current;
       const selectedIds = fireSelectedHardpointIdsRef.current;
+
       // Resolve which hardpoints we'll fire from: every selected id that
-      // is mounted AND parented. The controller's disabled state already
-      // prevents firing when no HP is selected; we still defensively
-      // filter here so a transient race during a unit swap doesn't fire
-      // from a ghost id.
+      // is mounted, parented, AND armed with a weapon part that resolves
+      // to a real WeaponPart on the unit. The controller's disabled
+      // state already prevents firing when no firable HP is selected;
+      // we re-filter defensively so a transient race during a unit swap
+      // doesn't fire from a ghost id or an unarmed HP.
       const hardpoints: readonly MeshHardpoint[] = currentUnit.hardpoints ?? [];
-      const firing: MeshHardpoint[] = hardpoints.filter(
-        (h) =>
-          selectedIds.has(h.id) &&
-          h.parent_rig_id !== null &&
-          h.parent_rig_id !== "",
-      );
+      interface FirableHp {
+        readonly hp: MeshHardpoint;
+        readonly weapon: WeaponPart;
+        readonly projectile: ProjectileSchematic;
+      }
+      const firing: FirableHp[] = [];
+      for (const h of hardpoints) {
+        if (!selectedIds.has(h.id)) continue;
+        if (h.parent_rig_id === null || h.parent_rig_id === "") continue;
+        const w = resolveWeaponPart(h.weapon_part_id);
+        if (w === null) continue;
+        const p = await loadProjectileForWeapon(w);
+        if (p === null) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[FireTest] weapon "${w.id}" on hp "${h.id}" has no loadable ` +
+              `projectile (projectile_id: ${w.projectile_id ?? "unset"}); ` +
+              `skipping this barrel.`,
+          );
+          continue;
+        }
+        firing.push({ hp: h, weapon: w, projectile: p });
+      }
 
       if (firing.length === 0) {
-        // Loud-over-silent: if the button was somehow clicked with no
-        // valid hardpoints (e.g. race during a unit-swap), say so
-        // instead of silently doing nothing.
+        // Loud-over-silent: if the button was clicked with no firable
+        // HP (e.g. race during a unit-swap or every weapon missing its
+        // projectile file), say so instead of silently doing nothing.
         // eslint-disable-next-line no-console
         console.warn(
           `[FireTest] handleFire invoked with no firable hardpoints — ` +
             `selection had ${selectedIds.size} id(s), unit has ` +
-            `${hardpoints.length} hardpoint(s). Skipping.`,
+            `${hardpoints.length} hardpoint(s) — none resolved to a ` +
+            `parented+armed+projectile-loaded barrel. Skipping.`,
         );
         return;
       }
 
-      // Match InteractionTester behaviour exactly — same fields, same
-      // fallback. The brief requires identical outcome text for the
-      // same inputs. The outcome doesn't depend on which hardpoint
-      // fires (it's a projectile-vs-target resolution), so we compute
-      // it once and reuse it for every concurrent shot.
-      const outcome = resolveInteraction(
-        request.projectile,
-        {
-          vulnerability: currentUnit.vulnerability,
-          thermal_cap_mj: currentUnit.chassis.thermal_capacity_MJ ?? 0,
-        },
-        request.hitZone,
-        request.range_m,
-      );
-
-      // Re-aim the rig(s) right before firing. We use the FIRST firing
-      // HP's spawn/direction to pick a shared aim target — Front/Side/Rear/
-      // Top yield ONE world point per click (convergent fire). Each
-      // hardpoint then fires from its OWN spawn toward that shared point.
-      const firstAim = slot.getHardpointAim(firing[0].id);
+      // Re-aim rigs right before firing. We use the FIRST firing HP's
+      // spawn/direction to pick a shared aim target — Front/Side/Rear/
+      // Top yield ONE world point per click. Each HP then fires from
+      // its OWN spawn toward that shared point. The delivery_kind used
+      // to project the aim point comes from the FIRST firing HP's
+      // projectile; mixed-kind volleys (rare) all aim at the same world
+      // target which is correct for any straight-line delivery.
+      const firstAim = slot.getHardpointAim(firing[0].hp.id);
       if (firstAim === null) {
         // eslint-disable-next-line no-console
         console.warn(
-          `[FireTest] firing HP "${firing[0].id}" has no aim — ` +
+          `[FireTest] firing HP "${firing[0].hp.id}" has no aim — ` +
             `slot returned null. Skipping fire.`,
         );
         return;
@@ -713,77 +853,141 @@ export function BattlefieldPreview({ unit }: BattlefieldPreviewProps): React.Rea
       const sharedTarget = getEffectiveTarget(
         [firstAim.position[0], firstAim.position[1], firstAim.position[2]],
         [firstAim.direction[0], firstAim.direction[1], firstAim.direction[2]],
-        request.range_m,
-        request.projectile.delivery_params.kind,
+        barRequest.range_m,
+        firing[0].projectile.delivery_params.kind,
       );
-      // Push the shared target into the slot so reactive muzzle rigs slew
-      // toward it, then snap to skip the rate-limited slew. snapAimToTarget
-      // operates on every reactive muzzle rig in the unit — if the firing
-      // hardpoints share a single parent rig (common: rail-mounted twins),
-      // one snap covers them all; if they have independent parent rigs,
-      // every one snaps independently in the same pass. No extra loop
-      // needed on our side.
       slot.setAimTarget(sharedTarget);
       slot.snapAimToTarget();
 
-      // Mark the target visually (one ring at the shared aim point).
       fts.setTargetMarker(
         [firstAim.position[0], firstAim.position[1], firstAim.position[2]],
         sharedTarget,
       );
+      fts.setHitZoneLabel(barRequest.hitZone);
 
       // Track the FIRST firing HP as "last fired" for the HUD details.
-      // (Picking the first keeps the HUD stable across re-fires; the
-      // brief specifies the LAST fired, and "last" in a simultaneous
-      // volley is ambiguous — first-in-iteration is the deterministic
-      // choice that matches the order the user sees in the form.)
-      setLastFiredHpId(firing[0].id);
-      // Event-driven HUD refresh — Fire is the canonical event that
-      // pulls a fresh aim.
+      setLastFiredHpId(firing[0].hp.id);
       refreshHpHud("fire");
 
       setFireBusy(true);
       try {
-        // Fire from EACH selected hardpoint. We collect the per-HP
-        // spawn/target tuples first (live-read against the now-snapped
-        // pose) so every barrel uses its OWN muzzle position. The
-        // shared target makes the beams converge naturally — exactly
-        // what real convergent-fire physics looks like.
+        // --------------------------------------------------------------
+        // Per-HP sequencer. Each firable HP runs its own async chain:
         //
-        // FireTestScene now supports a pool of active shots — multiple
-        // fire() calls each push their own ActiveShot onto the pool and
-        // the tick() loop animates them in parallel. Dispatching every
-        // shot at once and awaiting them as Promise.all gives true
-        // simultaneous visible beams (one per barrel).
-        const firePromises: Promise<void>[] = [];
-        for (const h of firing) {
-          const aim = slot.getHardpointAim(h.id);
-          if (aim === null) {
-            // eslint-disable-next-line no-console
-            console.warn(
-              `[FireTest] hardpoint "${h.id}" returned null aim post-snap — ` +
-                `skipping this barrel.`,
-            );
-            continue;
-          }
-          const shotSpawn: [number, number, number] = [
-            aim.position[0],
-            aim.position[1],
-            aim.position[2],
-          ];
-          const shotTarget: [number, number, number] = [
-            sharedTarget[0],
-            sharedTarget[1],
-            sharedTarget[2],
-          ];
-          firePromises.push(fts.fire(request, outcome, shotSpawn, shotTarget));
+        //   sleep(charge_time_ms)
+        //   for i in 0..burst_count-1:
+        //     re-read aim (rig may have slewed mid-burst)
+        //     fts.fire(request, outcome, spawn, target)
+        //     if i < burst-1: sleep(burst_delay_ms || fire_rate_ms)
+        //   sleep(cooldown_ms)
+        //
+        // The cooldown gate is part of the sequencer's promise — Promise.all
+        // doesn't resolve until every HP has completed its cooldown, so
+        // the Fire button stays disabled until the slowest barrel is
+        // ready to fire again. This is the intended UX: you can't
+        // re-press Fire mid-burst.
+        //
+        // Default values reproduce legacy single-shot behaviour exactly:
+        //   charge=0, burst=1, burst_delay=0, fire_rate=0, cooldown=0
+        // → sleep(0); fire once; sleep(0). Same shot, same timing.
+        // --------------------------------------------------------------
+        const sequencerPromises: Promise<void>[] = [];
+        for (const f of firing) {
+          const w = f.weapon;
+          // Apply zero-default semantics here at the boundary so the
+          // sequencer below operates on concrete numbers.
+          const charge_ms = Math.max(0, w.charge_time_ms ?? 0);
+          const fire_rate_ms = Math.max(0, w.fire_rate_ms ?? 0);
+          const burst_count = Math.max(1, w.burst_count ?? 1);
+          // Effective burst delay: per the brief, `burst_delay_ms ||
+          // fire_rate_ms` — when burst_delay is unset OR 0, fall back to
+          // fire_rate. This way an author who sets only fire_rate (the
+          // sustained-fire knob) gets reasonable burst spacing for free;
+          // a burst-only author who sets burst_delay = 100 overrides
+          // fire_rate locally without having to clear the latter.
+          const effective_burst_delay_ms = Math.max(
+            0,
+            (w.burst_delay_ms ?? 0) || fire_rate_ms,
+          );
+          const cooldown_ms = Math.max(0, w.cooldown_ms ?? 0);
+
+          // Resolve outcome ONCE per HP. Outcome is purely a function of
+          // (projectile, target vulnerability, hit zone, range) — none
+          // of those change within a burst, so re-resolving per shot
+          // would be wasted work AND inconsistent if the projectile
+          // were edited mid-burst (unlikely but possible via HMR).
+          const outcome = resolveInteraction(
+            f.projectile,
+            {
+              vulnerability: currentUnit.vulnerability,
+              thermal_cap_mj: currentUnit.chassis.thermal_capacity_MJ ?? 0,
+            },
+            barRequest.hitZone,
+            barRequest.range_m,
+          );
+
+          const seq = (async (): Promise<void> => {
+            await sleep(charge_ms);
+            for (let i = 0; i < burst_count; i++) {
+              // Re-read aim per shot — the rig may have slewed during
+              // the burst (e.g. multi-HP volleys converging on different
+              // targets, or a long burst across a moving aim point).
+              const aim = slot.getHardpointAim(f.hp.id);
+              if (aim === null) {
+                // eslint-disable-next-line no-console
+                console.warn(
+                  `[FireTest] hardpoint "${f.hp.id}" returned null aim ` +
+                    `during burst shot ${i + 1}/${burst_count} — ` +
+                    `aborting this barrel's burst.`,
+                );
+                break;
+              }
+              const shotSpawn: [number, number, number] = [
+                aim.position[0],
+                aim.position[1],
+                aim.position[2],
+              ];
+              const shotTarget: [number, number, number] = [
+                sharedTarget[0],
+                sharedTarget[1],
+                sharedTarget[2],
+              ];
+              // FireTestRequest is per-shot; rebuild it with this HP's
+              // projectile. We do not await the shot's flight here —
+              // the burst pacing is driven by burst_delay_ms, not by
+              // the visual flight duration. fts.fire() pushes onto the
+              // active-shots pool and resolves when THAT shot's dwell
+              // ends; awaiting it would over-stretch the burst by the
+              // flight time. We fire-and-forget the visual; the
+              // sequencer's burst_delay_ms IS the spacing.
+              const request: FireTestRequest = {
+                projectile: f.projectile,
+                hitZone: barRequest.hitZone,
+                range_m: barRequest.range_m,
+                time_dilation: barRequest.time_dilation,
+              };
+              void fts.fire(request, outcome, shotSpawn, shotTarget);
+
+              if (i < burst_count - 1) {
+                await sleep(effective_burst_delay_ms);
+              }
+            }
+            await sleep(cooldown_ms);
+          })();
+          sequencerPromises.push(seq);
         }
-        await Promise.all(firePromises);
+
+        // Wait for every per-HP sequencer to complete its cooldown
+        // before re-enabling the Fire button. The user therefore cannot
+        // re-press Fire while ANY barrel is still in its charge/burst/
+        // cooldown cycle — matches the "real fire-control system"
+        // mental model rather than "spam click".
+        await Promise.all(sequencerPromises);
       } finally {
         setFireBusy(false);
       }
     },
-    [refreshHpHud],
+    [refreshHpHud, resolveWeaponPart, loadProjectileForWeapon],
   );
 
   // -------------------------------------------------------------------------
@@ -797,6 +1001,7 @@ export function BattlefieldPreview({ unit }: BattlefieldPreviewProps): React.Rea
         busy={fireBusy}
         onAimChange={handleAimChange}
         hardpoints={unit.hardpoints ?? []}
+        unit={unit}
         onSelectedHardpointsChange={setFireSelectedHardpointIds}
       />
       <div style={hudStyle} aria-hidden>

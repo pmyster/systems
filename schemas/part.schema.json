@@ -68,6 +68,31 @@
       "maxItems": 2,
       "description": "[min, max] elevation in degrees. -10 to 60 typical for tanks; 0 to 85 for AA; -5 to 5 for direct-fire."
     },
+    "charge_time_ms": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Firing pattern: delay (ms) between trigger and the first shot leaving the barrel. Default 0 (fire immediately)."
+    },
+    "fire_rate_ms": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Firing pattern: time (ms) between shots in sustained fire. Acts as the default for burst_delay_ms when that is unset. Default 0."
+    },
+    "burst_count": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Firing pattern: shots per Fire trigger (1 = single shot, 3 = triple-burst). Default 1."
+    },
+    "burst_delay_ms": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Firing pattern: time (ms) between shots WITHIN a single burst. Default 0 (back-to-back)."
+    },
+    "cooldown_ms": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Firing pattern: lockout (ms) after the burst completes, before the weapon can fire again. Default 0."
+    },
 
     "sensor_modality": {
       "type": "string",

@@ -93,13 +93,15 @@ interface NumberFieldProps {
   readonly help?: string;
   readonly readOnly?: boolean;
   readonly placeholder?: string;
+  /** Native browser tooltip on the label + input. Use for short hints. */
+  readonly title?: string;
 }
 
 export function NumberField(props: NumberFieldProps): ReactNode {
-  const { label, value, onChange, unit, min, max, step, help, readOnly, placeholder } = props;
+  const { label, value, onChange, unit, min, max, step, help, readOnly, placeholder, title } = props;
   return (
     <div className={styles.row}>
-      <label className={styles.label}>
+      <label className={styles.label} {...(title !== undefined ? { title } : {})}>
         {label}
         {unit ? <span className={styles.unit}>({unit})</span> : null}
       </label>
@@ -112,6 +114,7 @@ export function NumberField(props: NumberFieldProps): ReactNode {
           {...(max !== undefined ? { max } : {})}
           {...(step !== undefined ? { step } : {})}
           {...(placeholder !== undefined ? { placeholder } : {})}
+          {...(title !== undefined ? { title } : {})}
           readOnly={readOnly}
           onChange={(e: ChangeEvent<HTMLInputElement>) => {
             const raw = e.target.value;

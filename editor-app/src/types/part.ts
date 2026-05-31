@@ -96,6 +96,38 @@ export interface WeaponPart extends PartCommon {
   readonly cooling_rate_MJs?: number;
   readonly drag_coefficient?: number;
   readonly elevation_range_deg?: ElevationRange;
+  /**
+   * Reference to a standalone Projectile Schematic file (stored at
+   * units/projectiles/<id>.proj.json). The weapon authors the
+   * propellant/heat/cooling characteristics here; the projectile owns
+   * delivery + effect + cluster physics. Optional: a weapon without a
+   * linked projectile is a half-authored draft, not a runtime error.
+   *
+   * `null` is treated as "unset" same as undefined — both shapes
+   * round-trip through JSON and Zod.
+   */
+  readonly projectile_id?: string | null;
+  // ---- Firing-pattern timing model -----------------------------------
+  // All five fields are optional with zero-default semantics — omitting
+  // every one reproduces the legacy single-shot behaviour exactly
+  // (charge=0, fire_rate=0, burst_count=1, burst_delay=0, cooldown=0).
+  //
+  // The sequencer in BattlefieldPreview.handleFire reads these per-HP
+  // and runs:   sleep(charge_time_ms)
+  //           → for i in 0..burst_count-1:
+  //               fire one shot
+  //               if i < burst_count-1: sleep(burst_delay_ms || fire_rate_ms)
+  //           → sleep(cooldown_ms)  (locks out re-fire of THIS HP)
+  /** Delay (ms) between Fire-press and first shot leaving the barrel. */
+  readonly charge_time_ms?: number;
+  /** Time (ms) between shots in continuous fire — used by the burst-delay default. */
+  readonly fire_rate_ms?: number;
+  /** Shots per Fire trigger. Default 1 (single shot). */
+  readonly burst_count?: number;
+  /** Time (ms) between shots WITHIN a single burst. */
+  readonly burst_delay_ms?: number;
+  /** Recovery (ms) after the burst completes, before this HP can fire again. */
+  readonly cooldown_ms?: number;
 }
 
 export interface SensorPart extends PartCommon {
@@ -156,11 +188,17 @@ export interface PartSchematicBase extends PartCommon {
   readonly weapon_type?: WeaponType;
   readonly propellant_energy_MJ?: number;
   readonly projectile_mass_kg?: number;
+  readonly projectile_id?: string | null;
   readonly barrel_thermal_capacity_MJ?: number;
   readonly per_shot_heat_MJ?: number;
   readonly cooling_rate_MJs?: number;
   readonly drag_coefficient?: number;
   readonly elevation_range_deg?: ElevationRange;
+  readonly charge_time_ms?: number;
+  readonly fire_rate_ms?: number;
+  readonly burst_count?: number;
+  readonly burst_delay_ms?: number;
+  readonly cooldown_ms?: number;
   readonly sensor_modality?: SensorModality;
   readonly sensor_range_m?: number;
   readonly sensor_sensitivity?: number;

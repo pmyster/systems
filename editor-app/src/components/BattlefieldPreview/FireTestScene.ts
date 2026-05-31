@@ -81,6 +81,16 @@ export interface FireTestSceneHandle {
     target: readonly [number, number, number],
   ): void;
   /**
+   * Update the floating hit-zone label sprite anchored above the target
+   * marker. The label is rebuilt only when the zone string changes — a
+   * range/position-only update reuses the existing texture.
+   *
+   * The label is parented under the marker group so it tracks marker
+   * visibility and position automatically; toggling the marker hides
+   * the label too.
+   */
+  setHitZoneLabel(zone: string): void;
+  /**
    * Fire a shot. Spawn + target are passed FRESH at every call — the scene
    * never caches them between setTargetMarker and fire. This is the
    * document-is-source-of-truth pattern: editing hardpoint pos/rot in the
@@ -110,6 +120,112 @@ interface TargetMarker {
   readonly ringMat: THREE.MeshBasicMaterial;
   readonly postGeom: THREE.CylinderGeometry;
   readonly postMat: THREE.MeshBasicMaterial;
+  /**
+   * Floating hit-zone label sprite. The current zone is cached so
+   * setHitZoneLabel can short-circuit when nothing changed (the texture
+   * upload cost matters when the controller spams aim-change calls).
+   * Null until the first label is set.
+   */
+  zoneLabel: HitZoneLabel | null;
+  currentZone: string | null;
+}
+
+interface HitZoneLabel {
+  readonly sprite: THREE.Sprite;
+  readonly material: THREE.SpriteMaterial;
+  readonly texture: THREE.CanvasTexture;
+}
+
+/**
+ * Build a small canvas-rendered sprite for the hit-zone label. The
+ * style mirrors HardpointVisuals.createHardpointLabel — a dark
+ * rounded-rect pill with white text, billboarded by the sprite
+ * material so it always faces the camera. Inlined rather than reused
+ * because the styling differs (no halo around the hardpoint id; here
+ * we use a small ⊕ crosshair glyph + the zone in uppercase).
+ */
+function buildHitZoneLabel(zone: string): HitZoneLabel {
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (ctx === null) {
+    // Loud-over-silent: a missing 2D context would ship a blank label.
+    // We still build the sprite so the caller doesn't crash; the user
+    // sees nothing and the warning surfaces the cause.
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[HitZoneLabel] could not acquire 2D canvas context — label will be empty.",
+    );
+  }
+  const text = `⊕ ${zone.toUpperCase()}`;
+  const FONT_PX = 36;
+  const font = `600 ${FONT_PX}px -apple-system, "Segoe UI", sans-serif`;
+  let textW = 80;
+  if (ctx !== null) {
+    ctx.font = font;
+    textW = Math.ceil(ctx.measureText(text).width);
+  }
+  const padX = 16;
+  const canvasW = Math.max(80, textW + padX * 2);
+  const canvasH = 64;
+  canvas.width = canvasW;
+  canvas.height = canvasH;
+
+  if (ctx !== null) {
+    ctx.font = font;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(20, 24, 32, 0.85)";
+    const radius = 10;
+    if (typeof ctx.roundRect === "function") {
+      ctx.beginPath();
+      ctx.roundRect(0, 0, canvasW, canvasH, radius);
+      ctx.fill();
+    } else {
+      ctx.fillRect(0, 0, canvasW, canvasH);
+    }
+    // Border tinted with the marker's red so the label reads as part of
+    // the target system rather than a free-floating chip.
+    ctx.strokeStyle = "rgba(255, 80, 80, 0.85)";
+    ctx.lineWidth = 2;
+    if (typeof ctx.roundRect === "function") {
+      ctx.beginPath();
+      ctx.roundRect(1, 1, canvasW - 2, canvasH - 2, radius);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(text, canvasW / 2, canvasH / 2 + 2);
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.premultiplyAlpha = true;
+  texture.needsUpdate = true;
+
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const sprite = new THREE.Sprite(material);
+  // Scale so the sprite reads as ~0.6m tall in world units — comfortably
+  // visible against terrain at the default zoom but not dominating.
+  const worldH = 0.6;
+  const aspect = canvasW / canvasH;
+  sprite.scale.set(worldH * aspect, worldH, 1);
+  // ~0.5m above the marker group's local origin (which sits on the
+  // ground). The post is 1.5m tall, so this lands above the post tip
+  // while still feeling pinned to the marker.
+  sprite.position.set(0, 2.0, 0);
+  sprite.renderOrder = 999;
+
+  return { sprite, material, texture };
+}
+
+function disposeHitZoneLabel(l: HitZoneLabel): void {
+  l.material.dispose();
+  l.texture.dispose();
 }
 
 interface ProjectileVisual {
@@ -164,7 +280,15 @@ function buildTargetMarker(): TargetMarker {
   group.add(post);
 
   group.visible = false;
-  return { group, ringGeom, ringMat, postGeom, postMat };
+  return {
+    group,
+    ringGeom,
+    ringMat,
+    postGeom,
+    postMat,
+    zoneLabel: null,
+    currentZone: null,
+  };
 }
 
 function disposeTargetMarker(m: TargetMarker): void {
@@ -172,6 +296,12 @@ function disposeTargetMarker(m: TargetMarker): void {
   m.ringMat.dispose();
   m.postGeom.dispose();
   m.postMat.dispose();
+  if (m.zoneLabel) {
+    if (m.zoneLabel.sprite.parent) {
+      m.zoneLabel.sprite.parent.remove(m.zoneLabel.sprite);
+    }
+    disposeHitZoneLabel(m.zoneLabel);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -633,6 +763,26 @@ export function createFireTestScene(
       void _spawn;
       marker.group.position.set(target[0], 0, target[2]);
       marker.group.visible = true;
+    },
+
+    setHitZoneLabel(zone: string) {
+      // No-op when nothing changed — avoids re-rendering the canvas +
+      // re-uploading the texture every frame the controller broadcasts.
+      if (marker.currentZone === zone && marker.zoneLabel !== null) return;
+      // Dispose the previous label (canvas texture + sprite material)
+      // before building the new one. The sprite is detached + the GPU
+      // resources released; the new sprite re-parents under the marker
+      // group so it inherits the marker's position and visibility.
+      if (marker.zoneLabel !== null) {
+        if (marker.zoneLabel.sprite.parent) {
+          marker.zoneLabel.sprite.parent.remove(marker.zoneLabel.sprite);
+        }
+        disposeHitZoneLabel(marker.zoneLabel);
+      }
+      const label = buildHitZoneLabel(zone);
+      marker.group.add(label.sprite);
+      marker.zoneLabel = label;
+      marker.currentZone = zone;
     },
 
     fire(

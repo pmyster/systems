@@ -295,6 +295,14 @@ const weaponPartSchema = z.object({
   cooling_rate_MJs: z.number().nonnegative().optional(),
   drag_coefficient: z.number().nonnegative().optional(),
   elevation_range_deg: elevationRangeSchema.optional(),
+  // Firing-pattern timing model — every field optional with zero-default
+  // semantics in the runtime (see WeaponPart docs in types/part.ts).
+  charge_time_ms: z.number().nonnegative().optional(),
+  fire_rate_ms: z.number().nonnegative().optional(),
+  // burst_count is a discrete shot count — must be an integer ≥ 1 when set.
+  burst_count: z.number().int().min(1).optional(),
+  burst_delay_ms: z.number().nonnegative().optional(),
+  cooldown_ms: z.number().nonnegative().optional(),
 });
 
 const sensorPartSchema = z.object({
@@ -502,6 +510,12 @@ const meshHardpointSchema = z.object({
     z.number(),
     z.number(),
   ]),
+  // Optional reference to a parts[].id where category === "weapon". The
+  // form validates referential integrity (a stale id surfaces as a
+  // warning chip); the schema is intentionally permissive at the wire
+  // level so a unit with a deleted weapon still loads instead of
+  // failing parse — Principle 4 (Invariance: amend, never alter).
+  weapon_part_id: z.string().optional(),
 });
 
 const rigEntrySchema = z.object({
