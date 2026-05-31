@@ -42,10 +42,37 @@ import type {
 } from "../../lib/fire-test/types";
 import type {
   BeamDelivery,
+  EffectKind,
   EnergyMedium,
   ProjectileSchematic,
 } from "../../types/projectile";
 import type { InteractionOutcome } from "../../types/vulnerability";
+
+/**
+ * Projectile body tint by effect kind. Read by the ballistic + guided
+ * visual builders so kinetic shells read white-yellow, energy bolts
+ * cyan, explosive shells orange, etc. Per the user's "loud over silent"
+ * standard: the table is a Record over the EXHAUSTIVE EffectKind union,
+ * so adding a new effect kind to the schema produces a TypeScript error
+ * here until it's wired up — no silent fallback to a default colour.
+ *
+ * `inner` is the hot core (mesh body). `trail` is the head-end of the
+ * trail gradient (the tail always fades to black or transparent).
+ */
+const EFFECT_PROJECTILE_TINT: Readonly<
+  Record<EffectKind, { inner: number; outer: number; trail: [number, number, number] }>
+> = {
+  // Kinetic: classic tracer yellow + warm orange halo + warm trail.
+  kinetic: { inner: 0xfff4a0, outer: 0xff8830, trail: [1.0, 0.667, 0.25] },
+  // Explosive: hotter orange core, deep red halo, smoky orange trail.
+  explosive: { inner: 0xffcc60, outer: 0xff4020, trail: [1.0, 0.5, 0.15] },
+  // Energy: bright cyan core, electric blue halo, cyan trail.
+  energy: { inner: 0xc0f0ff, outer: 0x40a0ff, trail: [0.4, 0.85, 1.0] },
+  // Electronic: cool cyan-white core, violet halo, violet trail.
+  electronic: { inner: 0xc0e0ff, outer: 0x8060ff, trail: [0.5, 0.4, 1.0] },
+  // Persistent area: muted greenish — the carrier shell, not the cloud.
+  persistent_area: { inner: 0xe0ffd0, outer: 0x70c050, trail: [0.55, 0.85, 0.4] },
+};
 
 /** Maximum number of trail samples retained per ballistic / guided shot. */
 const TRAIL_MAX_POINTS = 30;
@@ -308,48 +335,148 @@ function disposeTargetMarker(m: TargetMarker): void {
 // Projectile visual factories — per delivery kind.
 // ---------------------------------------------------------------------------
 
-function buildBallisticOrGuidedVisual(
+/**
+ * Style knobs for the bolt/missile visual family. Keeps the trail +
+ * orientation plumbing shared between ballistic and guided shots while
+ * letting each carry distinct mesh geometry and trail colours.
+ *
+ *  - `mesh`: 'capsule' is the cinematic ballistic bolt (two stacked
+ *     capsules — hot inner, additive halo). 'missile' is the guided
+ *     missile (cylinder body + cone nose).
+ *  - `innerColor` / `outerColor`: read from EFFECT_PROJECTILE_TINT so
+ *     the projectile colour reads the effect kind at a glance.
+ *  - `trailHeadColor`: RGB triple [0..1]^3 for the head of the trail
+ *     gradient. Tail fades to either black (warm tracer feel) or
+ *     transparent (smoke feel) per `trailMode`.
+ *  - `trailMode`: 'tracer' = bright→black additive feel; 'smoke' =
+ *     opaque white-grey fading to alpha — slower, lingering feel.
+ *  - `outerScale`: multiplies the inner capsule radius for the additive
+ *     halo (only used for 'capsule'). The 'missile' style has no halo.
+ */
+interface BoltVisualStyle {
+  readonly mesh: "capsule" | "missile";
+  readonly innerColor: number;
+  readonly outerColor: number;
+  readonly trailHeadColor: readonly [number, number, number];
+  readonly trailMode: "tracer" | "smoke";
+}
+
+function resolveBoltStyle(
+  projectile: ProjectileSchematic | null,
+  meshShape: "capsule" | "missile",
+  trailMode: "tracer" | "smoke",
+): BoltVisualStyle {
+  // Project the effect kind onto a tint. When the projectile is null
+  // (unknown delivery fallback path), default to kinetic — but that
+  // path doesn't use this style anyway; the unknown visual is magenta.
+  const effectKind: EffectKind = projectile?.effect_params.kind ?? "kinetic";
+  const tint = EFFECT_PROJECTILE_TINT[effectKind];
+  return {
+    mesh: meshShape,
+    innerColor: tint.inner,
+    outerColor: tint.outer,
+    trailHeadColor: tint.trail,
+    trailMode,
+  };
+}
+
+function buildBoltVisual(
   withTrail: boolean,
   projectile: ProjectileSchematic | null,
   spawn: readonly [number, number, number],
   target: readonly [number, number, number],
+  style: BoltVisualStyle,
 ): ProjectileVisual {
   const group = new THREE.Group();
   group.name = "FireTestProjectile";
 
-  // Cinematic bolt: two stacked capsules. Inner is a hot tracer-yellow
-  // core, outer is a translucent additive orange halo. CapsuleGeometry's
-  // long axis is +Y; we rotate the whole bolt to align with the velocity
-  // tangent each frame.
+  // The bolt is built on a pivot whose lookAt() each frame aligns the
+  // local +Z axis with the velocity tangent. The inner `boltOrient`
+  // pre-rotates the +Y-axis geometry onto +Z so everything points
+  // forward at rest.
   const boltPivot = new THREE.Group();
   boltPivot.name = "FireTestBolt";
-  // Capsule default axis is +Y; we want the bolt to point +Z (forward) so
-  // that `lookAt` aligns its tip with the velocity tangent. Pre-rotate the
-  // inner pivot by 90deg about X so the capsule axis becomes +Z.
   const boltOrient = new THREE.Group();
   boltOrient.rotation.x = Math.PI / 2;
   boltPivot.add(boltOrient);
 
-  const innerGeom = new THREE.CapsuleGeometry(0.18, 0.9, 4, 8);
-  const innerMat = new THREE.MeshBasicMaterial({ color: 0xfff4a0 });
-  const inner = new THREE.Mesh(innerGeom, innerMat);
-  boltOrient.add(inner);
+  // Per-mesh-shape geometry. We keep the geometry/material handles in
+  // a single array so dispose() can release them without branching.
+  const ownedGeoms: THREE.BufferGeometry[] = [];
+  const ownedMats: THREE.Material[] = [];
 
-  const outerGeom = new THREE.CapsuleGeometry(0.36, 1.4, 4, 8);
-  const outerMat = new THREE.MeshBasicMaterial({
-    color: 0xff8830,
-    transparent: true,
-    opacity: 0.35,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-  });
-  const outer = new THREE.Mesh(outerGeom, outerMat);
-  boltOrient.add(outer);
+  if (style.mesh === "capsule") {
+    // Cinematic bolt: hot inner core + additive halo.
+    const innerGeom = new THREE.CapsuleGeometry(0.18, 0.9, 4, 8);
+    const innerMat = new THREE.MeshBasicMaterial({ color: style.innerColor });
+    const inner = new THREE.Mesh(innerGeom, innerMat);
+    boltOrient.add(inner);
+    ownedGeoms.push(innerGeom);
+    ownedMats.push(innerMat);
+
+    const outerGeom = new THREE.CapsuleGeometry(0.36, 1.4, 4, 8);
+    const outerMat = new THREE.MeshBasicMaterial({
+      color: style.outerColor,
+      transparent: true,
+      opacity: 0.35,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const outer = new THREE.Mesh(outerGeom, outerMat);
+    boltOrient.add(outer);
+    ownedGeoms.push(outerGeom);
+    ownedMats.push(outerMat);
+  } else {
+    // Missile body: thin cylinder + pointed cone nose. Cylinder/Cone
+    // default along +Y; the boltOrient pre-rotation puts them along +Z
+    // so the nose leads. Push the nose forward of the body so the two
+    // visually fuse into a single missile silhouette.
+    const bodyLen = 1.1;
+    const bodyR = 0.12;
+    const bodyGeom = new THREE.CylinderGeometry(bodyR, bodyR, bodyLen, 12);
+    const bodyMat = new THREE.MeshBasicMaterial({ color: style.outerColor });
+    const body = new THREE.Mesh(bodyGeom, bodyMat);
+    boltOrient.add(body);
+    ownedGeoms.push(bodyGeom);
+    ownedMats.push(bodyMat);
+
+    const noseLen = 0.35;
+    const noseGeom = new THREE.ConeGeometry(bodyR, noseLen, 12);
+    const noseMat = new THREE.MeshBasicMaterial({ color: style.innerColor });
+    const nose = new THREE.Mesh(noseGeom, noseMat);
+    // Body centred at origin (length along +Y in geom-space → +Z after
+    // pivot rotation). Place the nose at +Y bodyLen/2 + noseLen/2 in
+    // the orient frame so it sits just past the body tip.
+    nose.position.y = bodyLen / 2 + noseLen / 2;
+    boltOrient.add(nose);
+    ownedGeoms.push(noseGeom);
+    ownedMats.push(noseMat);
+
+    // A tiny stabilising fin ring near the tail so the missile reads as
+    // a missile rather than a sausage. Cheap — 8 verts.
+    const finGeom = new THREE.RingGeometry(bodyR, bodyR * 1.8, 8);
+    const finMat = new THREE.MeshBasicMaterial({
+      color: style.outerColor,
+      side: THREE.DoubleSide,
+    });
+    const fins = new THREE.Mesh(finGeom, finMat);
+    fins.position.y = -bodyLen / 2;
+    // Ring lies in XY plane; rotate so it sits perpendicular to the
+    // missile axis (i.e. faces along +Y in orient-space).
+    fins.rotation.x = Math.PI / 2;
+    boltOrient.add(fins);
+    ownedGeoms.push(finGeom);
+    ownedMats.push(finMat);
+  }
 
   group.add(boltPivot);
 
-  // Trail — fading polyline of last N positions. Use vertex colours so
-  // the head end is bright (warm) and the tail fades to black.
+  // Trail — fading polyline of last N positions. Tracer mode bakes the
+  // gradient into vertex colours fading head→tail (head bright, tail
+  // black). Smoke mode uses an opaque-ish white-grey with alpha falloff
+  // baked into vertex colours too (LineBasicMaterial doesn't support
+  // per-vertex alpha, so we drive the head→tail FADE via the colour's
+  // luminance and a lower material opacity for the lingering feel).
   const trailPositions: number[] = [];
   let trailGeom: THREE.BufferGeometry | null = null;
   let trailMat: THREE.LineBasicMaterial | null = null;
@@ -368,6 +495,9 @@ function buildBallisticOrGuidedVisual(
     trailMat = new THREE.LineBasicMaterial({
       vertexColors: true,
       transparent: true,
+      // Smoke is held more opaquely than a tracer so the trail lingers
+      // visually behind the missile.
+      opacity: style.trailMode === "smoke" ? 0.85 : 1.0,
     });
     trail = new THREE.Line(trailGeom, trailMat);
     group.add(trail);
@@ -418,8 +548,14 @@ function buildBallisticOrGuidedVisual(
         const posAttr = trailGeom.getAttribute("position") as THREE.BufferAttribute;
         const colAttr = trailGeom.getAttribute("color") as THREE.BufferAttribute;
         const count = trailPositions.length / 3;
-        // Warm gradient: head (i = count-1) = (1.0, 0.667, 0.25) ~ 0xffaa40,
-        // tail (i = 0) = (0,0,0). Linear interpolate per-vertex.
+        // Gradient is driven by style.trailHeadColor (the head/bright end)
+        // fading to black at the tail. For 'smoke', we ALSO bias the
+        // floor up toward the head colour so even the tail end of the
+        // trail keeps a smoky-grey luminance (it doesn't go fully black
+        // — only the material's alpha drops it out gradually with the
+        // line's overall opacity). For 'tracer' we go all the way to
+        // black so the trail reads as a fast hot streak.
+        const [hr, hg, hb] = style.trailHeadColor;
         for (let i = 0; i < count; i++) {
           posAttr.setXYZ(
             i,
@@ -428,7 +564,15 @@ function buildBallisticOrGuidedVisual(
             trailPositions[i * 3 + 2],
           );
           const a = (i + 1) / count;
-          colAttr.setXYZ(i, a * 1.0, a * 0.667, a * 0.25);
+          if (style.trailMode === "smoke") {
+            // Bias: tail keeps 35% of head colour so the smoke reads
+            // continuous rather than fading to a black void.
+            const floor = 0.35;
+            const k = floor + (1 - floor) * a;
+            colAttr.setXYZ(i, k * hr, k * hg, k * hb);
+          } else {
+            colAttr.setXYZ(i, a * hr, a * hg, a * hb);
+          }
         }
         posAttr.needsUpdate = true;
         colAttr.needsUpdate = true;
@@ -437,12 +581,97 @@ function buildBallisticOrGuidedVisual(
       }
     },
     dispose() {
-      innerGeom.dispose();
-      innerMat.dispose();
-      outerGeom.dispose();
-      outerMat.dispose();
+      for (const g of ownedGeoms) g.dispose();
+      for (const m of ownedMats) m.dispose();
       if (trailGeom) trailGeom.dispose();
       if (trailMat) trailMat.dispose();
+    },
+  };
+}
+
+/**
+ * Unknown-delivery debug visual — the "loud over silent" fallback.
+ *
+ * When a projectile lands here, the delivery_kind discriminator was
+ * not one we handle (a new schema variant landed without scene
+ * wiring, or a hand-edited file has a bad value). Instead of
+ * silently rendering a ballistic-shaped bolt and pretending nothing
+ * is wrong, we draw a bright MAGENTA arrow from spawn → target that
+ * is impossible to miss, and log a console warning so the cause
+ * surfaces in the next debugging pass.
+ *
+ * The arrow is stationary for the duration of the shot (the flight
+ * sample updates its tip endpoint each frame anyway, but visually
+ * the magenta beam stays put — the user immediately sees "this is
+ * the unknown-delivery fallback, fix the schema").
+ */
+function buildUnknownDebugVisual(
+  spawn: readonly [number, number, number],
+  target: readonly [number, number, number],
+): ProjectileVisual {
+  const group = new THREE.Group();
+  group.name = "FireTestUnknownDebugArrow";
+
+  const spawnV = new THREE.Vector3(spawn[0], spawn[1], spawn[2]);
+  const targetV = new THREE.Vector3(target[0], target[1], target[2]);
+  const delta = new THREE.Vector3().subVectors(targetV, spawnV);
+  const length = Math.max(1e-3, delta.length());
+  const dir = delta.clone().normalize();
+
+  // Magenta. Bright. Unmissable.
+  const MAGENTA = 0xff00ff;
+
+  // Build the arrow shaft (thicker than a normal beam so it shouts
+  // "debug, not a real visual") + a cone tip.
+  const shaftRadius = 0.10;
+  const shaftLen = Math.max(0.01, length - 0.6);
+  const shaftGeom = new THREE.CylinderGeometry(shaftRadius, shaftRadius, shaftLen, 12);
+  const shaftMat = new THREE.MeshBasicMaterial({
+    color: MAGENTA,
+    transparent: true,
+    opacity: 0.95,
+    depthWrite: false,
+  });
+  const shaft = new THREE.Mesh(shaftGeom, shaftMat);
+  // Cylinder is along +Y; we'll re-orient the whole group below.
+  shaft.position.y = shaftLen / 2;
+  group.add(shaft);
+
+  const tipGeom = new THREE.ConeGeometry(shaftRadius * 2.5, 0.6, 14);
+  const tipMat = new THREE.MeshBasicMaterial({
+    color: MAGENTA,
+    transparent: true,
+    opacity: 1.0,
+    depthWrite: false,
+  });
+  const tip = new THREE.Mesh(tipGeom, tipMat);
+  tip.position.y = shaftLen + 0.3;
+  group.add(tip);
+
+  // Orient: align local +Y with spawn→target direction.
+  const quat = new THREE.Quaternion().setFromUnitVectors(
+    new THREE.Vector3(0, 1, 0),
+    dir,
+  );
+  group.position.copy(spawnV);
+  group.quaternion.copy(quat);
+
+  return {
+    group,
+    update(_position, t01) {
+      // Gentle fade-in at the start, fade-out at the end so it
+      // reads as a discrete event rather than an indefinite line.
+      let env = 1;
+      if (t01 < 0.1) env = t01 / 0.1;
+      else if (t01 > 0.85) env = Math.max(0, 1 - (t01 - 0.85) / 0.15);
+      shaftMat.opacity = 0.95 * env;
+      tipMat.opacity = 1.0 * env;
+    },
+    dispose() {
+      shaftGeom.dispose();
+      shaftMat.dispose();
+      tipGeom.dispose();
+      tipMat.dispose();
     },
   };
 }
@@ -577,9 +806,26 @@ function buildProjectileVisual(
   flight_ms: number,
 ): ProjectileVisual {
   switch (projectile.delivery_params.kind) {
-    case "ballistic":
-    case "guided":
-      return buildBallisticOrGuidedVisual(true, projectile, spawn, target);
+    case "ballistic": {
+      // Ballistic shells: capsule bolt + warm tracer trail tinted by
+      // effect kind so kinetic shells read white-yellow, energy bolts
+      // cyan, explosive shells orange. The orientation + path tangent
+      // plumbing is shared with guided via buildBoltVisual.
+      const style = resolveBoltStyle(projectile, "capsule", "tracer");
+      return buildBoltVisual(true, projectile, spawn, target, style);
+    }
+    case "guided": {
+      // Guided missiles: distinct silhouette (cylinder body + cone
+      // nose + tail fin ring) and a smoke trail (lingering, opaque-
+      // grey-ish biased by the effect tint). Visually slower and
+      // smoother than ballistic — the flight duration multiplier
+      // lives in simulator.ts (GUIDED_CRUISE_MPS = 400 m/s, much
+      // slower than typical muzzle velocities), so we don't override
+      // it here; the shape change carries the "this is a missile"
+      // read on its own.
+      const style = resolveBoltStyle(projectile, "missile", "smoke");
+      return buildBoltVisual(true, projectile, spawn, target, style);
+    }
     case "beam": {
       // Halo tint follows the energy medium. ENERGY_MEDIUM_COLOR is also
       // used by the impact-flash and persisted for back-compat; the beam
@@ -600,12 +846,28 @@ function buildProjectileVisual(
     }
     case "placed":
       return buildPlacedVisual();
-    case "dropped":
-      return buildBallisticOrGuidedVisual(false, projectile, spawn, target);
+    case "dropped": {
+      // Dropped ordnance: capsule bolt, no trail (free-fall is short
+      // and a trail through air just clutters the scene). Tinted by
+      // effect kind for parity with ballistic.
+      const style = resolveBoltStyle(projectile, "capsule", "tracer");
+      return buildBoltVisual(false, projectile, spawn, target, style);
+    }
     default: {
+      // Loud over silent: a delivery_kind not in the schema union
+      // landed here. Surface it with a magenta arrow + console
+      // warning so the cause is impossible to miss in a debugging
+      // session, instead of silently rendering a generic bolt.
+      const unknownKind =
+        (projectile.delivery_params as { kind?: unknown })?.kind;
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[FireTestScene] Unknown delivery_kind: '${String(unknownKind)}'. ` +
+          `Falling back to debug arrow.`,
+      );
       const _exh: never = projectile.delivery_params;
       void _exh;
-      return buildBallisticOrGuidedVisual(false, null, spawn, target);
+      return buildUnknownDebugVisual(spawn, target);
     }
   }
 }
