@@ -18,6 +18,7 @@
  */
 
 import type { PartSchematic } from "./part";
+import type { VulnerabilityProfile } from "./vulnerability";
 import type { VoxelGrid } from "./voxel";
 
 // ---------------------------------------------------------------------------
@@ -118,11 +119,54 @@ export type UnitRole =
 
 export type RigMotion = "passive" | "reactive" | "active";
 
+/**
+ * Local-axis label for the rig node's "barrel forward" direction. A unit
+ * vector along that axis (in the node's local space) is transformed by the
+ * node's world quaternion at fire time to yield the world-space firing
+ * direction. Physical input only — no derived semantics live here.
+ */
+export type MuzzleForwardAxis = "+x" | "-x" | "+y" | "-y" | "+z" | "-z";
+
 export interface RigAxisConstraint {
   readonly min_deg: number;
   readonly max_deg: number;
   readonly rate_dps?: number;
   readonly invert?: boolean;
+}
+
+/**
+ * MeshHardpoint — an artist-placed weapon-mount socket.
+ *
+ * A hardpoint is a transform: a local position + local quaternion attached to
+ * either the unit root or one of the unit's rig nodes (via `parent_rig_id`).
+ * The engine spawns projectiles at the hardpoint's world position, flying
+ * along its world +Z axis (Three.js convention: `getWorldDirection()` returns
+ * the +Z direction in world space).
+ *
+ * Per DESIGN.md Principle 2 (Derived-stat discipline) this is a pure physical
+ * input — both `local_position` and `local_quaternion` are facts about where
+ * the muzzle sits in space; no derived gameplay values live here.
+ *
+ * NAMED "MeshHardpoint" (not bare "Hardpoint") to avoid a barrel-export
+ * collision with the voxel-grid `Hardpoint` symbol already exported from
+ * `./voxel` via `types/index.ts`. Two distinct concepts with the same word —
+ * the prefix disambiguates without renaming the older type.
+ */
+export interface MeshHardpoint {
+  /** Unique within the unit, e.g. "main_gun". */
+  readonly id: string;
+  /**
+   * Id of the rig whose `target_node` this hardpoint is parented to in the
+   * Battlefield Preview. Null = parented to the unit root (no rig follow).
+   */
+  readonly parent_rig_id: string | null;
+  /** Local-space position of the hardpoint relative to its parent. */
+  readonly local_position: readonly [number, number, number];
+  /**
+   * Local-space orientation of the hardpoint relative to its parent, as a
+   * unit quaternion in (x, y, z, w) order matching THREE.Quaternion.
+   */
+  readonly local_quaternion: readonly [number, number, number, number];
 }
 
 export interface RigEntry {
@@ -133,6 +177,19 @@ export interface RigEntry {
   readonly yaw?: RigAxisConstraint;
   readonly pitch?: RigAxisConstraint;
   readonly parent_rig?: string;
+  /**
+   * When true, this rig is the projectile's spawn point AND aim direction
+   * for the Fire-Test. At most one rig per unit may be flagged the muzzle
+   * — the authoring UI enforces this when toggling the flag on. Optional
+   * for backwards compat (Principle 4: Invariance — old units fall back to
+   * the legacy bbox top-front + south aim).
+   */
+  readonly muzzle?: boolean;
+  /**
+   * Local axis of the rig's `target_node` that points OUT of the barrel.
+   * Default `"+z"`. Only meaningful when `muzzle === true`.
+   */
+  readonly muzzle_forward?: MuzzleForwardAxis;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +199,42 @@ export interface RigEntry {
 export interface UnitChassis {
   readonly chassis_class: ChassisClass;
   readonly mass_kg: number;
+  /**
+   * Overall unit scale factor applied at runtime ONLY (not at authoring time).
+   * 1.0 = base imported size after 8-unit normalization. 0.7 = ~30% smaller.
+   * 1.5 = 50% larger. Cubic relationship to mass — when scale changes, mass should
+   * scale by scale^3 if volume conservation is desired (designer's choice).
+   *
+   * SUPERSEDED BY `length_m`: when both are set, `length_m` wins. Kept here
+   * for backwards compatibility with units authored before the Option C
+   * world-meters refactor.
+   */
+  readonly scale?: number;
+  /**
+   * Target rendered size of the unit's longest bbox dimension, in world
+   * meters. When set, this is the AUTHORITATIVE scale knob — the runtime
+   * scales the mesh so its longest axis equals `length_m` and ignores
+   * `chassis.scale`. Default rendered size when both are absent: the
+   * mesh-loader's `NORMALIZE_TARGET_M` (8 m).
+   *
+   * Why this exists: post-Option-C the mesh root carries scale (1,1,1)
+   * and every coordinate downstream is in world meters. `length_m` is
+   * the natural unit to author "this tank is 9 meters long" — no
+   * multiplier algebra, no model-natural-size knowledge required.
+   */
+  readonly length_m?: number;
+  /**
+   * Coordinate-system version for the unit's `hardpoints[].local_position`
+   * field. `"world_m"` (the post-Option-C convention) means positions are
+   * in world meters. `"pre_bake"` (or the field being absent) means the
+   * positions were authored against a mesh root with a non-unit scale
+   * applied — the runtime multiplies them by the mesh's `normalizeScale`
+   * at mount time to migrate them to meters, and a console warning prompts
+   * the user to re-save.
+   *
+   * Brand-new units stamped by the editor get `"world_m"` automatically.
+   */
+  readonly hardpoint_units_version?: "pre_bake" | "world_m";
   readonly engine_kW: number;
   readonly drivetrain_efficiency: number;
   readonly energy_source?: EnergySource;
@@ -245,6 +338,24 @@ export interface UnitSchematic extends UnitMeta {
   readonly rig?: readonly RigEntry[];
   readonly role?: UnitRole;
   readonly mesh_asset?: MeshAssetRef;
+  /**
+   * Artist-placed weapon-mount sockets. Each carries a full local
+   * position + quaternion transform; the runtime parents them to the
+   * referenced rig (or to the unit root when `parent_rig_id` is null)
+   * and reads world position + +Z direction at fire time. Optional for
+   * backwards compatibility — old units without this field load fine
+   * and fall back to the legacy rig/muzzle_forward path (Principle 4).
+   */
+  readonly hardpoints?: readonly MeshHardpoint[];
+  /**
+   * Per-zone armor + electronics + crew + thermal physical inputs.
+   * The interaction resolver reads ONLY from this block when computing
+   * outcomes against this unit. Required on the TS type so the resolver
+   * never has to guard against missing data; the load path materializes
+   * defaults from chassis fields if an older file omits it (Principle 4:
+   * Invariance — amend, never alter; old units keep loading).
+   */
+  readonly vulnerability: VulnerabilityProfile;
 }
 
 /**

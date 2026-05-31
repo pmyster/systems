@@ -34,6 +34,8 @@ import type {
   UnitSchematic,
 } from "../../types/unit";
 
+import { InteractionTester } from "./InteractionTester";
+import { VulnerabilitySubform } from "./VulnerabilitySubform";
 import {
   NumberField,
   SelectField,
@@ -74,6 +76,7 @@ export function ChassisSection(props: ChassisSectionProps): ReactNode {
   const tags = c.compatibility_tags ?? [];
 
   return (
+    <>
     <section className={styles.section}>
       <h3 className={styles.sectionHeader}>
         Chassis
@@ -153,6 +156,25 @@ export function ChassisSection(props: ChassisSectionProps): ReactNode {
         min={1}
         step={100}
         help="computed from voxel data once VoxelSculptor integration lands"
+      />
+
+      <NumberField
+        label="Length"
+        unit="m"
+        value={c.length_m}
+        onChange={(length_m) => patch({ length_m })}
+        min={0.01}
+        step={0.5}
+        help="Rendered unit size in meters (longest bbox dim). Defaults to 8m. Overrides Scale when set — preferred for direct world-units control."
+      />
+
+      <NumberField
+        label="Scale"
+        value={c.scale}
+        onChange={(scale) => patch({ scale })}
+        min={0.01}
+        step={0.1}
+        help="Legacy multiplier — 0.5 = small, 1 = standard, 2 = giant. Ignored when Length (m) is set."
       />
 
       <NumberField
@@ -311,5 +333,19 @@ export function ChassisSection(props: ChassisSectionProps): ReactNode {
         </div>
       </div>
     </section>
+    {/*
+      VulnerabilitySubform — per-zone armor, electronics, crew, thermal
+      dissipation, structural integrity. Slice-1 of the projectile↔target
+      interaction model. Authored as separate sub-sections so the chassis
+      card stays focused on motion/energy inputs.
+    */}
+    <VulnerabilitySubform unit={unit} onUnitChange={onUnitChange} />
+    {/*
+      InteractionTester — last subsection in the chassis flow. Lets the
+      author validate "if X hits this unit at zone Y, what happens" without
+      saving the file. Live-derived, never persisted.
+    */}
+    <InteractionTester unit={unit} />
+    </>
   );
 }

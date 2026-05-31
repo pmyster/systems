@@ -31,8 +31,9 @@
  */
 
 import { DEFAULT_PHYSICS_VERSION } from "../lib/constants";
+import { defaultVulnerability } from "../lib/zod-schemas";
 import type { PartSchematic } from "../types/part";
-import type { UnitChassis, UnitSchematic } from "../types/unit";
+import type { MeshHardpoint, UnitChassis, UnitSchematic } from "../types/unit";
 import type { MaterialId, VoxelMap } from "../types/voxel";
 
 import { bumpPhysicsVersion } from "../file-ops/version-bump";
@@ -90,18 +91,24 @@ export interface UnitState {
  * `BLANK_UNIT` slot called out in the lift map.
  */
 export function blankUnit(): UnitSchematic {
+  const chassis = {
+    chassis_class: "ground_tracked" as const,
+    mass_kg: 1000,
+    engine_kW: 100,
+    drivetrain_efficiency: 0.8,
+    // Stamp the post-Option-C coordinate-system version so brand-new units
+    // skip the load-time migration path. Old files on disk (where this
+    // field is absent) are treated as "pre_bake" by the loader.
+    hardpoint_units_version: "world_m" as const,
+  };
   return {
     kind: "unit",
     id: "new_unit",
     physics_version: DEFAULT_PHYSICS_VERSION,
     name: "New Unit",
     faction: "reclaimer",
-    chassis: {
-      chassis_class: "ground_tracked",
-      mass_kg: 1000,
-      engine_kW: 100,
-      drivetrain_efficiency: 0.8,
-    },
+    chassis,
+    vulnerability: defaultVulnerability(chassis),
   };
 }
 
@@ -206,6 +213,29 @@ interface BumpPhysicsVersionAction {
   readonly type: "BumpPhysicsVersion";
 }
 
+/** Append a new hardpoint with sensible defaults (identity rotation at origin). */
+interface AddHardpointAction {
+  readonly type: "AddHardpoint";
+  /** Optional partial seed; reducer fills missing fields with defaults. */
+  readonly partial?: Partial<MeshHardpoint>;
+}
+
+/** Remove a hardpoint by id. No-op if id not present. */
+interface RemoveHardpointAction {
+  readonly type: "RemoveHardpoint";
+  readonly id: string;
+}
+
+/**
+ * Patch a hardpoint by id immutably. Used for both UI edits (form fields)
+ * and gizmo edits (drag-driven position/quaternion updates).
+ */
+interface UpdateHardpointAction {
+  readonly type: "UpdateHardpoint";
+  readonly id: string;
+  readonly patch: Partial<MeshHardpoint>;
+}
+
 /**
  * Load a unit from disk: replaces unit + voxels + file metadata,
  * clears dirty flag. The caller (file-ops/open.ts) has already
@@ -244,6 +274,9 @@ export type UnitAction =
   | PlaceVoxelAction
   | RemoveVoxelAction
   | BumpPhysicsVersionAction
+  | AddHardpointAction
+  | RemoveHardpointAction
+  | UpdateHardpointAction
   | LoadUnitAction
   | NewUnitAction
   | MarkSavedAction;
@@ -347,6 +380,54 @@ export function unitReducer(state: UnitState, action: UnitAction): UnitState {
       const next = bumpPhysicsVersion(state.unit.physics_version);
       if (next === state.unit.physics_version) return state;
       const nextUnit: UnitSchematic = { ...state.unit, physics_version: next };
+      return { ...state, unit: nextUnit, isDirty: true };
+    }
+    case "AddHardpoint": {
+      const current = state.unit.hardpoints ?? [];
+      // Generate the next free "hp_<n>" id. We scan existing ids, parse
+      // any "hp_<digit+>" suffixes, and pick max+1 so deletions don't
+      // collapse the numbering and create duplicate ids.
+      let maxN = 0;
+      for (const h of current) {
+        const m = /^hp_(\d+)$/.exec(h.id);
+        if (m && m[1]) {
+          const n = Number(m[1]);
+          if (Number.isFinite(n) && n > maxN) maxN = n;
+        }
+      }
+      const defaultId = `hp_${maxN + 1}`;
+      const seed: MeshHardpoint = {
+        id: action.partial?.id ?? defaultId,
+        parent_rig_id: action.partial?.parent_rig_id ?? null,
+        local_position: action.partial?.local_position ?? [0, 0, 0],
+        // Identity quaternion (no rotation): (x=0, y=0, z=0, w=1).
+        local_quaternion: action.partial?.local_quaternion ?? [0, 0, 0, 1],
+      };
+      const nextUnit: UnitSchematic = {
+        ...state.unit,
+        hardpoints: [...current, seed],
+      };
+      return { ...state, unit: nextUnit, isDirty: true };
+    }
+    case "RemoveHardpoint": {
+      const current = state.unit.hardpoints ?? [];
+      if (!current.some((h) => h.id === action.id)) return state;
+      const nextUnit: UnitSchematic = {
+        ...state.unit,
+        hardpoints: current.filter((h) => h.id !== action.id),
+      };
+      return { ...state, unit: nextUnit, isDirty: true };
+    }
+    case "UpdateHardpoint": {
+      const current = state.unit.hardpoints ?? [];
+      let found = false;
+      const next = current.map((h) => {
+        if (h.id !== action.id) return h;
+        found = true;
+        return { ...h, ...action.patch };
+      });
+      if (!found) return state;
+      const nextUnit: UnitSchematic = { ...state.unit, hardpoints: next };
       return { ...state, unit: nextUnit, isDirty: true };
     }
     case "LoadUnit": {

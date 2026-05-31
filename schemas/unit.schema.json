@@ -50,6 +50,21 @@
           ]
         },
         "mass_kg": { "type": "number", "minimum": 1 },
+        "scale": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Optional overall unit scale factor applied at runtime in the Battlefield Preview ONLY (not in the Mesh Workspace — authoring always happens at base scale 1). 1.0 = base imported size; 0.7 ≈ 30% smaller; 1.5 = 50% larger. Mass scales by scale^3 if volume conservation is desired (designer's choice). Defaults to 1.0 when omitted (backwards compatible). SUPERSEDED by `length_m` when that field is set."
+        },
+        "length_m": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Target rendered size (longest bbox dimension) of this unit, in world meters. When set, the runtime scales the mesh so its longest axis equals this value; `chassis.scale` is then ignored. When absent, the unit renders at the mesh-loader's normalize target (8 m) multiplied by `chassis.scale`. Authoring intent: 'this tank is 9 m long' → length_m = 9."
+        },
+        "hardpoint_units_version": {
+          "type": "string",
+          "enum": ["pre_bake", "world_m"],
+          "description": "Coordinate-system version for hardpoints[].local_position. 'world_m' = positions are in world meters (post-Option-C convention). 'pre_bake' (or absent) = positions were authored against a mesh root with a non-unit normalize scale; the runtime multiplies them by the mesh's normalizeScale at mount time and prompts a re-save. New units get 'world_m' automatically."
+        },
         "engine_kW": {
           "type": "number",
           "minimum": 0,
@@ -235,6 +250,15 @@
           "parent_rig": {
             "type": "string",
             "description": "Optional id of a parent rig whose motion this one composes onto (e.g. a barrel's parent_rig is the turret)."
+          },
+          "muzzle": {
+            "type": "boolean",
+            "description": "When true, this rig is the projectile spawn point AND aim direction for the Fire-Test. At most one rig per unit may carry this flag; the editor enforces single-muzzle on toggle. Optional — units without a muzzle rig fall back to the legacy bbox top-front + south aim."
+          },
+          "muzzle_forward": {
+            "type": "string",
+            "enum": ["+x", "-x", "+y", "-y", "+z", "-z"],
+            "description": "Local axis of this rig's target_node that points OUT of the barrel. Default '+z'. Only meaningful when muzzle=true."
           }
         }
       }
@@ -255,6 +279,96 @@
         "elite"
       ],
       "description": "Tactical role. Used by the game AI for squad composition and target priority."
+    },
+    "hardpoints": {
+      "type": "array",
+      "description": "Artist-placed weapon-mount sockets. Each has a unique id, an optional parent rig (by rig id), and a full local position + quaternion transform. The engine spawns projectiles at the hardpoint's world position, flying along its world +Z axis (Three.js convention). Optional — old units load fine without it.",
+      "items": {
+        "type": "object",
+        "required": ["id", "parent_rig_id", "local_position", "local_quaternion"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Unique id within the unit, e.g. 'main_gun'."
+          },
+          "parent_rig_id": {
+            "type": ["string", "null"],
+            "description": "Id of the rig (from the unit's rig array) whose target_node this hardpoint is parented to. null = parented to the unit root."
+          },
+          "local_position": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "Local-space position [x,y,z] relative to the parent."
+          },
+          "local_quaternion": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "Local-space unit quaternion [x,y,z,w] relative to the parent."
+          }
+        }
+      }
+    },
+    "vulnerability": {
+      "type": "object",
+      "description": "Per-zone armor + electronics + crew + thermal + structural inputs the engine uses to resolve projectile interactions. Physical inputs only — outcomes (damage taken, EMP susceptibility) are derived at engine time. Optional on disk for backwards compatibility; the editor materializes defaults from chassis fields when loading older files.",
+      "required": [
+        "armor_zones",
+        "electronics",
+        "crew",
+        "thermal_dissipation_kws",
+        "mobility_redundancy",
+        "structural_integrity_mj"
+      ],
+      "properties": {
+        "armor_zones": {
+          "type": "object",
+          "required": ["front", "side", "rear", "top"],
+          "properties": {
+            "front": { "$ref": "#/definitions/zoneArmor" },
+            "side": { "$ref": "#/definitions/zoneArmor" },
+            "rear": { "$ref": "#/definitions/zoneArmor" },
+            "top": { "$ref": "#/definitions/zoneArmor" }
+          }
+        },
+        "electronics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["system", "hardening_db"],
+            "properties": {
+              "system": { "type": "string", "minLength": 1 },
+              "hardening_db": { "type": "number", "minimum": 0 }
+            }
+          }
+        },
+        "crew": {
+          "type": "object",
+          "required": ["count", "exposure"],
+          "properties": {
+            "count": { "type": "integer", "minimum": 0 },
+            "exposure": { "type": "string", "enum": ["sealed", "partial", "open"] }
+          }
+        },
+        "thermal_dissipation_kws": { "type": "number", "minimum": 0 },
+        "mobility_redundancy": { "type": "number", "minimum": 0, "maximum": 1 },
+        "structural_integrity_mj": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    }
+  },
+  "definitions": {
+    "zoneArmor": {
+      "type": "object",
+      "required": ["thickness_mm", "material"],
+      "properties": {
+        "thickness_mm": { "type": "number", "minimum": 0 },
+        "material": { "type": "string", "enum": ["steel", "composite", "reactive", "ceramic"] }
+      }
     }
   }
 }

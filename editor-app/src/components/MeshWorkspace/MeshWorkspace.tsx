@@ -162,7 +162,14 @@ export function MeshWorkspace({
 
   // Publish mesh + skin to the shared context so the Battlefield Preview can
   // render a deep-cloned copy. MeshViewer still owns/displays the master.
-  const { setMeshSource, setSkinImage: publishSkin } = useMeshAssets();
+  // gizmoMode / selectedHardpointId drive the hardpoint TransformControls.
+  const {
+    setMeshSource,
+    setSkinImage: publishSkin,
+    gizmoMode,
+    setGizmoMode,
+    selectedHardpointId,
+  } = useMeshAssets();
 
   // Keep a ref so the dispose effect can always reach the latest mesh.
   const currentMeshRef = useRef<THREE.Group | null>(null);
@@ -227,6 +234,17 @@ export function MeshWorkspace({
         setSelectedTemplateId(ref.template_id);
         setSkinImage(null);
         appliedAssetRef.current = meshAssetKey;
+        // Templates build geometry at true world scale already — no
+        // normalize-bake factor exists, so no coordinate migration is
+        // needed. We DO still want to stamp the unit as "world_m" so
+        // subsequent loads skip this path and the file persists with the
+        // current convention.
+        if (unit.chassis.hardpoint_units_version !== "world_m") {
+          onUnitChange({
+            ...unit,
+            chassis: { ...unit.chassis, hardpoint_units_version: "world_m" },
+          });
+        }
       } else {
         setImportError(
           `Couldn't reload mesh — unknown template "${ref.template_id}".`,
@@ -248,6 +266,56 @@ export function MeshWorkspace({
         setSelectedTemplateId(null);
         setSkinImage(null);
         appliedAssetRef.current = meshAssetKey;
+
+        // Option C migration — hardpoint positions authored before the
+        // mesh-root scale was baked into geometry need a one-shot
+        // multiplication by `normalizeScale` to land in world meters. The
+        // unit's `chassis.hardpoint_units_version` flag records the
+        // coordinate system in use:
+        //   - "world_m"   → already in meters; do nothing.
+        //   - "pre_bake"  → multiply by normalizeScale, warn, mark migrated.
+        //   - undefined   → treat as "pre_bake" (legacy files predate the flag).
+        // We update the in-memory unit only; the file on disk stays untouched
+        // until the user saves, but every viewer downstream sees the migrated
+        // values immediately — no drift between Mesh Workspace and Battlefield
+        // Preview, no broken-looking arrow at the wrong position.
+        const version = unit.chassis.hardpoint_units_version;
+        const needsMigration = version !== "world_m";
+        const ud = group.userData as { normalizeScale?: number };
+        const s = typeof ud.normalizeScale === "number" ? ud.normalizeScale : 1;
+        if (
+          needsMigration &&
+          s !== 1 &&
+          unit.hardpoints &&
+          unit.hardpoints.length > 0
+        ) {
+          const migrated = unit.hardpoints.map((h) => ({
+            ...h,
+            local_position: [
+              h.local_position[0] * s,
+              h.local_position[1] * s,
+              h.local_position[2] * s,
+            ] as readonly [number, number, number],
+          }));
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[Migration] unit "${unit.id}" hardpoint positions converted ` +
+              `from pre-bake to world meters (×${s.toFixed(6)}). Save to persist.`,
+          );
+          onUnitChange({
+            ...unit,
+            chassis: { ...unit.chassis, hardpoint_units_version: "world_m" },
+            hardpoints: migrated,
+          });
+        } else if (needsMigration) {
+          // No hardpoints to migrate (or normalize scale was 1 — same coords
+          // either way). Still stamp the version so future saves carry the
+          // new convention and future loads skip this branch.
+          onUnitChange({
+            ...unit,
+            chassis: { ...unit.chassis, hardpoint_units_version: "world_m" },
+          });
+        }
       } catch (err) {
         if (cancelled) return;
         setImportError(
@@ -491,7 +559,12 @@ export function MeshWorkspace({
 
       {/* 3D viewer — grows to fill available space */}
       <div style={S.viewerWrapper}>
-        <MeshViewer mesh={currentMesh} skinImage={skinImage} />
+        <MeshViewer
+          mesh={currentMesh}
+          skinImage={skinImage}
+          unit={unit}
+          onUnitChange={onUnitChange}
+        />
 
         {/* MaterialPainter overlay */}
         {showPainter && (
@@ -577,6 +650,39 @@ export function MeshWorkspace({
         >
           {skinImage !== null ? "Remove Skin" : "Apply Skin"}
         </button>
+
+        {/* Hardpoint gizmo mode — Move / Rotate / Off. The active button is
+            highlighted; selecting "Off" detaches the TransformControls. The
+            buttons are visible whether or not a hardpoint is currently
+            selected so the artist can pre-pick a mode before clicking a row. */}
+        <div
+          style={{
+            display: "flex",
+            gap: 4,
+            marginLeft: "auto",
+            alignItems: "center",
+          }}
+          title={
+            selectedHardpointId
+              ? `Hardpoint "${selectedHardpointId}" — drag the gizmo to edit`
+              : "Select a hardpoint in the form to attach the gizmo"
+          }
+        >
+          <span style={{ fontSize: 10, color: "#8a93a3" }}>HP Gizmo</span>
+          {(["translate", "rotate", "off"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              style={{
+                ...S.btn,
+                ...(gizmoMode === m ? { background: "#3a4b66" } : undefined),
+              }}
+              onClick={() => setGizmoMode(m)}
+            >
+              {m === "translate" ? "Move" : m === "rotate" ? "Rotate" : "Off"}
+            </button>
+          ))}
+        </div>
 
         {/* Hidden picker for the skin image. */}
         <input

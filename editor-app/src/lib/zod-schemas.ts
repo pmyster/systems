@@ -35,14 +35,27 @@ import type {
   WeaponPart,
 } from "../types/part";
 import type {
+  ClusterModifier,
+  DeliveryParams,
+  EffectParams,
+  ProjectileSchematic,
+} from "../types/projectile";
+import type {
   HardpointSlot,
   MeshAssetRef,
+  MeshHardpoint,
   RigEntry,
   UnitChassis,
   UnitCosts,
   UnitEvolution,
   UnitSchematic,
 } from "../types/unit";
+import type {
+  CrewVulnerability,
+  ElectronicSystem,
+  VulnerabilityProfile,
+  ZoneArmor,
+} from "../types/vulnerability";
 import type {
   Hardpoint,
   VoxelGrid,
@@ -274,6 +287,9 @@ const weaponPartSchema = z.object({
   weapon_type: weaponTypeSchema.optional(),
   propellant_energy_MJ: z.number().nonnegative().optional(),
   projectile_mass_kg: z.number().nonnegative().optional(),
+  // projectile_id references a standalone Projectile Schematic file.
+  // Accept null AND undefined — both serialize as "unset" in JSON.
+  projectile_id: z.string().nullable().optional(),
   barrel_thermal_capacity_MJ: z.number().nonnegative().optional(),
   per_shot_heat_MJ: z.number().nonnegative().optional(),
   cooling_rate_MJs: z.number().nonnegative().optional(),
@@ -337,6 +353,9 @@ export const PartSchematicSchema = z.discriminatedUnion("category", [
 const unitChassisSchema = z.object({
   chassis_class: chassisClassSchema,
   mass_kg: z.number().min(1),
+  scale: z.number().positive().optional(),
+  length_m: z.number().positive().optional(),
+  hardpoint_units_version: z.enum(["pre_bake", "world_m"]).optional(),
   engine_kW: z.number().nonnegative(),
   drivetrain_efficiency: z.number().min(0).max(1),
   energy_source: energySourceSchema.optional(),
@@ -354,6 +373,86 @@ const unitChassisSchema = z.object({
   structure_type: structureTypeSchema.optional(),
   hardpoints: z.array(hardpointSlotSchema).optional(),
 });
+
+// ---------------------------------------------------------------------------
+// Vulnerability profile — per-zone armor + electronics + crew + thermal.
+// All physical inputs (Principle 2). On disk this field is OPTIONAL for
+// backwards compat (Principle 4: old files keep loading). The load path
+// in src/file-ops/open.ts materializes a default profile from chassis
+// fields when missing; first save after load writes the full new shape.
+// ---------------------------------------------------------------------------
+
+const vulnerabilityArmorMaterialSchema = z.enum([
+  "steel",
+  "composite",
+  "reactive",
+  "ceramic",
+]);
+
+const zoneArmorSchema = z.object({
+  thickness_mm: z.number().nonnegative(),
+  material: vulnerabilityArmorMaterialSchema,
+});
+
+const electronicSystemSchema = z.object({
+  system: z.string().min(1),
+  hardening_db: z.number().nonnegative(),
+});
+
+const crewExposureSchema = z.enum(["sealed", "partial", "open"]);
+
+const crewVulnerabilitySchema = z.object({
+  count: z.number().int().nonnegative(),
+  exposure: crewExposureSchema,
+});
+
+export const VulnerabilityProfileSchema = z.object({
+  armor_zones: z.object({
+    front: zoneArmorSchema,
+    side: zoneArmorSchema,
+    rear: zoneArmorSchema,
+    top: zoneArmorSchema,
+  }),
+  electronics: z.array(electronicSystemSchema),
+  crew: crewVulnerabilitySchema,
+  thermal_dissipation_kws: z.number().nonnegative(),
+  mobility_redundancy: z.number().min(0).max(1),
+  structural_integrity_mj: z.number().positive(),
+});
+
+/**
+ * Default vulnerability profile materialized for old unit files that
+ * lack the field. Maps the legacy chassis-wide armor onto all four
+ * zones; everything else gets neutral defaults. Loud-over-silent: the
+ * load path logs a console warning when this kicks in so authors know
+ * to revisit the field on next save.
+ */
+export function defaultVulnerability(chassis: {
+  readonly armor_thickness_mm?: number;
+  readonly thermal_capacity_MJ?: number;
+  readonly mass_kg?: number;
+}): VulnerabilityProfile {
+  const thickness = chassis.armor_thickness_mm ?? 0;
+  // Map legacy chassis material → vulnerability material taxonomy
+  // (the schemas have distinct taxonomies on purpose — see types/vulnerability.ts).
+  // We always default to "steel" because the legacy field is enumerated
+  // separately and isn't a 1:1 mapping; the author picks the physical
+  // material on the new form.
+  const mat = "steel" as const;
+  return {
+    armor_zones: {
+      front: { thickness_mm: thickness, material: mat },
+      side: { thickness_mm: thickness, material: mat },
+      rear: { thickness_mm: thickness, material: mat },
+      top: { thickness_mm: thickness, material: mat },
+    },
+    electronics: [],
+    crew: { count: 2, exposure: "sealed" },
+    thermal_dissipation_kws: (chassis.thermal_capacity_MJ ?? 1) * 0.1,
+    mobility_redundancy: 0.5,
+    structural_integrity_mj: Math.max(1, (chassis.mass_kg ?? 1000) / 1000),
+  };
+}
 
 const unitCostsSchema = z.object({
   power: z.number().nonnegative().optional(),
@@ -384,6 +483,27 @@ const rigAxisConstraintSchema = z.object({
   invert: z.boolean().optional(),
 });
 
+const muzzleForwardAxisSchema = z.enum(["+x", "-x", "+y", "-y", "+z", "-z"]);
+
+/**
+ * MeshHardpoint — artist-placed weapon-mount socket. Position is a 3-tuple
+ * of finite numbers; quaternion is a 4-tuple of finite numbers (the form
+ * always writes a unit quaternion, but we don't reject slightly off-unit
+ * inputs at the schema layer — loud-over-silent: any drift is visible in
+ * the rendered arrow's orientation).
+ */
+const meshHardpointSchema = z.object({
+  id: z.string().min(1),
+  parent_rig_id: z.string().nullable(),
+  local_position: z.tuple([z.number(), z.number(), z.number()]),
+  local_quaternion: z.tuple([
+    z.number(),
+    z.number(),
+    z.number(),
+    z.number(),
+  ]),
+});
+
 const rigEntrySchema = z.object({
   id: z.string(),
   target_node: z.string(),
@@ -392,6 +512,8 @@ const rigEntrySchema = z.object({
   yaw: rigAxisConstraintSchema.optional(),
   pitch: rigAxisConstraintSchema.optional(),
   parent_rig: z.string().optional(),
+  muzzle: z.boolean().optional(),
+  muzzle_forward: muzzleForwardAxisSchema.optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -425,6 +547,105 @@ export const UnitSchematicSchema = z.object({
   tags: z.array(z.string()).optional(),
   rig: z.array(rigEntrySchema).optional(),
   mesh_asset: meshAssetRefSchema.optional(),
+  hardpoints: z.array(meshHardpointSchema).optional(),
+  // Vulnerability is OPTIONAL on the schema so older files still parse;
+  // the load path (src/file-ops/open.ts) materializes defaults and the
+  // top-level UnitSchematic type marks it as REQUIRED so the in-memory
+  // shape is always complete.
+  vulnerability: VulnerabilityProfileSchema.optional(),
+});
+
+// ---------------------------------------------------------------------------
+// Projectile Schematic — standalone files referenced by weapon parts.
+// ---------------------------------------------------------------------------
+
+const ballisticDeliverySchema = z.object({
+  kind: z.literal("ballistic"),
+  muzzle_velocity_mps: z.number().positive(),
+  ballistic_coefficient: z.number().positive(),
+});
+const guidedDeliverySchema = z.object({
+  kind: z.literal("guided"),
+  thrust_n: z.number().positive(),
+  fuel_mass_kg: z.number().nonnegative(),
+  guidance_quality: z.number().min(0).max(1),
+});
+const beamDeliverySchema = z.object({
+  kind: z.literal("beam"),
+  beam_power_kw: z.number().positive(),
+  dwell_time_s: z.number().positive(),
+  divergence_mrad: z.number().nonnegative(),
+});
+const placedDeliverySchema = z.object({
+  kind: z.literal("placed"),
+  trigger_type: z.enum(["proximity", "timer", "tripwire", "command"]),
+  arming_delay_s: z.number().nonnegative(),
+  lifetime_s: z.number().nonnegative(),
+});
+const droppedDeliverySchema = z.object({
+  kind: z.literal("dropped"),
+  drag_coefficient: z.number().positive(),
+});
+
+const deliveryParamsSchema = z.discriminatedUnion("kind", [
+  ballisticDeliverySchema,
+  guidedDeliverySchema,
+  beamDeliverySchema,
+  placedDeliverySchema,
+  droppedDeliverySchema,
+]);
+
+const kineticEffectSchema = z.object({
+  kind: z.literal("kinetic"),
+  penetrator_material: z.enum(["steel", "tungsten", "du", "composite"]),
+  sectional_density_kgm2: z.number().positive(),
+});
+const explosiveEffectSchema = z.object({
+  kind: z.literal("explosive"),
+  payload_mass_kg: z.number().positive(),
+  blast_yield_mj: z.number().positive(),
+});
+const energyEffectSchema = z.object({
+  kind: z.literal("energy"),
+  joules_delivered: z.number().positive(),
+  medium: z.enum(["visible", "ir", "uv", "particle", "plasma"]),
+});
+const electronicEffectSchema = z.object({
+  kind: z.literal("electronic"),
+  disruption_power_kw: z.number().positive(),
+  area_radius_m: z.number().positive(),
+});
+const persistentAreaEffectSchema = z.object({
+  kind: z.literal("persistent_area"),
+  medium: z.enum(["gas", "fire", "smoke", "acid"]),
+  duration_s: z.number().positive(),
+  density: z.number().min(0).max(1),
+});
+
+const effectParamsSchema = z.discriminatedUnion("kind", [
+  kineticEffectSchema,
+  explosiveEffectSchema,
+  energyEffectSchema,
+  electronicEffectSchema,
+  persistentAreaEffectSchema,
+]);
+
+const clusterModifierSchema = z.object({
+  trigger: z.enum(["altitude", "proximity", "timer"]),
+  trigger_value: z.number().positive(),
+  spread_radius_m: z.number().positive(),
+  child_projectile_id: idSchema,
+});
+
+export const ProjectileSchematicSchema = z.object({
+  id: idSchema,
+  name: z.string().min(1).max(80),
+  physics_version: physicsVersionSchema,
+  mass_kg: z.number().nonnegative(),
+  delivery_params: deliveryParamsSchema,
+  effect_params: effectParamsSchema,
+  cluster: clusterModifierSchema.optional(),
+  physics_tags: z.array(z.string()).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -466,15 +687,47 @@ type _AssertPartSchematic = z.infer<typeof PartSchematicSchema> extends PartSche
 type _AssertChassis = z.infer<typeof unitChassisSchema> extends UnitChassis ? true : never;
 type _AssertCosts = z.infer<typeof unitCostsSchema> extends UnitCosts ? true : never;
 type _AssertEvolution = z.infer<typeof evolutionSchema> extends UnitEvolution ? true : never;
-type _AssertUnit = z.infer<typeof UnitSchematicSchema> extends UnitSchematic ? true : never;
+// Vulnerability is required on the TS shape but optional on the Zod schema
+// (so old files parse). We assert the rest of the unit matches and trust
+// the load-path materialization to fill vulnerability before any code
+// reads it. The _AssertVulnerability check above ensures the inner shape
+// of vulnerability itself is in sync between TS and Zod.
+type _AssertUnit = z.infer<typeof UnitSchematicSchema> extends Omit<UnitSchematic, "vulnerability">
+  ? true
+  : never;
 type _AssertGrid = z.infer<typeof VoxelGridSchema> extends VoxelGrid ? true : never;
 type _AssertHardpoint = z.infer<typeof hardpointSchema> extends Hardpoint ? true : never;
 type _AssertHardpointSlot = z.infer<typeof hardpointSlotSchema> extends HardpointSlot ? true : never;
 type _AssertRigEntry = z.infer<typeof rigEntrySchema> extends RigEntry ? true : never;
+type _AssertMeshHardpoint = z.infer<typeof meshHardpointSchema> extends MeshHardpoint
+  ? true
+  : never;
 type _AssertVoxelMaterial = z.infer<typeof voxelMaterialSpecSchema> extends VoxelMaterialSpec
   ? true
   : never;
 type _AssertMeshAssetRef = z.infer<typeof meshAssetRefSchema> extends MeshAssetRef ? true : never;
+type _AssertDeliveryParams = z.infer<typeof deliveryParamsSchema> extends DeliveryParams
+  ? true
+  : never;
+type _AssertEffectParams = z.infer<typeof effectParamsSchema> extends EffectParams
+  ? true
+  : never;
+type _AssertClusterModifier = z.infer<typeof clusterModifierSchema> extends ClusterModifier
+  ? true
+  : never;
+type _AssertProjectile = z.infer<typeof ProjectileSchematicSchema> extends ProjectileSchematic
+  ? true
+  : never;
+type _AssertZoneArmor = z.infer<typeof zoneArmorSchema> extends ZoneArmor ? true : never;
+type _AssertElectronicSystem = z.infer<typeof electronicSystemSchema> extends ElectronicSystem
+  ? true
+  : never;
+type _AssertCrewVulnerability = z.infer<typeof crewVulnerabilitySchema> extends CrewVulnerability
+  ? true
+  : never;
+type _AssertVulnerability = z.infer<typeof VulnerabilityProfileSchema> extends VulnerabilityProfile
+  ? true
+  : never;
 
 // Touch the type aliases so unused-locals doesn't strip them.
 type _SyncChecks = [
@@ -493,7 +746,16 @@ type _SyncChecks = [
   _AssertHardpoint,
   _AssertHardpointSlot,
   _AssertRigEntry,
+  _AssertMeshHardpoint,
   _AssertVoxelMaterial,
   _AssertMeshAssetRef,
+  _AssertDeliveryParams,
+  _AssertEffectParams,
+  _AssertClusterModifier,
+  _AssertProjectile,
+  _AssertZoneArmor,
+  _AssertElectronicSystem,
+  _AssertCrewVulnerability,
+  _AssertVulnerability,
 ];
 export type __EditorSchemaSyncChecks = _SyncChecks;
