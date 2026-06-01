@@ -509,16 +509,16 @@ body,
 .color-palette-current {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .color-palette-current input[type="color"] {
-  width: 44px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid #3a4150;
-  border-radius: 3px;
-  background: #232831;
+  width: 36px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  background: transparent;
   cursor: pointer;
 }
 
@@ -527,6 +527,46 @@ body,
   font-size: 12px;
   letter-spacing: 0.04em;
   color: #d8dde6;
+}
+
+.color-palette-hex-input {
+  background: #1a1a1a;
+  color: #e8d8a8;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  font-size: 12px;
+  padding: 4px 6px;
+  width: 90px;
+}
+
+.color-palette-hex-input:focus {
+  outline: none;
+  border-color: #c9a55c;
+}
+
+.color-palette-preset-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  margin-bottom: 2px;
+}
+
+.color-palette-preset-label {
+  color: #9aa3ad;
+  font-size: 12px;
+}
+
+.color-palette-preset-select {
+  flex: 1;
+  background: #1a1a1a;
+  color: #e6e6e6;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .color-palette-presets {
@@ -538,20 +578,37 @@ body,
 .color-palette-swatch {
   width: 100%;
   aspect-ratio: 1 / 1;
-  min-height: 24px;
-  border: 1px solid #3a4150;
+  min-height: 20px;
+  border: 1px solid #3a3a3a;
   border-radius: 3px;
   cursor: pointer;
   padding: 0;
+  transition: transform 80ms ease;
 }
 
 .color-palette-swatch:hover {
   border-color: #6f8a4a;
+  transform: scale(1.1);
+  z-index: 2;
 }
 
 .color-palette-swatch.is-active {
   border-color: #c9a55c;
+  border-width: 2px;
   box-shadow: 0 0 0 1px #c9a55c inset;
+}
+
+.color-palette-recent-title {
+  color: #9aa3ad;
+  font-size: 11px;
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
+.color-palette-recents {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 3px;
 }
 
 .color-palette-erase-row {
