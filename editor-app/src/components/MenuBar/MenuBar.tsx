@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 import { useUnitState } from "../../state";
+import { useAppMode } from "../../state/appMode";
 import { selectIsDirty, selectWindowTitle } from "../../state/selectors";
 import {
   OpenParseError,
@@ -111,7 +112,19 @@ function MenuButton({ label, hint, onClick }: MenuButtonProps): ReactNode {
 export function MenuBar({ notice, setNotice }: MenuBarProps): ReactNode {
   const { state, dispatch } = useUnitState();
   const isDirty = selectIsDirty(state);
-  const title = selectWindowTitle(state);
+  const mode = useAppMode((s) => s.mode);
+  // The unit-mode title pulls from the unit-store selector. The map-mode
+  // title is a stub until Day 4 wires up real map-project state — without
+  // this conditional the bar shows the unit's filename + dirty marker
+  // even when the user has switched to the Map Editor, which is
+  // confusing.
+  const title =
+    mode === "map"
+      ? "Child of Light Editor — Map Editor (no project loaded)"
+      : selectWindowTitle(state);
+  // Suppress the unit-side "unsaved" dot while in map mode for the same
+  // reason — it's signalling state that isn't visible from this surface.
+  const showDirtyDot = mode === "unit" && isDirty;
 
   const announce = useCallback(
     (msg: string | null) => {
@@ -226,6 +239,12 @@ export function MenuBar({ notice, setNotice }: MenuBarProps): ReactNode {
 
   useEffect(() => {
     const onKey = (ev: KeyboardEvent): void => {
+      // Gate ALL unit-menu shortcuts to Unit mode. The Map editor has its
+      // own MapMenuBar that handles Ctrl+S / Ctrl+Shift+S; without this
+      // guard, Ctrl+N would reset the unit while the user is editing a
+      // map, Ctrl+O would prompt to open a unit file from map mode, etc.
+      const { mode } = useAppMode.getState();
+      if (mode !== "unit") return;
       // Skip shortcuts while typing into an input/textarea.
       const target = ev.target as HTMLElement | null;
       if (target) {
@@ -269,25 +288,33 @@ export function MenuBar({ notice, setNotice }: MenuBarProps): ReactNode {
   return (
     <>
       <span className="app-title">{title}</span>
-      {isDirty ? (
+      {showDirtyDot ? (
         <span style={dirtyDotStyle} title="Unsaved changes" aria-hidden />
       ) : null}
       {notice ? <span style={noticeStyle}>{notice}</span> : null}
-      <div style={menuRowStyle}>
-        <MenuButton label="New" hint="Ctrl+N" onClick={handleNew} />
-        <MenuButton label="Open…" hint="Ctrl+O" onClick={() => void handleOpen()} />
-        <MenuButton label="Save" hint="Ctrl+S" onClick={() => void handleSave()} />
-        <MenuButton
-          label="Save As…"
-          hint="Ctrl+Shift+S"
-          onClick={() => void handleSaveAs()}
-        />
-        <MenuButton
-          label="Bump physics_version"
-          hint="Principle 4 — explicit"
-          onClick={handleBump}
-        />
-      </div>
+      {mode === "unit" ? (
+        // Unit-only action surface. These buttons operate on .json unit
+        // files (New/Open/Save → unit reducers + file-ops). In map mode
+        // the Map editor renders its own MapMenuBar that drives the
+        // map-project directory I/O, so showing both is confusing — the
+        // unit buttons would silently target the unit store, not the
+        // map project the user is actually editing.
+        <div style={menuRowStyle}>
+          <MenuButton label="New" hint="Ctrl+N" onClick={handleNew} />
+          <MenuButton label="Open…" hint="Ctrl+O" onClick={() => void handleOpen()} />
+          <MenuButton label="Save" hint="Ctrl+S" onClick={() => void handleSave()} />
+          <MenuButton
+            label="Save As…"
+            hint="Ctrl+Shift+S"
+            onClick={() => void handleSaveAs()}
+          />
+          <MenuButton
+            label="Bump physics_version"
+            hint="Principle 4 — explicit"
+            onClick={handleBump}
+          />
+        </div>
+      ) : null}
     </>
   );
 }

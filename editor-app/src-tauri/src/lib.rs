@@ -1,7 +1,111 @@
+use serde::Serialize;
+
+mod map_project;
+
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+/// Row returned by `list_projectile_files` — enough for the picker UI
+/// to render without round-tripping the full projectile body.
+#[derive(Serialize)]
+struct ProjectileFileEntry {
+    path: String,
+    id: String,
+    name: String,
+}
+
+/// Enumerate `*.proj.json` files in a directory and pull `id` + `name`
+/// from each. Per the constitution's "loud over silent" rule, files
+/// that fail to parse are logged to stderr (so they show up in the
+/// dev console / Rust log) AND skipped from the returned list rather
+/// than silently swallowed. The skipped count is implicit in the
+/// directory-vs-list size delta — the UI can surface a warning if it
+/// needs to.
+#[tauri::command]
+fn list_projectile_files(dir: String) -> Result<Vec<ProjectileFileEntry>, String> {
+    let dir_path = std::path::Path::new(&dir);
+    if !dir_path.exists() {
+        // Treat a missing directory as "no projectiles yet" — the
+        // first save will create it via write_unit_file's mkdir-p.
+        return Ok(Vec::new());
+    }
+    let read = std::fs::read_dir(&dir)
+        .map_err(|e| format!("Failed to read dir {dir}: {e}"))?;
+    let mut out: Vec<ProjectileFileEntry> = Vec::new();
+    for entry in read {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("[list_projectile_files] dir entry error: {e}");
+                continue;
+            }
+        };
+        let path = entry.path();
+        // Filter to `*.proj.json`. We do this by string suffix on the
+        // filename so we catch the compound extension reliably across
+        // platforms (Path::extension only returns the last segment).
+        let file_name = match path.file_name().and_then(|s| s.to_str()) {
+            Some(s) => s,
+            None => continue,
+        };
+        if !file_name.ends_with(".proj.json") {
+            continue;
+        }
+        let path_str = match path.to_str() {
+            Some(s) => s.to_string(),
+            None => {
+                eprintln!(
+                    "[list_projectile_files] non-utf8 path skipped: {:?}",
+                    path
+                );
+                continue;
+            }
+        };
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("[list_projectile_files] read failed {path_str}: {e}");
+                continue;
+            }
+        };
+        // We don't deserialize the full projectile shape here — that
+        // would couple Rust to the TS schema. We only need id + name,
+        // which we pull via serde_json::Value lookup.
+        let v: serde_json::Value = match serde_json::from_str(&text) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[list_projectile_files] parse failed {path_str}: {e}");
+                continue;
+            }
+        };
+        let id = match v.get("id").and_then(|x| x.as_str()) {
+            Some(s) => s.to_string(),
+            None => {
+                eprintln!(
+                    "[list_projectile_files] missing id field {path_str}",
+                );
+                continue;
+            }
+        };
+        let name = match v.get("name").and_then(|x| x.as_str()) {
+            Some(s) => s.to_string(),
+            None => {
+                eprintln!(
+                    "[list_projectile_files] missing name field {path_str}",
+                );
+                continue;
+            }
+        };
+        out.push(ProjectileFileEntry {
+            path: path_str,
+            id,
+            name,
+        });
+    }
+    Ok(out)
 }
 
 /// Read a UTF-8 text file from an absolute path.
@@ -17,7 +121,9 @@ fn greet(name: &str) -> String {
 /// the documented escape hatch.
 #[tauri::command]
 fn read_unit_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read {path}: {e}"))
+    let bytes = std::fs::read(&path)
+        .map_err(|e| format!("Failed to read {path}: {e}"))?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// Write a UTF-8 text file to an absolute path, creating parent
@@ -57,7 +163,12 @@ pub fn run() {
             greet,
             read_unit_file,
             write_unit_file,
-            read_binary_file
+            read_binary_file,
+            list_projectile_files,
+            map_project::create_map_project,
+            map_project::open_map_project,
+            map_project::save_map_project,
+            map_project::autosave_map_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

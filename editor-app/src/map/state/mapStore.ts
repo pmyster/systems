@@ -1,0 +1,199 @@
+/**
+ * Authoritative client-side state for the Map Editor.
+ *
+ * Architecture notes:
+ *   - All terrain edits flow through the Command bus (see
+ *     `../commands/CommandBus.ts`). Commands MUTATE the heightmap's
+ *     Float32Array in place (we cannot afford to clone a 129*129*4 byte
+ *     buffer per brush stroke) and bump `terrain.revision` via
+ *     `_markTerrainDirty()`. The scene manager subscribes and reacts.
+ *   - Objects and spawn points are immutable records keyed by id so React
+ *     can do cheap reference-equality re-render checks via selectors.
+ *   - Tool / brush state is UI-driven (not Command-driven) and uses the
+ *     `setTool` / `setBrushRadius` / `setBrushStrength` helpers.
+ *
+ * Naming convention:
+ *   - Methods prefixed `_` are MUTATORS for Commands only. UI code MUST
+ *     NOT call them — go through Commands so the change is undoable.
+ *   - Public methods (no underscore) are safe for any caller.
+ *
+ * Zustand v5 exposes `getState` / `setState` / `subscribe` directly on the
+ * hook itself, so non-React code can use `useMapStore.getState()` etc.
+ * We re-export the hook as `mapStore` to make this intent explicit.
+ */
+
+import { create } from "zustand";
+
+import {
+  DEFAULT_HEIGHTMAP_HEIGHT_PX,
+  DEFAULT_HEIGHTMAP_WIDTH_PX,
+} from "../coords/constants";
+
+export type ToolKind = "sculpt-raise" | "sculpt-lower" | "place" | "select";
+export type BrushFalloff = "gaussian";
+
+export interface InstanceObject {
+  readonly id: string;
+  readonly prefabId: string;
+  readonly position: { x: number; y: number; z: number };
+  readonly rotation: { x: number; y: number; z: number };
+  readonly scale: { x: number; y: number; z: number };
+  readonly properties: Record<string, unknown>;
+}
+
+export interface SpawnPoint {
+  readonly id: string;
+  readonly kind: string;
+  readonly position: { x: number; y: number; z: number };
+  readonly facing: number;
+  readonly team?: number;
+}
+
+export interface Selection {
+  readonly kind: "none" | "object" | "spawn";
+  readonly id: string | null;
+}
+
+export interface MapState {
+  terrain: {
+    widthPx: number;
+    heightPx: number;
+    /** Mutated in place by Commands; never replaced. */
+    heightmap: Float32Array;
+    /** Bump on every terrain edit so subscribers can refresh. */
+    revision: number;
+  };
+  objects: Record<string, InstanceObject>;
+  spawnPoints: Record<string, SpawnPoint>;
+  selection: Selection;
+  tool: ToolKind;
+  brush: { radiusM: number; strength: number; falloff: BrushFalloff };
+
+  // --- Internal mutators (Commands only — UI must not call these) ---
+  _markTerrainDirty(): void;
+  _setObjects(next: Record<string, InstanceObject>): void;
+  _setSpawnPoints(next: Record<string, SpawnPoint>): void;
+  _setSelection(sel: Selection): void;
+
+  // --- UI-driven tool/brush state ---
+  setTool(t: ToolKind): void;
+  setBrushRadius(r: number): void;
+  setBrushStrength(s: number): void;
+}
+
+export const useMapStore = create<MapState>((set) => ({
+  terrain: {
+    widthPx: DEFAULT_HEIGHTMAP_WIDTH_PX,
+    heightPx: DEFAULT_HEIGHTMAP_HEIGHT_PX,
+    heightmap: new Float32Array(
+      DEFAULT_HEIGHTMAP_WIDTH_PX * DEFAULT_HEIGHTMAP_HEIGHT_PX,
+    ),
+    revision: 0,
+  },
+  objects: {},
+  spawnPoints: {},
+  selection: { kind: "none", id: null },
+  tool: "sculpt-raise",
+  brush: { radiusM: 4, strength: 0.5, falloff: "gaussian" },
+
+  _markTerrainDirty: () =>
+    set((s) => ({
+      terrain: { ...s.terrain, revision: s.terrain.revision + 1 },
+    })),
+  _setObjects: (next) => set({ objects: next }),
+  _setSpawnPoints: (next) => set({ spawnPoints: next }),
+  _setSelection: (sel) => set({ selection: sel }),
+
+  setTool: (t) => set({ tool: t }),
+  setBrushRadius: (r) => set((s) => ({ brush: { ...s.brush, radiusM: r } })),
+  setBrushStrength: (st) =>
+    set((s) => ({ brush: { ...s.brush, strength: st } })),
+}));
+
+/**
+ * Non-React access — for MapSceneManager and Commands. Stable reference,
+ * identical capability surface to `useMapStore` (zustand v5 puts
+ * `getState` / `setState` / `subscribe` on the hook itself).
+ */
+export const mapStore = useMapStore;
+
+/**
+ * --- Dirty-pixel accumulator (module-singleton) -----------------------
+ *
+ * Commands writing to the heightmap call `_accumulateDirty(idx)` for each
+ * pixel they touch BEFORE bumping the terrain revision via
+ * `_markTerrainDirty()`. The scene manager's revision subscriber then
+ * calls `_drainDirty()`:
+ *   - non-null: apply selective per-pixel upload to the GPU (cheap).
+ *   - null: do a full heightmap re-upload (covers initial mount and bulk
+ *     changes like load/reset where per-pixel tracking would be silly).
+ *
+ * Living at module scope rather than on the store keeps zustand's state
+ * shape pristine (no transient mutable Set on every snapshot). The
+ * trade-off is one shared accumulator per process — fine because there's
+ * exactly one MapSceneManager active at a time.
+ */
+let pendingDirty: Set<number> | null = null;
+
+/** Called by Commands for each pixel they mutate. */
+export function _accumulateDirty(idx: number): void {
+  if (!pendingDirty) pendingDirty = new Set();
+  pendingDirty.add(idx);
+}
+
+/** Called by the scene manager when reacting to a revision bump. */
+export function _drainDirty(): Set<number> | null {
+  const d = pendingDirty;
+  pendingDirty = null;
+  return d;
+}
+
+/**
+ * Reset terrain to flat zero. Mutates the existing heightmap in place
+ * (preserving its identity for any subscriber that captured a reference),
+ * marks every pixel dirty, and bumps the terrain revision so the scene
+ * manager re-uploads.
+ *
+ * Caller is responsible for clearing the CommandBus history — this is a
+ * destructive bulk reset and the existing undo trail no longer matches
+ * reality once we run it.
+ */
+export function _resetTerrainToFlat(): void {
+  const state = useMapStore.getState();
+  const hm = state.terrain.heightmap;
+  for (let i = 0; i < hm.length; i++) {
+    hm[i] = 0;
+    _accumulateDirty(i);
+  }
+  state._markTerrainDirty();
+}
+
+/**
+ * Reset the store to initial state. Test-only — production code never
+ * needs this because the store is a clean slate at module load.
+ *
+ * We also drain the dirty accumulator so leftover indices from a
+ * previous test don't leak into the next one.
+ */
+export function _resetMapStore(): void {
+  useMapStore.setState(
+    (s) => ({
+      ...s,
+      terrain: {
+        widthPx: DEFAULT_HEIGHTMAP_WIDTH_PX,
+        heightPx: DEFAULT_HEIGHTMAP_HEIGHT_PX,
+        heightmap: new Float32Array(
+          DEFAULT_HEIGHTMAP_WIDTH_PX * DEFAULT_HEIGHTMAP_HEIGHT_PX,
+        ),
+        revision: 0,
+      },
+      objects: {},
+      spawnPoints: {},
+      selection: { kind: "none", id: null },
+      tool: "sculpt-raise",
+      brush: { radiusM: 4, strength: 0.5, falloff: "gaussian" },
+    }),
+    false,
+  );
+  pendingDirty = null;
+}

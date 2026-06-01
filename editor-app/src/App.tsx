@@ -5,6 +5,7 @@ import "./App.css";
 
 import { AttributeForm } from "./components/AttributeForm";
 import { BattlefieldPreview } from "./components/BattlefieldPreview";
+import { MapEditor } from "./components/MapEditor/MapEditor";
 import { MenuBar } from "./components/MenuBar";
 import { MeshWorkspace } from "./components/MeshWorkspace";
 import { startAutosave, getAutosavePath, type AutosaveHandle } from "./file-ops";
@@ -12,6 +13,7 @@ import {
   UnitStateProvider,
   useUnitState,
 } from "./state";
+import { useAppMode, type AppMode } from "./state/appMode";
 import { MeshAssetProvider } from "./state/mesh-assets";
 import {
   selectIsDirty,
@@ -54,8 +56,42 @@ function isAutosaveEnvelope(v: unknown): v is AutosaveEnvelope {
   );
 }
 
+/**
+ * Mode tab strip — switches the shell between the existing Unit editor
+ * and the new Map editor. Both panes always sit under the Unit + Mesh
+ * providers (they're cheap when unread) and the unit-side autosave keeps
+ * running in the background regardless of which mode is showing.
+ */
+function ModeTabs() {
+  const mode = useAppMode((s) => s.mode);
+  const setMode = useAppMode((s) => s.setMode);
+
+  const tabs: ReadonlyArray<{ id: AppMode; label: string }> = [
+    { id: "unit", label: "Unit Editor" },
+    { id: "map", label: "Map Editor" },
+  ];
+
+  return (
+    <div className="mode-tabs" role="tablist" aria-label="Editor mode">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          aria-selected={mode === t.id}
+          className={"mode-tab" + (mode === t.id ? " is-active" : "")}
+          onClick={() => setMode(t.id)}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function AppShell() {
   const { state, dispatch } = useUnitState();
+  const mode = useAppMode((s) => s.mode);
 
   // Live selectors - recomputed each render, free.
   const unit: UnitSchematic = selectUnit(state);
@@ -161,6 +197,7 @@ function AppShell() {
 
   return (
     <div className="app-shell">
+      <ModeTabs />
       <header className="app-header">
         <MenuBar notice={notice} setNotice={setNotice} />
         {recoverData !== null && (
@@ -179,37 +216,45 @@ function AppShell() {
           </div>
         )}
       </header>
-      <main className="workspace">
-        <section className="pane pane-left" aria-label="Mesh workspace">
-          <div className="pane-header">Mesh Workspace</div>
-          <div className="pane-body" style={overflowHidden}>
-            <MeshWorkspace
-              voxels={voxels}
-              onVoxelsUpdated={handleVoxelsChange}
-              unit={unit}
-              onUnitChange={handleUnitChange}
-            />
-          </div>
-        </section>
-        <section className="pane pane-center" aria-label="Attribute form">
-          <div className="pane-header">Attributes</div>
-          <div className="pane-body">
-            <AttributeForm unit={unit} onUnitChange={handleUnitChange} />
-          </div>
-        </section>
-        <section className="pane pane-right" aria-label="Battlefield preview">
-          <div className="pane-header">Battlefield Preview</div>
-          <div className="pane-body">
-            <BattlefieldPreview unit={unit} />
-          </div>
-        </section>
-      </main>
+      {mode === "unit" ? (
+        <main className="workspace">
+          <section className="pane pane-left" aria-label="Mesh workspace">
+            <div className="pane-header">Mesh Workspace</div>
+            <div className="pane-body" style={overflowHidden}>
+              <MeshWorkspace
+                voxels={voxels}
+                onVoxelsUpdated={handleVoxelsChange}
+                unit={unit}
+                onUnitChange={handleUnitChange}
+              />
+            </div>
+          </section>
+          <section className="pane pane-center" aria-label="Attribute form">
+            <div className="pane-header">Attributes</div>
+            <div className="pane-body">
+              <AttributeForm unit={unit} onUnitChange={handleUnitChange} />
+            </div>
+          </section>
+          <section className="pane pane-right" aria-label="Battlefield preview">
+            <div className="pane-header">Battlefield Preview</div>
+            <div className="pane-body">
+              <BattlefieldPreview unit={unit} />
+            </div>
+          </section>
+        </main>
+      ) : (
+        <main className="workspace workspace-map">
+          <MapEditor />
+        </main>
+      )}
       <footer className="app-footer">
         <span className="status">
-          {state.file.path
-            ? "Path: " + state.file.path
-            : "Unsaved - File then Save to set a path"}
-          {isDirty ? " | unsaved changes" : ""}
+          {mode === "unit"
+            ? (state.file.path
+                ? "Path: " + state.file.path
+                : "Unsaved - File then Save to set a path") +
+              (isDirty ? " | unsaved changes" : "")
+            : "Map Editor (Day 1 scaffold)"}
         </span>
       </footer>
     </div>
