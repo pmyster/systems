@@ -23,16 +23,13 @@
  *
  * Why MeshStandardMaterial + onBeforeCompile shader injection:
  *   We want PBR lighting (so the directional sun + hemi fill read
- *   correctly), but the BASE COLOR comes from an elevation gradient
- *   computed in the fragment shader from world-space Y. onBeforeCompile
- *   lets us inject a varying + helper function into Three's built-in
- *   shader without re-implementing all the light loops. Smooth shading
- *   (flatShading=false) is required for the gradient to interpolate
- *   nicely across triangle interiors — flat faces would produce visible
- *   color banding between adjacent triangles.
- *
- *   Normal recompute strategy is unchanged: cheap during a stroke
- *   (skipped), one pass on stroke end via finalizeStroke().
+ *   correctly), but the BASE COLOR comes from a blend of:
+ *     1. An elevation gradient computed from world-space Y.
+ *     2. A 4-material splatmap sampled at the vertex UV.
+ *   The splatmap dominates at low elevation (painted ground), and the
+ *   elevation gradient takes over at extremes (snow caps, deep water).
+ *   onBeforeCompile lets us inject a sampler2D + helper functions into
+ *   Three's built-in shader without re-implementing all the light loops.
  */
 
 import * as THREE from "three";
@@ -44,11 +41,20 @@ export class TerrainMesh {
   private readonly geometry: THREE.PlaneGeometry;
   private readonly material: THREE.MeshStandardMaterial;
   private positionAttr: THREE.BufferAttribute;
+  /** Cached compiled-shader handle so we can swap the splatmap texture later. */
+  private compiledShader: { uniforms: Record<string, { value: unknown }> } | null =
+    null;
 
   constructor(
     private readonly widthPx: number,
     private readonly heightPx: number,
     initialHeightmap: Float32Array,
+    /**
+     * Optional splatmap texture. When provided, the shader blends 4
+     * hardcoded material colors weighted by the texture's RGBA channels,
+     * mixed 80/20 with the elevation gradient.
+     */
+    splatmap?: THREE.Texture,
   ) {
     const widthM = (widthPx - 1) * HEIGHTMAP_M_PER_PIXEL;
     const heightM = (heightPx - 1) * HEIGHTMAP_M_PER_PIXEL;
@@ -70,55 +76,46 @@ export class TerrainMesh {
     this.applyHeightmap(initialHeightmap);
 
     this.material = new THREE.MeshStandardMaterial({
-      // Base color is overridden by the gradient shader injected below;
-      // setting white here ensures the gradient color comes through
-      // unmodulated by the base `diffuse` uniform.
+      // Base color is overridden by the gradient+splatmap shader injected
+      // below; setting white here ensures the injected color comes
+      // through unmodulated by the base `diffuse` uniform.
       color: 0xffffff,
       roughness: 0.95,
       metalness: 0.0,
-      // Smooth shading is required for the elevation gradient to
-      // interpolate cleanly between vertices. We previously used
-      // flatShading=true to defer the normal recompute during a stroke;
-      // that optimisation still holds because applyDirtyPixels skips
-      // computeVertexNormals — the gradient just reads stale normals
-      // for the in-flight frame, which is fine for color (lighting is
-      // independent).
       flatShading: false,
       side: THREE.FrontSide,
       wireframe: false,
-      // fog reads through from MeshStandardMaterial without any extra
-      // wiring — the injected fragment shader runs BEFORE the
-      // fog-mix chunk in Three's pipeline.
     });
 
-    // Elevation-gradient injection. Stops in world meters:
-    //   y ≤ -2     deep blue water
-    //   y = -0.5   shallow blue/teal
-    //   y = 0      wet sand
-    //   y = 0.5    dry sand
-    //   y = 2      grass/dirt
-    //   y = 5      rock
-    //   y ≥ 10     snow
-    // The shader linearly interpolates between adjacent stops so the
-    // gradient is continuous (no banding) and reads like a hand-painted
-    // biome map without us authoring one.
+    const splatTex = splatmap ?? null;
+    const hasSplat = splatTex !== null;
+
+    // Elevation-gradient + splatmap injection.
     this.material.onBeforeCompile = (shader) => {
+      // Expose the splatmap as a uniform when provided.
+      shader.uniforms.splatmap = { value: splatTex };
+      this.compiledShader = shader;
+
       shader.vertexShader = shader.vertexShader
         .replace(
           "#include <common>",
           `#include <common>
-varying float vWorldY;`,
+varying float vWorldY;
+varying vec2 vSplatUv;`,
         )
         .replace(
           "#include <begin_vertex>",
           `#include <begin_vertex>
-vWorldY = (modelMatrix * vec4(position, 1.0)).y;`,
+vWorldY = (modelMatrix * vec4(position, 1.0)).y;
+vSplatUv = uv;`,
         );
       shader.fragmentShader = shader.fragmentShader
         .replace(
           "#include <common>",
           `#include <common>
 varying float vWorldY;
+varying vec2 vSplatUv;
+${hasSplat ? "uniform sampler2D splatmap;" : ""}
 vec3 elevationColor(float y) {
   vec3 deepWater = vec3(0.10, 0.23, 0.42);
   vec3 shallow   = vec3(0.23, 0.54, 0.69);
@@ -135,11 +132,27 @@ vec3 elevationColor(float y) {
   if (y < 5.0)   return mix(grass,     rock,     (y - 2.0)  / 3.0);
   if (y < 10.0)  return mix(rock,      snow,     (y - 5.0)  / 5.0);
   return snow;
+}
+${
+  hasSplat
+    ? `vec3 splatColor(vec2 uv) {
+  vec4 w = texture2D(splatmap, uv);
+  float total = max(w.r + w.g + w.b + w.a, 0.001);
+  // R=grass, G=dirt, B=sand, A=scorched.
+  vec3 mat0 = vec3(0.32, 0.45, 0.20);
+  vec3 mat1 = vec3(0.40, 0.30, 0.20);
+  vec3 mat2 = vec3(0.78, 0.68, 0.45);
+  vec3 mat3 = vec3(0.12, 0.10, 0.09);
+  return (mat0*w.r + mat1*w.g + mat2*w.b + mat3*w.a) / total;
+}`
+    : ""
 }`,
         )
         .replace(
           "vec4 diffuseColor = vec4( diffuse, opacity );",
-          "vec4 diffuseColor = vec4( elevationColor(vWorldY), opacity );",
+          hasSplat
+            ? "vec4 diffuseColor = vec4(mix(elevationColor(vWorldY), splatColor(vSplatUv), 0.8), opacity);"
+            : "vec4 diffuseColor = vec4( elevationColor(vWorldY), opacity );",
         );
     };
     this.material.needsUpdate = true;
@@ -183,6 +196,18 @@ vec3 elevationColor(float y) {
    */
   finalizeStroke(): void {
     this.geometry.computeVertexNormals();
+  }
+
+  /**
+   * Hot-swap the splatmap texture uniform. The store load path replaces
+   * the splatmap byte buffer wholesale on map open, so callers need to
+   * point the shader at the new DataTexture without recompiling the
+   * material.
+   */
+  setSplatmapTexture(tex: THREE.Texture | null): void {
+    if (!this.compiledShader) return;
+    const u = this.compiledShader.uniforms.splatmap;
+    if (u) u.value = tex;
   }
 
   setWireframe(on: boolean): void {

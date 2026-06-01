@@ -1,28 +1,21 @@
 /**
  * BrushPanel — left rail of the Map Editor. Tool palette + brush controls.
  *
- * Adds the "Scatter" tool to the Sculpt / Place / Select / Scatter tool
- * palette. While Scatter is active the panel exposes radius, density,
- * per-instance scale jitter, and a random-rotation toggle. The prefab
- * library shows for both Place and Scatter so the user can pick what
- * each click/drag will spawn.
+ * Tools: Sculpt / Place / Scatter / Decal / Paint / Select.
  *
- * State source-of-truth lives in `mapStore`. The scene manager listens
- * to the same store so radius changes here reposition the brush decal
- * ring live, and tool changes route input through the right controller
- * (Brush / Place / Selection / Scatter).
+ * State source-of-truth lives in `mapStore`. The scene manager listens to
+ * the same store so radius changes here reposition the brush decal ring
+ * live, and tool changes route input through the right controller.
  */
 
 import { useMapStore, _resetTerrainToFlat } from "../../map/state/mapStore";
-import type { ToolKind } from "../../map/state/mapStore";
+import type { MaterialIndex, ToolKind } from "../../map/state/mapStore";
 import { mapCommandBus } from "../../map/commands/CommandBus";
+import { DecalLibraryPanel } from "./DecalLibraryPanel";
 import { PrefabLibraryPanel } from "./PrefabLibraryPanel";
 
 function handleReset(): void {
   if (!window.confirm("Reset terrain to flat? This cannot be undone.")) return;
-  // Order matters: clear history first so any in-flight undo can't
-  // re-stamp the heightmap with stale prev-snapshots after we've zeroed
-  // everything. Then zero the surface and bump revision.
   mapCommandBus.clear();
   _resetTerrainToFlat();
 }
@@ -37,6 +30,12 @@ function modeHint(tool: ToolKind): string {
   if (tool === "scatter") {
     return "Left-click drag to scatter; one drag = one undo.";
   }
+  if (tool === "decal") {
+    return "Left-click on terrain to place decal (scorch / tire tracks / blast crater).";
+  }
+  if (tool === "paint") {
+    return "Left-click drag to paint selected material on terrain.";
+  }
   if (tool === "select") {
     return "Left-click a cube to select; drag the gizmo to move it; Delete to remove.";
   }
@@ -45,10 +44,20 @@ function modeHint(tool: ToolKind): string {
   } terrain. Ctrl+Z to undo whole stroke.`;
 }
 
+const MATERIAL_LABELS: readonly { idx: MaterialIndex; label: string; swatch: string }[] = [
+  { idx: 0, label: "Grass", swatch: "#527338" },
+  { idx: 1, label: "Dirt", swatch: "#664c33" },
+  { idx: 2, label: "Sand", swatch: "#c7ae73" },
+  { idx: 3, label: "Scorched", swatch: "#1f1916" },
+];
+
 export function BrushPanel() {
   const tool = useMapStore((s) => s.tool);
   const brush = useMapStore((s) => s.brush);
   const scatter = useMapStore((s) => s.scatter);
+  const paint = useMapStore((s) => s.paint);
+  const decalScale = useMapStore((s) => s.decalScale);
+  const decalOpacity = useMapStore((s) => s.decalOpacity);
   const setTool = useMapStore((s) => s.setTool);
   const setRadius = useMapStore((s) => s.setBrushRadius);
   const setStrength = useMapStore((s) => s.setBrushStrength);
@@ -58,6 +67,11 @@ export function BrushPanel() {
   const setScatterRandomRotation = useMapStore(
     (s) => s.setScatterRandomRotation,
   );
+  const setDecalScale = useMapStore((s) => s.setDecalScale);
+  const setDecalOpacity = useMapStore((s) => s.setDecalOpacity);
+  const setPaintRadius = useMapStore((s) => s.setPaintRadius);
+  const setPaintStrength = useMapStore((s) => s.setPaintStrength);
+  const setPaintMaterial = useMapStore((s) => s.setPaintMaterial);
 
   const sculpt = isSculpt(tool);
 
@@ -89,6 +103,24 @@ export function BrushPanel() {
           onClick={() => setTool("scatter")}
         >
           Scatter
+        </button>
+        <button
+          type="button"
+          className={
+            "brush-tool-button" + (tool === "decal" ? " is-active" : "")
+          }
+          onClick={() => setTool("decal")}
+        >
+          Decal
+        </button>
+        <button
+          type="button"
+          className={
+            "brush-tool-button" + (tool === "paint" ? " is-active" : "")
+          }
+          onClick={() => setTool("paint")}
+        >
+          Paint
         </button>
         <button
           type="button"
@@ -222,9 +254,97 @@ export function BrushPanel() {
         </>
       )}
 
+      {tool === "decal" && (
+        <>
+          <div className="brush-panel-header">Decal</div>
+          <div className="brush-sliders">
+            <label className="brush-slider-row">
+              <span className="brush-slider-label">
+                Scale: {decalScale.toFixed(2)}x
+              </span>
+              <input
+                type="range"
+                min={0.3}
+                max={3}
+                step={0.05}
+                value={decalScale}
+                onChange={(e) => setDecalScale(parseFloat(e.target.value))}
+              />
+            </label>
+            <label className="brush-slider-row">
+              <span className="brush-slider-label">
+                Opacity: {decalOpacity.toFixed(2)}
+              </span>
+              <input
+                type="range"
+                min={0.2}
+                max={1}
+                step={0.05}
+                value={decalOpacity}
+                onChange={(e) => setDecalOpacity(parseFloat(e.target.value))}
+              />
+            </label>
+          </div>
+        </>
+      )}
+
+      {tool === "paint" && (
+        <>
+          <div className="brush-panel-header">Material</div>
+          <div className="tool-palette">
+            {MATERIAL_LABELS.map((m) => (
+              <button
+                key={m.idx}
+                type="button"
+                className={
+                  "brush-tool-button" +
+                  (paint.materialIndex === m.idx ? " is-active" : "")
+                }
+                onClick={() => setPaintMaterial(m.idx)}
+                title={m.label}
+                style={{
+                  borderLeft: `8px solid ${m.swatch}`,
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <div className="brush-sliders">
+            <label className="brush-slider-row">
+              <span className="brush-slider-label">
+                Radius: {paint.radiusM.toFixed(1)} m
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={30}
+                step={0.5}
+                value={paint.radiusM}
+                onChange={(e) => setPaintRadius(parseFloat(e.target.value))}
+              />
+            </label>
+            <label className="brush-slider-row">
+              <span className="brush-slider-label">
+                Strength: {paint.strength.toFixed(2)}
+              </span>
+              <input
+                type="range"
+                min={0.05}
+                max={1}
+                step={0.05}
+                value={paint.strength}
+                onChange={(e) => setPaintStrength(parseFloat(e.target.value))}
+              />
+            </label>
+          </div>
+        </>
+      )}
+
       <p className="brush-hint">{modeHint(tool)}</p>
 
       <PrefabLibraryPanel />
+      <DecalLibraryPanel />
 
       {sculpt && (
         <button

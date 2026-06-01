@@ -29,8 +29,22 @@ describe("projectIo bundle round-trip", () => {
     useMapStore.setState({
       objects: {},
       spawnPoints: {},
+      decals: {},
       selection: { kind: "none", id: null },
     });
+  });
+
+  it("includes splatmap_bytes sized to widthPx*heightPx*4", () => {
+    const bundle = _buildBundleFromStore();
+    const sm = useMapStore.getState().splatmap;
+    expect(bundle.splatmap_bytes).toHaveLength(sm.widthPx * sm.heightPx * 4);
+  });
+
+  it("emits an empty decals array when no decals are placed", () => {
+    const bundle = _buildBundleFromStore();
+    const parsed = JSON.parse(bundle.manifest_json);
+    const manifest = MapProjectManifestSchema.parse(parsed);
+    expect(manifest.decals).toEqual([]);
   });
 
   it("places an object into the manifest with full transform fidelity", () => {

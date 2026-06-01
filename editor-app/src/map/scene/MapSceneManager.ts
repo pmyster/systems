@@ -3,41 +3,35 @@
  * render loop. Lives OUTSIDE React so the rAF loop doesn't trigger
  * re-renders and so we can dispose deterministically on unmount.
  *
- * Day 3 contents:
- *   - Dark-themed scene background + hemisphere + directional lighting.
- *   - TerrainMesh driven from `mapStore.terrain.heightmap`. Per-pixel
- *     dirty-set updates during a stroke, full re-upload on revision
- *     changes that come without dirty hints (initial mount, undo of a
- *     pre-existing bulk change, future load/reset).
- *   - BrushDecal + BrushController for hover preview and left-drag
- *     sculpt input.
- *   - A faint grid helper kept as spatial reference.
- *   - RtsOrbitCamera wired to the canvas (middle/right buttons —
- *     BrushController takes left for sculpting).
- *   - ResizeObserver on the host container so the camera + renderer
- *     follow layout changes.
- *
- * Store integration:
- *   We subscribe and on each store snapshot diff:
- *     - terrain.revision bumped → drain dirty pixels and upload them.
- *       Null drain = full re-upload (initial mount / bulk change).
- *     - brush.radiusM changed → resize the brush decal.
- *     - tool changed → hide the decal if we left sculpt mode.
+ * Week-2 day-2 additions:
+ *   - DecalRenderer subtree reconciling `store.decals`.
+ *   - PlaceDecalController for `tool === "decal"`.
+ *   - SplatmapTexture uniform pushed into the terrain shader.
+ *   - PaintMaterialController for `tool === "paint"`.
+ *   - Splatmap revision subscription → texture re-upload.
  */
 
 import * as THREE from "three";
 
 import { HEIGHTMAP_M_PER_PIXEL } from "../coords/constants";
-import { mapStore, _drainDirty } from "../state/mapStore";
+import {
+  _drainDirty,
+  _drainSplatDirty,
+  mapStore,
+} from "../state/mapStore";
 import { BrushController } from "./BrushController";
 import { BrushDecal } from "./BrushDecal";
+import { DecalRenderer } from "./DecalRenderer";
 import { GizmoController } from "./GizmoController";
+import { PaintMaterialController } from "./PaintMaterialController";
+import { PlaceDecalController } from "./PlaceDecalController";
 import { PlaceObjectController } from "./PlaceObjectController";
 import { PrefabRenderer } from "./PrefabRenderer";
 import { RtsOrbitCamera } from "./RtsOrbitCamera";
 import { ScatterController } from "./ScatterController";
 import { SelectionController } from "./SelectionController";
 import { SkyDome } from "./SkyDome";
+import { SplatmapTexture } from "./SplatmapTexture";
 import { TerrainMesh } from "./TerrainMesh";
 import { WaterPlane } from "./WaterPlane";
 
@@ -51,10 +45,14 @@ export class MapSceneManager {
   private resizeObserver: ResizeObserver | null = null;
   private disposed = false;
   private readonly terrain: TerrainMesh;
+  private splatmapTexture: SplatmapTexture;
   private readonly decal: BrushDecal;
   private readonly brushController: BrushController;
   private readonly prefabRenderer: PrefabRenderer;
+  private readonly decalRenderer: DecalRenderer;
   private readonly placeController: PlaceObjectController;
+  private readonly placeDecalController: PlaceDecalController;
+  private readonly paintController: PaintMaterialController;
   private readonly scatterController: ScatterController;
   private readonly selectionController: SelectionController;
   private readonly gizmoController: GizmoController;
@@ -62,9 +60,12 @@ export class MapSceneManager {
   private readonly skyDome: SkyDome;
   private readonly waterPlane: WaterPlane;
   private lastUploadedRevision = -1;
+  private lastUploadedSplatRevision = -1;
+  private lastSplatDataRef: Uint8Array | null = null;
   private lastBrushRadius: number;
   private lastTool: string;
   private lastObjectsRef: object | null = null;
+  private lastDecalsRef: object | null = null;
   private lastSelectionId: string | null = null;
   private lastSelectionKind: string = "none";
 
@@ -73,15 +74,7 @@ export class MapSceneManager {
     private readonly container: HTMLElement,
   ) {
     this.scene = new THREE.Scene();
-    // Background color is kept as a fallback but the SkyDome (added
-    // below) actually fills the visible sky — we only see this color
-    // for a single frame at startup before the dome geometry uploads.
     this.scene.background = new THREE.Color(0x1a1d22);
-    // Linear fog blended toward the horizon color so distant terrain
-    // dissolves into the sunset rather than stopping abruptly at the
-    // map edge. near=80m, far=300m sits well past the 128m map extent
-    // so close-up sculpting is unaffected and the edge fades smoothly
-    // when the camera pulls back.
     this.scene.fog = new THREE.Fog(0xc97a4a, 80, 300);
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -89,30 +82,17 @@ export class MapSceneManager {
 
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.1, 5000);
     this.camera.position.set(80, 60, 80);
-    this.camera.lookAt(64, 0, 64); // map center for default 128m map.
+    this.camera.lookAt(64, 0, 64);
 
-    // RTS orbit cam — focus at the map center.
     this.cameraController = new RtsOrbitCamera(this.camera, canvas, {
       x: 64,
       y: 0,
       z: 64,
     });
 
-    // Skydome — large inverted sphere with a procedural sunset gradient.
-    // Added BEFORE lights so its renderOrder=-1000 is the first thing
-    // drawn each frame (everything else overdraws it).
     this.skyDome = new SkyDome(1500);
     this.scene.add(this.skyDome.mesh);
 
-    // Atmospheric lighting — warm directional "sun" coming in at a low
-    // sunset angle, cool dusty-blue hemisphere fill, small cyan fill
-    // light from the opposite side to keep shadows readable. Same
-    // recipe philosophy as the Battlefield Preview but tuned for an
-    // outdoor post-apoc dusk rather than a clean daytime PBR setup.
-    // Slight intensity bump from the original recipe — the colored
-    // terrain palette was reading a touch muddy under the previous
-    // sunset values. 0.9 hemi + 1.6 sun preserves the warm/dusk feel
-    // while letting the green/brown bands come through cleanly.
     const hemi = new THREE.HemisphereLight(0x6878a8, 0x5a4030, 0.9);
     this.scene.add(hemi);
     const sun = new THREE.DirectionalLight(0xffd9a5, 1.6);
@@ -124,19 +104,28 @@ export class MapSceneManager {
     fill.position.set(-60, 40, -40);
     this.scene.add(fill);
 
-    // Terrain mesh — pulls the initial heightmap snapshot. Subsequent
-    // changes flow through the store subscription below.
     const initialState = mapStore.getState();
+
+    // Splatmap GPU texture, backed by the store's Uint8Array. Must be
+    // constructed BEFORE the TerrainMesh so we can hand its
+    // .texture to the shader uniform.
+    this.splatmapTexture = new SplatmapTexture(
+      initialState.splatmap.widthPx,
+      initialState.splatmap.heightPx,
+      initialState.splatmap.data,
+    );
+    this.lastUploadedSplatRevision = initialState.splatmap.revision;
+    this.lastSplatDataRef = initialState.splatmap.data;
+
     this.terrain = new TerrainMesh(
       initialState.terrain.widthPx,
       initialState.terrain.heightPx,
       initialState.terrain.heightmap,
+      this.splatmapTexture.texture,
     );
     this.scene.add(this.terrain.mesh);
     this.lastUploadedRevision = initialState.terrain.revision;
 
-    // Water plane at y=0 covering the full map extent. Depressions
-    // below sea level get the translucent blue overlay automatically.
     const waterWidthM =
       (initialState.terrain.widthPx - 1) * HEIGHTMAP_M_PER_PIXEL;
     const waterDepthM =
@@ -144,15 +133,9 @@ export class MapSceneManager {
     this.waterPlane = new WaterPlane(waterWidthM, waterDepthM);
     this.scene.add(this.waterPlane.mesh);
 
-    // Grid helper retired — the colored terrain + sky now provide the
-    // spatial reference the grid used to give us, and at y=-0.02 the
-    // grid was bleeding through the translucent water plane in an
-    // obvious shimmer. A small axes helper at origin replaces it as a
-    // sanity-check for orientation during development.
     this.axes = new THREE.AxesHelper(4);
     this.scene.add(this.axes);
 
-    // Brush decal + controller.
     this.decal = new BrushDecal(initialState.brush.radiusM);
     this.scene.add(this.decal.mesh);
     this.lastBrushRadius = initialState.brush.radiusM;
@@ -165,15 +148,27 @@ export class MapSceneManager {
       this.decal,
     );
 
-    // Prefab subsystem — Day 5. Order matters: build renderer first,
-    // then the controllers that depend on it.
     this.prefabRenderer = new PrefabRenderer();
     this.scene.add(this.prefabRenderer.root);
-    // Seed the renderer with any objects already in the store (load path).
     this.prefabRenderer.sync(initialState.objects);
     this.lastObjectsRef = initialState.objects;
 
+    this.decalRenderer = new DecalRenderer();
+    this.scene.add(this.decalRenderer.root);
+    this.decalRenderer.sync(initialState.decals);
+    this.lastDecalsRef = initialState.decals;
+
     this.placeController = new PlaceObjectController(
+      canvas,
+      this.camera,
+      this.terrain,
+    );
+    this.placeDecalController = new PlaceDecalController(
+      canvas,
+      this.camera,
+      this.terrain,
+    );
+    this.paintController = new PaintMaterialController(
       canvas,
       this.camera,
       this.terrain,
@@ -183,8 +178,6 @@ export class MapSceneManager {
       this.camera,
       this.terrain,
     );
-    // Construct gizmo BEFORE selection so the selection controller can
-    // gate raycasts on `gizmo.controls.axis` (avoids deselect-during-drag).
     this.gizmoController = new GizmoController(
       this.camera,
       canvas,
@@ -197,8 +190,6 @@ export class MapSceneManager {
       this.prefabRenderer,
       this.gizmoController,
     );
-    // Match initial selection (likely "none" but be defensive against
-    // load-with-selection in future).
     this.lastSelectionId = initialState.selection.id;
     this.lastSelectionKind = initialState.selection.kind;
     if (
@@ -208,25 +199,12 @@ export class MapSceneManager {
       this.gizmoController.attachTo(initialState.selection.id);
     }
 
-    // Resize handling.
     this.resizeObserver = new ResizeObserver(() => this.handleResize());
     this.resizeObserver.observe(container);
     this.handleResize();
 
-    // Store subscription — diff snapshots and react to the bits we care
-    // about. Zustand v5 subscribe is "any change in state" so we must
-    // gate every action on a real value change.
     this.storeUnsub = mapStore.subscribe((s) => {
       // Terrain revision → push heightmap diff to GPU.
-      //
-      // Three paths:
-      //   1. Drained set is null — no per-pixel hints; bulk path.
-      //   2. Drained set is "large" (Reset Terrain, big bulk undo, etc.) —
-      //      treat as bulk so normals get recomputed in one pass instead
-      //      of leaving a stroke-shaped seam waiting on a finalizeStroke
-      //      that will never come.
-      //   3. Drained set is small — typical stroke-tick path; defer
-      //      normals until the BrushController calls finalizeStroke().
       if (s.terrain.revision !== this.lastUploadedRevision) {
         this.lastUploadedRevision = s.terrain.revision;
         const drained = _drainDirty();
@@ -238,26 +216,39 @@ export class MapSceneManager {
           this.terrain.applyDirtyPixels(s.terrain.heightmap, drained);
         }
       }
-      // Brush radius → resize the decal.
+      // Splatmap revision → re-upload to GPU.
+      //
+      // Two cases:
+      //   1. Same backing Uint8Array as before → mutated in place by
+      //      PaintMaterialCommand. Full re-upload via needsUpdate=true
+      //      is fine at 128×128×4 = 64 KB.
+      //   2. Different reference → load path replaced the buffer
+      //      wholesale. Re-point the DataTexture at the new bytes.
+      if (s.splatmap.revision !== this.lastUploadedSplatRevision) {
+        this.lastUploadedSplatRevision = s.splatmap.revision;
+        if (s.splatmap.data !== this.lastSplatDataRef) {
+          this.lastSplatDataRef = s.splatmap.data;
+          this.splatmapTexture.replaceData(s.splatmap.data);
+        } else {
+          this.splatmapTexture.updateRegion();
+        }
+        // Drain dirty marks even though we don't use them yet — keeps
+        // the accumulator from growing unboundedly across strokes.
+        _drainSplatDirty();
+      }
       if (s.brush.radiusM !== this.lastBrushRadius) {
         this.lastBrushRadius = s.brush.radiusM;
         this.decal.setRadius(s.brush.radiusM);
       }
-      // Tool change → hide decal if we left sculpt mode.
       if (s.tool !== this.lastTool) {
         this.lastTool = s.tool;
         if (s.tool !== "sculpt-raise" && s.tool !== "sculpt-lower") {
           this.decal.hide();
         }
       }
-      // Objects map changed → reconcile prefab nodes. Reference-compare
-      // is enough because every store mutator that touches objects (the
-      // command pipeline + load) replaces the map wholesale.
       if (s.objects !== this.lastObjectsRef) {
         this.lastObjectsRef = s.objects;
         this.prefabRenderer.sync(s.objects);
-        // Re-attach the gizmo if it was pointing at an id that just
-        // came/went (load + undo of place + redo of delete all need this).
         if (
           this.lastSelectionKind === "object" &&
           this.lastSelectionId !== null
@@ -267,7 +258,10 @@ export class MapSceneManager {
           );
         }
       }
-      // Selection changed → attach / detach the transform gizmo.
+      if (s.decals !== this.lastDecalsRef) {
+        this.lastDecalsRef = s.decals;
+        this.decalRenderer.sync(s.decals);
+      }
       if (
         s.selection.id !== this.lastSelectionId ||
         s.selection.kind !== this.lastSelectionKind
@@ -282,7 +276,6 @@ export class MapSceneManager {
       }
     });
 
-    // Start the render loop.
     const tick = (): void => {
       if (this.disposed) return;
       this.cameraController.update();
@@ -292,7 +285,6 @@ export class MapSceneManager {
     this.rafHandle = requestAnimationFrame(tick);
   }
 
-  /** For debug / external callers (e.g. future hit-tests). */
   getTerrainMesh(): TerrainMesh {
     return this.terrain;
   }
@@ -313,15 +305,18 @@ export class MapSceneManager {
     this.resizeObserver?.disconnect();
     this.brushController.dispose();
     this.placeController.dispose();
+    this.placeDecalController.dispose();
+    this.paintController.dispose();
     this.scatterController.dispose();
     this.selectionController.dispose();
     this.gizmoController.dispose();
     this.cameraController.dispose();
 
-    // Free GPU resources for everything we own.
     this.terrain.dispose();
+    this.splatmapTexture.dispose();
     this.decal.dispose();
     this.prefabRenderer.dispose();
+    this.decalRenderer.dispose();
     this.axes.dispose();
     this.skyDome.dispose();
     this.waterPlane.dispose();

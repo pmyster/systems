@@ -1,24 +1,20 @@
 /**
  * Project I/O — New / Open / Save / Save As wrappers for Map projects.
  *
- * The flow:
- *   1. Build a `MapBundle` (manifest JSON string + heightmap byte array)
- *      from the current Zustand store state.
- *   2. Hand it to Rust via one of four `invoke()` commands.
- *   3. On load, decode the bundle back into Float32 + manifest, then
- *      apply to the store (replacing the heightmap reference, bumping
- *      revision so the scene manager does a full re-upload).
+ * Bundle now carries:
+ *   - manifest_json: canonical JSON string for the v2 manifest.
+ *   - heightmap_bytes: raw little-endian Float32 sidecar.
+ *   - splatmap_bytes: raw RGBA Uint8 sidecar (4 weights per pixel).
  *
- * Why we store the manifest as a JSON STRING rather than a JS object:
- *   - It's already canonical on the wire — what we hash, what we diff,
- *     what we write to disk.
- *   - Rust never has to re-serialize. The Tauri command is shape-blind.
- *   - The validation barrier sits in one place: `MapProjectManifestSchema`.
- *
- * Tauri serializes `Vec<u8>` as `number[]`. We convert with
+ * The Tauri side serializes `Vec<u8>` as JS `number[]`. We convert via
  * `new Uint8Array(arr)` on the way in and `Array.from(...)` on the way
- * out. That's the price of the JSON-RPC bridge until Tauri adds a
- * proper bytes channel.
+ * out. Manifest validation happens JS-side via Zod; Rust never inspects
+ * the manifest bytes.
+ *
+ * Backward compat: a v1 project on disk has no splatmap.r8 sidecar. The
+ * Rust loader returns an empty `splatmap_bytes` Vec for that case; we
+ * detect the empty array here and synthesize a default all-grass
+ * splatmap so the rest of the editor doesn't have to special-case it.
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -31,19 +27,29 @@ import {
   WORLD_M_PER_UNIT,
 } from "../coords/constants";
 import {
+  DEFAULT_SPLATMAP_HEIGHT_PX,
+  DEFAULT_SPLATMAP_WIDTH_PX,
   MapProjectManifestSchema,
-  type MapProjectManifest,
   MAP_SCHEMA_VERSION,
+  type MapProjectManifest,
 } from "../schema/manifest";
 import { migrate } from "../schema/migrations";
 import { useMapStore } from "../state/mapStore";
 
 import { decodeHeightmap, encodeHeightmap } from "./heightmapCodec";
 
-/** Tauri command payload — Rust returns `Vec<u8>` as JS `number[]`. */
+/** Tauri command payload. */
 interface MapBundle {
   manifest_json: string;
   heightmap_bytes: number[];
+  splatmap_bytes: number[];
+}
+
+function buildDefaultSplatmap(widthPx: number, heightPx: number): Uint8Array {
+  const len = widthPx * heightPx * 4;
+  const data = new Uint8Array(len);
+  for (let i = 0; i < len; i += 4) data[i] = 255; // pure grass
+  return data;
 }
 
 /**
@@ -57,9 +63,6 @@ export function _buildBundleFromStore(): MapBundle {
   const nowIso = new Date().toISOString();
   const manifest: MapProjectManifest = {
     schemaVersion: MAP_SCHEMA_VERSION,
-    // Placeholder name — the metadata panel (Week 2+) will let the user
-    // override this. Until then we surface the grid size so two unnamed
-    // projects in the open dialog are at least distinguishable.
     name: `${s.terrain.widthPx}x${s.terrain.heightPx} map`,
     metadata: {
       author: "phee",
@@ -82,24 +85,30 @@ export function _buildBundleFromStore(): MapBundle {
       widthPx: s.terrain.widthPx,
       heightPx: s.terrain.heightPx,
       tileSizeM: TILE_SIZE_M,
+      splatmap: {
+        sidecar: "splatmap.r8",
+        widthPx: s.splatmap.widthPx,
+        heightPx: s.splatmap.heightPx,
+      },
     },
     objects: Object.values(s.objects),
     spawnPoints: Object.values(s.spawnPoints),
+    decals: Object.values(s.decals),
   };
   return {
     manifest_json: JSON.stringify(manifest, null, 2),
     heightmap_bytes: Array.from(encodeHeightmap(s.terrain.heightmap)),
+    splatmap_bytes: Array.from(s.splatmap.data),
   };
 }
 
 /**
  * Apply a loaded bundle into the store.
  *
- * Heightmap is REPLACED (new Float32Array reference). The scene
- * manager's revision subscriber takes the bulk-upload path because
- * `_drainDirty()` returns null (we don't accumulate per-pixel dirty
- * markers for a load). Command history is cleared because the new
- * project's undo trail no longer matches the in-memory state.
+ * Heightmap + splatmap are REPLACED (new backing arrays). The scene
+ * manager's revision subscribers take the bulk-upload path because the
+ * dirty accumulators return null. Command history is cleared because the
+ * new project's undo trail no longer matches the in-memory state.
  */
 function applyBundleToStore(bundle: MapBundle): void {
   const rawJson: unknown = JSON.parse(bundle.manifest_json);
@@ -110,6 +119,29 @@ function applyBundleToStore(bundle: MapBundle): void {
     manifest.terrain.widthPx,
     manifest.terrain.heightPx,
   );
+  // Splatmap fallback chain:
+  //   1. Sidecar bytes present + non-empty + correct length → use them.
+  //   2. Manifest declares splatmap dims → synthesize all-grass at those dims.
+  //   3. Neither → default 128×128 all-grass.
+  const splatRef = manifest.terrain.splatmap;
+  const splatWidth = splatRef?.widthPx ?? DEFAULT_SPLATMAP_WIDTH_PX;
+  const splatHeight = splatRef?.heightPx ?? DEFAULT_SPLATMAP_HEIGHT_PX;
+  const expectedSplatLen = splatWidth * splatHeight * 4;
+  let splatData: Uint8Array;
+  if (
+    bundle.splatmap_bytes &&
+    bundle.splatmap_bytes.length === expectedSplatLen
+  ) {
+    splatData = new Uint8Array(bundle.splatmap_bytes);
+  } else {
+    if (bundle.splatmap_bytes && bundle.splatmap_bytes.length > 0) {
+      // Loud-over-silent: size mismatch should be visible, not swallowed.
+      console.warn(
+        `[projectIo] splatmap.r8 length ${bundle.splatmap_bytes.length} != expected ${expectedSplatLen} (${splatWidth}x${splatHeight}*4). Falling back to default grass.`,
+      );
+    }
+    splatData = buildDefaultSplatmap(splatWidth, splatHeight);
+  }
   useMapStore.setState(
     (s) => ({
       ...s,
@@ -119,10 +151,17 @@ function applyBundleToStore(bundle: MapBundle): void {
         heightmap,
         revision: s.terrain.revision + 1,
       },
+      splatmap: {
+        widthPx: splatWidth,
+        heightPx: splatHeight,
+        data: splatData,
+        revision: s.splatmap.revision + 1,
+      },
       objects: Object.fromEntries(manifest.objects.map((o) => [o.id, o])),
       spawnPoints: Object.fromEntries(
         manifest.spawnPoints.map((sp) => [sp.id, sp]),
       ),
+      decals: Object.fromEntries(manifest.decals.map((d) => [d.id, d])),
       selection: { kind: "none", id: null },
     }),
     false,
@@ -149,19 +188,13 @@ export async function newMapProject(): Promise<void> {
   const dir = await saveDialog({
     title: "Create Map Project Folder",
     defaultPath: "untitled-map",
-    // No filters: the user picks a DIRECTORY NAME, not a file. Tauri's
-    // saveDialog still gives us a clean string back even with no
-    // extension — we use it as a directory path on the Rust side.
-    // The dialog title is the only signal the OS file picker shows to
-    // explain the directory-not-file model (ADR 0002: a map project is
-    // a folder containing manifest.json + heightmap.r32 sidecars).
   });
   if (!dir) return;
   const bundle = _buildBundleFromStore();
   await invoke("create_map_project", { dir, bundle });
   currentProjectDir = dir;
   console.warn(
-    `[map] Created project folder ${dir}. Manifest + heightmap sidecars saved inside.`,
+    `[map] Created project folder ${dir}. Manifest + heightmap + splatmap sidecars saved inside.`,
   );
 }
 
@@ -197,10 +230,6 @@ export async function saveMapProjectAs(): Promise<void> {
   });
   if (!dir) return;
   const bundle = _buildBundleFromStore();
-  // First try create (errors if dir exists with a manifest). If that
-  // fails — i.e. the user picked an existing project — fall through to
-  // save, which rotates a .bak then overwrites. Either way the user
-  // sees their chosen location become "current".
   try {
     await invoke("create_map_project", { dir, bundle });
   } catch {

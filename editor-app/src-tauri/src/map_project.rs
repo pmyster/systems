@@ -4,7 +4,8 @@
 //!   <projectdir>/
 //!     manifest.json         — UTF-8 JSON, validated JS-side via Zod
 //!     heightmap.r32         — raw little-endian Float32 sidecar
-//!     .bak/<unix_ts>/       — last 10 snapshot copies (manifest + heightmap)
+//!     splatmap.r8           — raw RGBA Uint8 sidecar (4 material weights / pixel)
+//!     .bak/<unix_ts>/       — last 10 snapshot copies (manifest + heightmap + splatmap)
 //!     .autosave/            — most-recent autosave snapshot (overwrites in place)
 //!
 //! Atomicity strategy: write `.tmp` next to target, fsync, rename. On
@@ -20,18 +21,25 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-/// One atomic unit of map state — manifest text + heightmap bytes.
+/// One atomic unit of map state — manifest text + heightmap bytes + splatmap bytes.
 ///
 /// `heightmap_bytes` is the raw .r32 payload: `widthPx * heightPx * 4`
-/// little-endian Float32 values. Encoding/decoding lives JS-side
-/// (see `src/map/io/heightmapCodec.ts`); Rust only shuttles bytes.
+/// little-endian Float32 values. `splatmap_bytes` is the raw .r8 payload:
+/// `splatWidthPx * splatHeightPx * 4` RGBA Uint8 values. Encoding/decoding
+/// lives JS-side (see `src/map/io/`); Rust only shuttles bytes.
+///
+/// `splatmap_bytes` defaults to an empty Vec for backward compat with v1
+/// project folders that have no splatmap.r8 sidecar yet — the JS load
+/// path synthesizes a default all-grass splatmap when the array is empty.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MapBundle {
     pub manifest_json: String,
     pub heightmap_bytes: Vec<u8>,
+    #[serde(default)]
+    pub splatmap_bytes: Vec<u8>,
 }
 
-/// Create a fresh project directory with manifest + heightmap sidecar.
+/// Create a fresh project directory with manifest + sidecars.
 ///
 /// Refuses to overwrite an existing manifest — the New flow must never
 /// clobber an existing project. Use `save_map_project` for in-place
@@ -49,26 +57,43 @@ pub fn create_map_project(dir: String, bundle: MapBundle) -> Result<(), String> 
     Ok(())
 }
 
-/// Load manifest + heightmap from a project directory.
+/// Load manifest + sidecars from a project directory.
+///
+/// `splatmap.r8` is optional — older v1 projects don't have one. When
+/// missing we return an empty `splatmap_bytes` Vec and let the JS load
+/// path synthesize a default. Loud-over-silent: we log to stderr so a
+/// developer running with the dev console knows the synth happened.
 #[tauri::command]
 pub fn open_map_project(dir: String) -> Result<MapBundle, String> {
     let dir_path = PathBuf::from(&dir);
     let manifest_path = dir_path.join("manifest.json");
     let heightmap_path = dir_path.join("heightmap.r32");
+    let splatmap_path = dir_path.join("splatmap.r8");
     let manifest_json = fs::read_to_string(&manifest_path)
         .map_err(|e| format!("read manifest failed: {e}"))?;
     let heightmap_bytes = fs::read(&heightmap_path)
         .map_err(|e| format!("read heightmap failed: {e}"))?;
+    let splatmap_bytes = if splatmap_path.exists() {
+        fs::read(&splatmap_path)
+            .map_err(|e| format!("read splatmap failed: {e}"))?
+    } else {
+        eprintln!(
+            "[map_project] No splatmap.r8 at {splatmap_path:?}; JS layer will synth default."
+        );
+        Vec::new()
+    };
     Ok(MapBundle {
         manifest_json,
         heightmap_bytes,
+        splatmap_bytes,
     })
 }
 
 /// Atomic save into an existing project directory.
 ///
-/// Rotates the prior manifest+heightmap into `.bak/<unix_ts>/` (keeping
-/// the most recent 10), then writes the new payload via `.tmp`+rename.
+/// Rotates the prior manifest+heightmap+splatmap into `.bak/<unix_ts>/`
+/// (keeping the most recent 10), then writes the new payload via
+/// `.tmp`+rename.
 #[tauri::command]
 pub fn save_map_project(dir: String, bundle: MapBundle) -> Result<(), String> {
     let dir_path = PathBuf::from(&dir);
@@ -98,6 +123,12 @@ pub fn autosave_map_project(dir: String, bundle: MapBundle) -> Result<(), String
         &autosave_dir.join("heightmap.r32"),
         &bundle.heightmap_bytes,
     )?;
+    if !bundle.splatmap_bytes.is_empty() {
+        write_atomic(
+            &autosave_dir.join("splatmap.r8"),
+            &bundle.splatmap_bytes,
+        )?;
+    }
     Ok(())
 }
 
@@ -108,6 +139,9 @@ pub fn autosave_map_project(dir: String, bundle: MapBundle) -> Result<(), String
 fn write_bundle_atomic(dir: &Path, bundle: &MapBundle) -> Result<(), String> {
     write_atomic(&dir.join("manifest.json"), bundle.manifest_json.as_bytes())?;
     write_atomic(&dir.join("heightmap.r32"), &bundle.heightmap_bytes)?;
+    if !bundle.splatmap_bytes.is_empty() {
+        write_atomic(&dir.join("splatmap.r8"), &bundle.splatmap_bytes)?;
+    }
     Ok(())
 }
 
@@ -139,8 +173,8 @@ fn write_atomic(target: &Path, contents: &[u8]) -> Result<(), String> {
     }
 }
 
-/// Copy the current manifest+heightmap into `.bak/<unix_ts>/`, then
-/// trim the backup folder to the 10 most recent snapshots.
+/// Copy the current manifest+heightmap+splatmap into `.bak/<unix_ts>/`,
+/// then trim the backup folder to the 10 most recent snapshots.
 fn rotate_baks(dir: &Path) -> Result<(), String> {
     let manifest = dir.join("manifest.json");
     if !manifest.exists() {
@@ -161,6 +195,10 @@ fn rotate_baks(dir: &Path) -> Result<(), String> {
         dir.join("heightmap.r32"),
         stamp_dir.join("heightmap.r32"),
     );
+    let splatmap = dir.join("splatmap.r8");
+    if splatmap.exists() {
+        let _ = fs::copy(&splatmap, stamp_dir.join("splatmap.r8"));
+    }
     let mut entries: Vec<_> = fs::read_dir(&bak_dir)
         .map_err(|e| format!("read .bak dir: {e}"))?
         .filter_map(|r| r.ok())

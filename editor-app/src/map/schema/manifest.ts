@@ -21,7 +21,11 @@ import {
 } from "../coords/constants";
 
 /** Current schema version. Bump and add a migration when shape changes. */
-export const MAP_SCHEMA_VERSION = 1 as const;
+export const MAP_SCHEMA_VERSION = 2 as const;
+
+/** Default splatmap dimensions in pixels (square, ~1 sample per meter at 128m map). */
+export const DEFAULT_SPLATMAP_WIDTH_PX = 128 as const;
+export const DEFAULT_SPLATMAP_HEIGHT_PX = 128 as const;
 
 // ---------------------------------------------------------------------------
 // Primitive shapes
@@ -52,12 +56,25 @@ const CoordinateSystemSnapshot = z.object({
   worldMPerUnit: z.number().positive(),
 });
 
+/**
+ * Splatmap sidecar reference. Stored as `splatmap.r8` — raw bytes,
+ * `widthPx * heightPx * 4` long. Each pixel is RGBA; each channel is a
+ * 0-255 weight for one of four hardcoded materials (grass / dirt / sand /
+ * scorched). Sidecar dims are smaller than the heightmap dims by design —
+ * splatmap fidelity is "biome-scale" rather than per-vertex.
+ */
+const SplatmapRef = z.object({
+  sidecar: z.literal("splatmap.r8"),
+  widthPx: z.number().int().positive(),
+  heightPx: z.number().int().positive(),
+});
+
 const TerrainRef = z.object({
   sidecar: z.literal("heightmap.r32"),
   widthPx: z.number().int().positive(),
   heightPx: z.number().int().positive(),
   tileSizeM: z.number().positive(),
-  splatmap: z.string().optional(),
+  splatmap: SplatmapRef.optional(),
   instances: z.string().optional(),
 });
 
@@ -77,6 +94,30 @@ const SpawnPoint = z.object({
   facing: z.number(),
   team: z.number().int().optional(),
 });
+
+/**
+ * Decal instance — a flat textured quad laid on the terrain surface for
+ * visual storytelling (scorch marks, tire tracks, blast craters).
+ *
+ * `decalKind` is a string (not enum) so plugins/users can register new
+ * kinds via the runtime DecalRegistry without a schema migration. Unknown
+ * kinds at load time are LOGGED and dropped at the renderer (loud-over-
+ * silent), not by the schema parser — we want the data to survive a
+ * round-trip even if a kind is temporarily missing from the build.
+ */
+const DecalInstance = z.object({
+  id: z.string().uuid(),
+  decalKind: z.string(),
+  position: Vec3,
+  /** Y-rotation in radians; decals lie flat on terrain, only yaw matters. */
+  rotation: z.number(),
+  /** Uniform scale multiplier on the decal's baseSize (1.0 = baseline). */
+  scale: z.number().positive(),
+  /** 0-1 alpha multiplier on the underlying texture. */
+  opacity: z.number().min(0).max(1),
+});
+
+export type DecalInstanceData = z.infer<typeof DecalInstance>;
 
 // ---------------------------------------------------------------------------
 // Top-level manifest
@@ -99,6 +140,11 @@ export const MapProjectManifestSchema = z.object({
   terrain: TerrainRef,
   objects: z.array(InstanceObject),
   spawnPoints: z.array(SpawnPoint),
+  /**
+   * Decal instances — required in v2 but can be empty. v1 manifests get
+   * `[]` synthesized by the migration step.
+   */
+  decals: z.array(DecalInstance),
 });
 
 export type MapProjectManifest = z.infer<typeof MapProjectManifestSchema>;
@@ -144,8 +190,14 @@ export function createEmptyManifest(
       widthPx: DEFAULT_HEIGHTMAP_WIDTH_PX,
       heightPx: DEFAULT_HEIGHTMAP_HEIGHT_PX,
       tileSizeM: TILE_SIZE_M,
+      splatmap: {
+        sidecar: "splatmap.r8",
+        widthPx: DEFAULT_SPLATMAP_WIDTH_PX,
+        heightPx: DEFAULT_SPLATMAP_HEIGHT_PX,
+      },
     },
     objects: [],
     spawnPoints: [],
+    decals: [],
   };
 }

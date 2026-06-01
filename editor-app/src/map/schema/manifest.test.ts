@@ -27,13 +27,23 @@ describe("createEmptyManifest", () => {
 
   it("uses the current schemaVersion literal", () => {
     const m = createEmptyManifest("a", "b");
-    expect(m.schemaVersion).toBe(1);
+    expect(m.schemaVersion).toBe(2);
   });
 
-  it("starts with empty objects and spawnPoints arrays", () => {
+  it("starts with empty objects, spawnPoints, and decals arrays", () => {
     const m = createEmptyManifest("a", "b");
     expect(m.objects).toEqual([]);
     expect(m.spawnPoints).toEqual([]);
+    expect(m.decals).toEqual([]);
+  });
+
+  it("includes a default splatmap sidecar reference on the terrain", () => {
+    const m = createEmptyManifest("a", "b");
+    expect(m.terrain.splatmap).toEqual({
+      sidecar: "splatmap.r8",
+      widthPx: 128,
+      heightPx: 128,
+    });
   });
 });
 
