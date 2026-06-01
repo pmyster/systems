@@ -29,6 +29,8 @@ import {
   saveMapProjectAs,
 } from "../../map/io/projectIo";
 
+import { RecentProjectsPanel } from "./RecentProjectsPanel";
+
 function isEditingInput(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
@@ -45,6 +47,7 @@ export function MapMenuBar() {
     getCurrentProjectDir(),
   );
   const [busy, setBusy] = useState(false);
+  const [showRecents, setShowRecents] = useState(false);
 
   // Wrap any handler in busy-state so a slow disk doesn't let the user
   // queue up overlapping saves. Errors surface via console.warn for now
@@ -82,6 +85,7 @@ export function MapMenuBar() {
   }, [busy]);
 
   return (
+    <>
     <div className="map-menu-bar">
       <button
         type="button"
@@ -98,6 +102,14 @@ export function MapMenuBar() {
         onClick={() => void guarded(openMapProject)}
       >
         Open…
+      </button>
+      <button
+        type="button"
+        className="map-menu-button"
+        disabled={busy}
+        onClick={() => setShowRecents(true)}
+      >
+        Recent…
       </button>
       <button
         type="button"
@@ -125,5 +137,9 @@ export function MapMenuBar() {
         📁 Projects are folders
       </span>
     </div>
+    {showRecents ? (
+      <RecentProjectsPanel onClose={() => setShowRecents(false)} />
+    ) : null}
+    </>
   );
 }

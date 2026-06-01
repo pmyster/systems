@@ -133,6 +133,90 @@
       "category": "prop",
       "glbPath": "kenney-city-suburban/Models/GLB%20format/fence-1x3.glb",
       "defaultScale": { "x": 1, "y": 1, "z": 1 }
+    },
+    {
+      "id": "kenney-nature-tree-oak",
+      "displayName": "Oak tree",
+      "category": "nature",
+      "glbPath": "kenney-nature/Models/GLTF%20format/tree_oak.glb",
+      "defaultScale": { "x": 1, "y": 1, "z": 1 }
+    },
+    {
+      "id": "kenney-nature-tree-detailed",
+      "displayName": "Detailed tree",
+      "category": "nature",
+      "glbPath": "kenney-nature/Models/GLTF%20format/tree_detailed.glb",
+      "defaultScale": { "x": 1, "y": 1, "z": 1 }
+    },
+    {
+      "id": "kenney-nature-tree-pine",
+      "displayName": "Pine tree",
+      "category": "nature",
+      "glbPath": "kenney-nature/Models/GLTF%20format/tree_pineDefaultA.glb",
+      "defaultScale": { "x": 1, "y": 1, "z": 1 }
+    },
+    {
+      "id": "kenney-nature-tree-palm",
+      "displayName": "Palm tree",
+      "category": "nature",
+      "glbPath": "kenney-nature/Models/GLTF%20format/tree_palm.glb",
+      "defaultScale": { "x": 1, "y": 1, "z": 1 }
+    },
+    {
+      "id": "kenney-nature-rock-large-a",
+      "displayName": "Rock (large A)",
+      "category": "nature",
+      "glbPath": "kenney-nature/Models/GLTF%20format/rock_largeA.glb",
+      "defaultScale": { "x": 1, "y": 1, "z": 1 }
+    },
+    {
+      "id": "kenney-nature-rock-small-a",
+      "displayName": "Rock (small A)",
+      "category": "nature",
+      "glbPath": "kenney-nature/Models/GLTF%20format/rock_smallA.glb",
+      "defaultScale": { "x": 1, "y": 1, "z": 1 }
+    },
+    {
+      "id": "kenney-nature-rock-flat",
+      "displayName": "Rock (flat)",
+      "category": "nature",
+      "glbPath": "kenney-nature/Models/GLTF%20format/rock_smallFlatA.glb",
+      "defaultScale": { "x": 1, "y": 1, "z": 1 }
+    },
+    {
+      "id": "kenney-nature-mushroom-red",
+      "displayName": "Mushroom (red)",
+      "category": "nature",
+      "glbPath": "kenney-nature/Models/GLTF%20format/mushroom_red.glb",
+      "defaultScale": { "x": 1, "y": 1, "z": 1 }
+    },
+    {
+      "id": "kenney-nature-bush",
+      "displayName": "Bush",
+      "category": "nature",
+      "glbPath": "kenney-nature/Models/GLTF%20format/plant_bush.glb",
+      "defaultScale": { "x": 1, "y": 1, "z": 1 }
+    },
+    {
+      "id": "kenney-nature-flower-yellow",
+      "displayName": "Flower (yellow)",
+      "category": "nature",
+      "glbPath": "kenney-nature/Models/GLTF%20format/flower_yellowA.glb",
+      "defaultScale": { "x": 1, "y": 1, "z": 1 }
+    },
+    {
+      "id": "kenney-nature-flower-red",
+      "displayName": "Flower (red)",
+      "category": "nature",
+      "glbPath": "kenney-nature/Models/GLTF%20format/flower_redA.glb",
+      "defaultScale": { "x": 1, "y": 1, "z": 1 }
+    },
+    {
+      "id": "kenney-nature-grass",
+      "displayName": "Grass tuft",
+      "category": "nature",
+      "glbPath": "kenney-nature/Models/GLTF%20format/grass.glb",
+      "defaultScale": { "x": 1, "y": 1, "z": 1 }
     }
   ]
 }

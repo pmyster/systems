@@ -110,6 +110,35 @@ pub fn open_map_project(dir: String) -> Result<MapBundle, String> {
     })
 }
 
+/// Lightweight metadata-only loader for the Recent Projects panel.
+///
+/// Returns just the manifest JSON + thumbnail bytes — skipping the
+/// heightmap and splatmap sidecars (which can be several MB each).
+/// Callers that need the full bundle should use `open_map_project`.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MapBundleMeta {
+    pub manifest_json: String,
+    #[serde(default)]
+    pub thumbnail_bytes: Vec<u8>,
+}
+
+#[tauri::command]
+pub fn open_map_project_meta_only(dir: String) -> Result<MapBundleMeta, String> {
+    let dir_path = PathBuf::from(&dir);
+    let manifest_json = fs::read_to_string(dir_path.join("manifest.json"))
+        .map_err(|e| format!("read manifest failed: {e}"))?;
+    let thumbnail_path = dir_path.join("thumbnail.png");
+    let thumbnail_bytes = if thumbnail_path.exists() {
+        fs::read(&thumbnail_path).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    Ok(MapBundleMeta {
+        manifest_json,
+        thumbnail_bytes,
+    })
+}
+
 /// Atomic save into an existing project directory.
 ///
 /// Rotates the prior manifest+heightmap+splatmap into `.bak/<unix_ts>/`

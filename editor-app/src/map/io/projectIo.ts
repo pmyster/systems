@@ -51,6 +51,87 @@ interface MapBundle {
   thumbnail_bytes: number[];
 }
 
+/** Lightweight bundle for the Recent Projects panel — manifest + thumb only. */
+interface MapBundleMeta {
+  manifest_json: string;
+  thumbnail_bytes: number[];
+}
+
+// ---------------------------------------------------------------------------
+// Recent projects — small list of dirs we've opened/created/saved-as, stored
+// in localStorage so it survives reloads. The Recent panel reads this list,
+// lazy-loads thumbnails per entry, and offers a quick re-open path.
+// ---------------------------------------------------------------------------
+
+/** Entry persisted to localStorage. lastOpenedAt is passed in by callers — */
+/** we don't compute it here so the function stays pure for tests. */
+export interface RecentProject {
+  dir: string;
+  name: string;
+  lastOpenedAt: number;
+}
+
+const RECENT_KEY = "cl_map_recent_projects";
+const RECENT_MAX = 8;
+
+export function getRecentProjects(): RecentProject[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as RecentProject[];
+    return Array.isArray(arr) ? arr.slice(0, RECENT_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function pushRecentProject(
+  dir: string,
+  name: string,
+  nowMs: number,
+): void {
+  try {
+    const existing = getRecentProjects().filter((r) => r.dir !== dir);
+    const next = [{ dir, name, lastOpenedAt: nowMs }, ...existing].slice(
+      0,
+      RECENT_MAX,
+    );
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch (e) {
+    // Loud-over-silent: localStorage quota / disabled storage shouldn't
+    // crash the save flow, but we want to know it regressed.
+    console.warn("[projectIo] failed to persist recent projects:", e);
+  }
+}
+
+/**
+ * Read `thumbnail.png` from a project dir via the cheap meta-only
+ * Rust command (skips the heightmap+splatmap sidecars). Returns a
+ * base64 data URL ready to drop into `<img src=...>`, or null if no
+ * thumbnail / read failure.
+ */
+export async function readProjectThumbnail(
+  dir: string,
+): Promise<string | null> {
+  try {
+    const bundle = await invoke<MapBundleMeta>("open_map_project_meta_only", {
+      dir,
+    });
+    if (!bundle.thumbnail_bytes || bundle.thumbnail_bytes.length === 0) {
+      return null;
+    }
+    const bytes = new Uint8Array(bundle.thumbnail_bytes);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return `data:image/png;base64,${btoa(binary)}`;
+  } catch (e) {
+    console.warn("[projectIo] readProjectThumbnail failed:", dir, e);
+    return null;
+  }
+}
+
 /**
  * Scene manager handle for thumbnail capture at save time.
  *
@@ -223,6 +304,24 @@ export function getCurrentProjectDir(): string | null {
   return currentProjectDir;
 }
 
+/**
+ * Pull the human-friendly project name from a manifest JSON string.
+ * Falls back to the dir's basename if the manifest doesn't have one or
+ * fails to parse — we never want this to throw.
+ */
+function deriveProjectName(manifestJson: string, dir: string): string {
+  try {
+    const parsed = JSON.parse(manifestJson) as { name?: unknown };
+    if (typeof parsed.name === "string" && parsed.name.length > 0) {
+      return parsed.name;
+    }
+  } catch {
+    // ignore — fall through to basename
+  }
+  const parts = dir.split(/[\\/]/).filter((p) => p.length > 0);
+  return parts[parts.length - 1] ?? dir;
+}
+
 // ---------------------------------------------------------------------------
 // Public API — wired from MapMenuBar.
 // ---------------------------------------------------------------------------
@@ -237,6 +336,7 @@ export async function newMapProject(): Promise<void> {
   const bundle = _buildBundleFromStore();
   await invoke("create_map_project", { dir, bundle });
   currentProjectDir = dir;
+  pushRecentProject(dir, deriveProjectName(bundle.manifest_json, dir), Date.now());
   console.warn(
     `[map] Created project folder ${dir}. Manifest + heightmap + splatmap sidecars saved inside.`,
   );
@@ -252,7 +352,21 @@ export async function openMapProject(): Promise<void> {
   const bundle = await invoke<MapBundle>("open_map_project", { dir: picked });
   applyBundleToStore(bundle);
   currentProjectDir = picked;
+  pushRecentProject(picked, deriveProjectName(bundle.manifest_json, picked), Date.now());
   console.warn(`[map] opened project from ${picked}`);
+}
+
+/**
+ * Open an existing project directory by an explicit path — used by the
+ * Recent Projects panel to skip the dialog. Behaves identically to
+ * `openMapProject` once the dir is known.
+ */
+export async function openMapProjectByDir(dir: string): Promise<void> {
+  const bundle = await invoke<MapBundle>("open_map_project", { dir });
+  applyBundleToStore(bundle);
+  currentProjectDir = dir;
+  pushRecentProject(dir, deriveProjectName(bundle.manifest_json, dir), Date.now());
+  console.warn(`[map] opened project from ${dir}`);
 }
 
 /** Save to the current project (rotates a .bak snapshot first). */
@@ -280,5 +394,6 @@ export async function saveMapProjectAs(): Promise<void> {
     await invoke("save_map_project", { dir, bundle });
   }
   currentProjectDir = dir;
+  pushRecentProject(dir, deriveProjectName(bundle.manifest_json, dir), Date.now());
   console.warn(`[map] saved as ${dir}`);
 }

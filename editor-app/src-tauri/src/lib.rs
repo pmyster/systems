@@ -167,6 +167,7 @@ pub fn run() {
             list_projectile_files,
             map_project::create_map_project,
             map_project::open_map_project,
+            map_project::open_map_project_meta_only,
             map_project::save_map_project,
             map_project::autosave_map_project,
         ])
