@@ -88,6 +88,12 @@ function makeColorTexture(rgb: readonly [number, number, number]): THREE.DataTex
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
+  // 1×1 fallback: no mips needed (single texel), use Linear filtering
+  // so the sampler doesn't fall back to a NEAREST mip and produce hard
+  // stair-stepping at oblique angles.
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
   tex.needsUpdate = true;
   return tex;
 }
@@ -104,9 +110,18 @@ async function loadTextureOrFallback(
     tex.wrapS = THREE.RepeatWrapping;
     tex.wrapT = THREE.RepeatWrapping;
     tex.colorSpace = THREE.SRGBColorSpace;
-    // Enable anisotropy for crisper tiling at grazing angles. The renderer
-    // will clamp this to its supported max; passing a high value is safe.
-    tex.anisotropy = 8;
+    // Anisotropic filtering eliminates the horizontal banding visible at
+    // grazing camera angles when tiled textures are sampled. 16 is the
+    // max supported by virtually every modern GPU; the renderer clamps
+    // to its actual capability internally, so over-requesting is safe.
+    tex.anisotropy = 16;
+    // Explicit trilinear filtering: LinearMipmapLinear interpolates
+    // between mip levels so distant tiles fade smoothly instead of
+    // popping. generateMipmaps=true is Three's default but we set it
+    // explicitly for clarity — the loader sometimes loses this on async.
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.generateMipmaps = true;
     return tex;
   } catch (e) {
     console.warn(
@@ -259,10 +274,24 @@ vec3 elevationColor(float y) {
 ${
   hasSplat
     ? `vec3 splatColor(vec2 uv) {
-  vec4 w = texture2D(splatmap, uv);
+  // PlaneGeometry's default V runs OPPOSITE to world Z after the
+  // rotateX(-PI/2) applied in TerrainMesh's constructor: worldZ=0
+  // (north) maps to vUv.y=1, worldZ=depth (south) maps to vUv.y=0.
+  // PaintMaterialController writes splatmap pixels using an UNFLIPPED
+  // worldZ → pxY mapping (pxY=0 ↔ worldZ=0), so the splatmap byte
+  // array is semantically aligned with world. We flip V here at the
+  // sample site so display matches storage. The 4 tiled material
+  // textures (grass/dirt/sand/scorched) are pattern-invariant under
+  // Y mirror at any tile scale, so they intentionally DO NOT get
+  // flipped — only the splatmap weight lookup does.
+  vec2 splatLookup = vec2(uv.x, 1.0 - uv.y);
+  vec4 w = texture2D(splatmap, splatLookup);
   float total = max(w.r + w.g + w.b + w.a, 0.001);
-  // Tile diffuse textures 16x across the map for close-up detail.
-  vec2 tileUv = uv * 16.0;
+  // Tile diffuse textures 8x across the map. At a 128m map that's
+  // ~16m per tile — readable at orbit distance without obvious
+  // close-up repetition. 16x (the previous value) was too grainy at
+  // distance and produced visible banding at grazing angles.
+  vec2 tileUv = uv * 8.0;
   vec3 grass    = texture2D(matGrass,    tileUv).rgb;
   vec3 dirt     = texture2D(matDirt,     tileUv).rgb;
   vec3 sand     = texture2D(matSand,     tileUv).rgb;
@@ -280,14 +309,20 @@ ${
               // high peaks) so the world reads coherently regardless of
               // how the artist painted the splatmap. The smoothstep on
               // world-Y picks the mix ratio:
-              //   y < 0    : 30% splat / 70% elevation (underwater is blue)
+              //   y < -1   : 30% splat / 70% elevation (underwater is blue)
+              //   y >= 0   : 80% splat / 20% elevation (painted ground dominates)
               //   y > 8    : 40% splat / 60% elevation (peaks tint toward snow)
-              //   middle   : 80% splat / 20% elevation (painted ground dominates)
               // Implemented with two smoothsteps so the transition is
               // continuous: lerp the splat WEIGHT from 0.3 → 0.8 across
-              // y∈[0,1] (water-to-ground edge) and from 0.8 → 0.4 across
+              // y∈[-1,0] (water-to-ground edge) and from 0.8 → 0.4 across
               // y∈[5,8] (ground-to-snowline edge).
-              `float waterToGround = smoothstep(0.0, 1.0, vWorldY);
+              //
+              // The water-edge band sits at [-1, 0] (not [0, 1] as a
+              // previous version had) so that the DEFAULT flat-y=0
+              // terrain shows the painted splatmap colors directly
+              // instead of the elevation gradient's wetSand tan — the
+              // old curve rendered an all-grass splatmap as tan beach.
+              `float waterToGround = smoothstep(-1.0, 0.0, vWorldY);
 float groundToSnow  = smoothstep(5.0, 8.0, vWorldY);
 float splatWeight   = mix(mix(0.3, 0.8, waterToGround), 0.4, groundToSnow);
 vec4 diffuseColor = vec4(mix(elevationColor(vWorldY), splatColor(vSplatUv), splatWeight), opacity);`

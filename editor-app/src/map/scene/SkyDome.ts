@@ -5,11 +5,12 @@
  * of "outdoors" instead of the flat charcoal background.
  *
  * Gradient anatomy:
- *   - topColor:     dusty blue overhead
- *   - horizonColor: warm sunset amber at the horizon ring
- *   - groundColor:  dark earth haze below the horizon (rarely visible
+ *   - topColor:     bright clear blue overhead (zenith)
+ *   - horizonColor: hazy light blue at the horizon ring (atmospheric
+ *                   perspective)
+ *   - groundColor:  light gray-blue below the horizon (rarely visible
  *                   because the terrain mesh covers most of it, but
- *                   prevents an ugly cyan halo where the sphere passes
+ *                   prevents an ugly halo where the sphere passes
  *                   under the terrain plane)
  *
  * Render order:
@@ -35,11 +36,20 @@ export class SkyDome {
       // washes out the gradient.
       fog: false,
       uniforms: {
-        topColor: { value: new THREE.Color(0x3a4a78) },
-        horizonColor: { value: new THREE.Color(0xc97a4a) },
-        groundColor: { value: new THREE.Color(0x2a1a18) },
-        offset: { value: 0.05 },
-        exponent: { value: 0.7 },
+        // Clear bright daylight sky — bright blue zenith fading to hazy
+        // light blue at the horizon. Matches the BattlefieldPreview's
+        // daylight mood so the map editor is comfortable for sustained
+        // authoring sessions instead of looking like dusk/dawn.
+        topColor: { value: new THREE.Color(0x4f8fcf) },
+        horizonColor: { value: new THREE.Color(0xc8e6ff) },
+        groundColor: { value: new THREE.Color(0x8aa0b5) },
+        // Zero offset — the haze band sits right at the geometric
+        // horizon, matching real atmospheric perspective.
+        offset: { value: 0.0 },
+        // Smooth, gentle exponent — the gradient breathes from haze to
+        // blue over a wide swath of the upper hemisphere instead of
+        // banding sharply.
+        exponent: { value: 0.45 },
       },
       vertexShader: /* glsl */ `
         varying vec3 vWorldPos;

@@ -76,8 +76,12 @@ export class MapSceneManager {
     private readonly container: HTMLElement,
   ) {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x1a1d22);
-    this.scene.fog = new THREE.Fog(0xc97a4a, 80, 300);
+    this.scene.background = new THREE.Color(0xc8e6ff);
+    // Neutral daylight haze — matches SkyDome horizonColor so distant
+    // terrain dissolves into the sky band coherently. Near pushed out
+    // to 100 so immediate terrain reads at full saturation under the
+    // authoring camera (~60–120m typical distance).
+    this.scene.fog = new THREE.Fog(0xc8e6ff, 100, 500);
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(window.devicePixelRatio);
@@ -95,15 +99,22 @@ export class MapSceneManager {
     this.skyDome = new SkyDome(1500);
     this.scene.add(this.skyDome.mesh);
 
-    const hemi = new THREE.HemisphereLight(0x6878a8, 0x5a4030, 0.9);
+    // Daylight lighting rig — mirrors BattlefieldPreview/lighting.ts so
+    // the map editor reads as clear midday outdoors. Authoring needs
+    // even, bright lighting; the sunset palette looked atmospheric in
+    // screenshots but was too dark for sustained work.
+    const hemi = new THREE.HemisphereLight(0xc8e6ff, 0x6ba14a, 1.15);
     this.scene.add(hemi);
-    const sun = new THREE.DirectionalLight(0xffd9a5, 1.6);
-    sun.position.set(80, 60, 100);
+    // Warm-white sun, high and slightly angled so terrain features
+    // catch directional shading without the scene reading as low-sun.
+    const sun = new THREE.DirectionalLight(0xfff8e8, 2.6);
+    sun.position.set(100, 200, 80);
     sun.target.position.set(64, 0, 64);
     this.scene.add(sun);
     this.scene.add(sun.target);
-    const fill = new THREE.DirectionalLight(0x6080b8, 0.3);
-    fill.position.set(-60, 40, -40);
+    // Cool fill from the opposite quadrant lifts shadow-side detail.
+    const fill = new THREE.DirectionalLight(0x9fbfe0, 0.5);
+    fill.position.set(-60, 80, -100);
     this.scene.add(fill);
 
     const initialState = mapStore.getState();

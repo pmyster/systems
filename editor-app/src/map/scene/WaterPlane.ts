@@ -42,7 +42,13 @@ export class WaterPlane {
       depthWrite: false,
     });
     this.mesh = new THREE.Mesh(this.geometry, this.material);
-    this.mesh.position.y = 0.0;
+    // Sit 5cm below sea level so the default flat terrain (y=0) renders
+    // ABOVE the water — otherwise the translucent water plane composites
+    // over the entire terrain at startup (coplanar z-fight where both
+    // surfaces share y=0, made worse by depthWrite=false + renderOrder=1).
+    // Once the user sculpts below -0.05m the water covers the depression
+    // as intended. Tiny offset, no perceptible difference for lakes.
+    this.mesh.position.y = -0.05;
     this.mesh.renderOrder = 1;
     this.mesh.name = "WaterPlane";
     // Water shouldn't intercept the Place / Select tool raycasts —

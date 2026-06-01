@@ -103,20 +103,21 @@ export class PaintMaterialController {
     // iterator floors/ceils internally for the bbox.
     const pxX = (worldX / terrainWidthM) * sm.widthPx;
     const pxY = (worldZ / terrainDepthM) * sm.heightPx;
+    const pxPerM = sm.widthPx / terrainWidthM;
+    const radiusPx = state.paint.radiusM * pxPerM;
     // Skip the tick when the cursor is fully outside the splatmap
     // bounds — the disc iterator would silently produce no work, but
     // creating an empty command and pushing it to the bus wastes undo
-    // slots.
+    // slots. Bounds check uses radiusPx (NOT radiusM) so meters and
+    // pixels don't get cross-compared.
     if (
-      pxX < -state.paint.radiusM ||
-      pxX > sm.widthPx + state.paint.radiusM ||
-      pxY < -state.paint.radiusM ||
-      pxY > sm.heightPx + state.paint.radiusM
+      pxX < -radiusPx ||
+      pxX > sm.widthPx + radiusPx ||
+      pxY < -radiusPx ||
+      pxY > sm.heightPx + radiusPx
     ) {
       return;
     }
-    const pxPerM = sm.widthPx / terrainWidthM;
-    const radiusPx = state.paint.radiusM * pxPerM;
     const cmd = new PaintMaterialCommand({
       centerPxX: pxX,
       centerPxY: pxY,
