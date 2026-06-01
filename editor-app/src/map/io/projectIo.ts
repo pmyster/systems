@@ -27,6 +27,8 @@ import {
   WORLD_M_PER_UNIT,
 } from "../coords/constants";
 import {
+  DEFAULT_COLOR_PAINT_HEIGHT_PX,
+  DEFAULT_COLOR_PAINT_WIDTH_PX,
   DEFAULT_SPLATMAP_HEIGHT_PX,
   DEFAULT_SPLATMAP_WIDTH_PX,
   MapProjectManifestSchema,
@@ -34,6 +36,12 @@ import {
   type MapProjectManifest,
 } from "../schema/manifest";
 import { migrate } from "../schema/migrations";
+import {
+  DEFAULT_ATMOSPHERE,
+  DEFAULT_COLOR_VARIANCE,
+  DEFAULT_ELEVATION_PROFILE,
+  DEFAULT_SPLAT_TO_ELEVATION_MIX,
+} from "../scene/biomes";
 import { useMapStore } from "../state/mapStore";
 
 import { decodeHeightmap, encodeHeightmap } from "./heightmapCodec";
@@ -43,6 +51,15 @@ interface MapBundle {
   manifest_json: string;
   heightmap_bytes: number[];
   splatmap_bytes: number[];
+  /**
+   * Raw `colorpaint.r8` bytes — `widthPx * heightPx * 4` RGBA values
+   * where RGB is the painted color and A is the overlay opacity.
+   * Empty array signals "no painted color anywhere" so the Rust side
+   * skips writing the sidecar file (keeping legacy maps free of an
+   * empty stub file). Loaders likewise return an empty array when no
+   * `colorpaint.r8` is present.
+   */
+  colorpaint_bytes: number[];
   /**
    * Optional PNG bytes for `thumbnail.png`. Empty array signals "no
    * thumbnail this save"; the Rust side then skips the file write rather
@@ -161,6 +178,27 @@ function buildDefaultSplatmap(widthPx: number, heightPx: number): Uint8Array {
   return data;
 }
 
+/** All-zero color-paint buffer = no painted tint anywhere. */
+function buildDefaultColorPaint(
+  widthPx: number,
+  heightPx: number,
+): Uint8Array {
+  return new Uint8Array(widthPx * heightPx * 4);
+}
+
+/**
+ * True iff the color-paint buffer has any non-zero byte. We only
+ * serialize the sidecar when there's actually painted content — saves a
+ * 64 KB write per save for the common "no color paint yet" case and
+ * keeps legacy projects from gaining an empty stub file.
+ */
+function hasAnyColorPaint(data: Uint8Array): boolean {
+  for (let i = 0; i < data.length; i++) {
+    if (data[i] !== 0) return true;
+  }
+  return false;
+}
+
 /**
  * Build a `MapBundle` snapshot of the current store state.
  *
@@ -213,16 +251,93 @@ export function _buildBundleFromStore(): MapBundle {
         widthPx: s.splatmap.widthPx,
         heightPx: s.splatmap.heightPx,
       },
+      // colorPaint sidecar ref is always declared so a re-load knows
+      // the expected dimensions even when the sidecar bytes are absent
+      // (no painted content — see hasAnyColorPaint gate below).
+      colorPaint: {
+        sidecar: "colorpaint.r8",
+        widthPx: s.colorPaint.widthPx,
+        heightPx: s.colorPaint.heightPx,
+      },
     },
     objects: Object.values(s.objects),
     spawnPoints: Object.values(s.spawnPoints),
     decals: Object.values(s.decals),
+    elevationProfile: {
+      mid: [
+        s.elevationProfile.mid[0],
+        s.elevationProfile.mid[1],
+        s.elevationProfile.mid[2],
+      ],
+      high: [
+        s.elevationProfile.high[0],
+        s.elevationProfile.high[1],
+        s.elevationProfile.high[2],
+      ],
+      peak: [
+        s.elevationProfile.peak[0],
+        s.elevationProfile.peak[1],
+        s.elevationProfile.peak[2],
+      ],
+    },
+    splatToElevationMix: s.splatToElevationMix,
+    atmosphere: {
+      skyTop: [
+        s.atmosphere.skyTop[0],
+        s.atmosphere.skyTop[1],
+        s.atmosphere.skyTop[2],
+      ],
+      skyHorizon: [
+        s.atmosphere.skyHorizon[0],
+        s.atmosphere.skyHorizon[1],
+        s.atmosphere.skyHorizon[2],
+      ],
+      skyGround: [
+        s.atmosphere.skyGround[0],
+        s.atmosphere.skyGround[1],
+        s.atmosphere.skyGround[2],
+      ],
+      sunColor: [
+        s.atmosphere.sunColor[0],
+        s.atmosphere.sunColor[1],
+        s.atmosphere.sunColor[2],
+      ],
+      sunIntensity: s.atmosphere.sunIntensity,
+      hemiSky: [
+        s.atmosphere.hemiSky[0],
+        s.atmosphere.hemiSky[1],
+        s.atmosphere.hemiSky[2],
+      ],
+      hemiGround: [
+        s.atmosphere.hemiGround[0],
+        s.atmosphere.hemiGround[1],
+        s.atmosphere.hemiGround[2],
+      ],
+      hemiIntensity: s.atmosphere.hemiIntensity,
+      fogColor: [
+        s.atmosphere.fogColor[0],
+        s.atmosphere.fogColor[1],
+        s.atmosphere.fogColor[2],
+      ],
+      fogNear: s.atmosphere.fogNear,
+      fogFar: s.atmosphere.fogFar,
+    },
+    colorVariance: s.colorVariance,
     ...(thumbnailBytes.length > 0 ? { thumbnail: "thumbnail.png" } : {}),
   };
+  // Only emit color-paint bytes when there's actually paint on the
+  // terrain. Skipping for empty buffers (the common case for legacy
+  // maps) avoids a 64 KB write per save and keeps the on-disk project
+  // dir clean.
+  const colorPaintBytes = hasAnyColorPaint(s.colorPaint.data)
+    ? Array.from(s.colorPaint.data)
+    : [];
+
   return {
     manifest_json: JSON.stringify(manifest, null, 2),
     heightmap_bytes: Array.from(encodeHeightmap(s.terrain.heightmap)),
     splatmap_bytes: Array.from(s.splatmap.data),
+    colorpaint_bytes: colorPaintBytes,
     thumbnail_bytes: thumbnailBytes,
   };
 }
@@ -267,6 +382,93 @@ function applyBundleToStore(bundle: MapBundle): void {
     }
     splatData = buildDefaultSplatmap(splatWidth, splatHeight);
   }
+  // Elevation profile + mix come from the v3 manifest fields. v2 maps were
+  // migrated to v3 in `migrate()` with Grassland defaults; v3-native maps
+  // may carry custom values. Fall back defensively if either field is
+  // missing — never let the load path crash because of an old manifest.
+  const ep = manifest.elevationProfile ?? DEFAULT_ELEVATION_PROFILE;
+  const elevationProfile = {
+    mid: [ep.mid[0], ep.mid[1], ep.mid[2]] as [number, number, number],
+    high: [ep.high[0], ep.high[1], ep.high[2]] as [number, number, number],
+    peak: [ep.peak[0], ep.peak[1], ep.peak[2]] as [number, number, number],
+  };
+  const splatToElevationMix =
+    manifest.splatToElevationMix ?? DEFAULT_SPLAT_TO_ELEVATION_MIX;
+  // v4 — atmosphere + color variance. Migration synthesises defaults from
+  // the legacy daylight rig for pre-v4 maps so they keep rendering as
+  // before. We still defensively fall back here in case a hand-edit
+  // somehow stripped the field after migration.
+  const atm = manifest.atmosphere ?? DEFAULT_ATMOSPHERE;
+  const atmosphere = {
+    skyTop: [atm.skyTop[0], atm.skyTop[1], atm.skyTop[2]] as [
+      number,
+      number,
+      number,
+    ],
+    skyHorizon: [atm.skyHorizon[0], atm.skyHorizon[1], atm.skyHorizon[2]] as [
+      number,
+      number,
+      number,
+    ],
+    skyGround: [atm.skyGround[0], atm.skyGround[1], atm.skyGround[2]] as [
+      number,
+      number,
+      number,
+    ],
+    sunColor: [atm.sunColor[0], atm.sunColor[1], atm.sunColor[2]] as [
+      number,
+      number,
+      number,
+    ],
+    sunIntensity: atm.sunIntensity,
+    hemiSky: [atm.hemiSky[0], atm.hemiSky[1], atm.hemiSky[2]] as [
+      number,
+      number,
+      number,
+    ],
+    hemiGround: [atm.hemiGround[0], atm.hemiGround[1], atm.hemiGround[2]] as [
+      number,
+      number,
+      number,
+    ],
+    hemiIntensity: atm.hemiIntensity,
+    fogColor: [atm.fogColor[0], atm.fogColor[1], atm.fogColor[2]] as [
+      number,
+      number,
+      number,
+    ],
+    fogNear: atm.fogNear,
+    fogFar: atm.fogFar,
+  };
+  const colorVariance = manifest.colorVariance ?? DEFAULT_COLOR_VARIANCE;
+
+  // Color-paint fallback chain mirrors splatmap:
+  //   1. Manifest declares dims + sidecar bytes present with matching
+  //      length → use them.
+  //   2. Manifest declares dims only → all-zero buffer at those dims.
+  //   3. Neither → default 128×128 all-zero buffer.
+  const colorPaintRef = manifest.terrain.colorPaint;
+  const colorPaintWidth =
+    colorPaintRef?.widthPx ?? DEFAULT_COLOR_PAINT_WIDTH_PX;
+  const colorPaintHeight =
+    colorPaintRef?.heightPx ?? DEFAULT_COLOR_PAINT_HEIGHT_PX;
+  const expectedColorPaintLen = colorPaintWidth * colorPaintHeight * 4;
+  let colorPaintData: Uint8Array;
+  if (
+    bundle.colorpaint_bytes &&
+    bundle.colorpaint_bytes.length === expectedColorPaintLen
+  ) {
+    colorPaintData = new Uint8Array(bundle.colorpaint_bytes);
+  } else {
+    if (bundle.colorpaint_bytes && bundle.colorpaint_bytes.length > 0) {
+      // Loud-over-silent: size mismatch surfaces in the dev console.
+      console.warn(
+        `[projectIo] colorpaint.r8 length ${bundle.colorpaint_bytes.length} != expected ${expectedColorPaintLen} (${colorPaintWidth}x${colorPaintHeight}*4). Falling back to empty.`,
+      );
+    }
+    colorPaintData = buildDefaultColorPaint(colorPaintWidth, colorPaintHeight);
+  }
+
   useMapStore.setState(
     (s) => ({
       ...s,
@@ -282,12 +484,22 @@ function applyBundleToStore(bundle: MapBundle): void {
         data: splatData,
         revision: s.splatmap.revision + 1,
       },
+      colorPaint: {
+        widthPx: colorPaintWidth,
+        heightPx: colorPaintHeight,
+        data: colorPaintData,
+        revision: s.colorPaint.revision + 1,
+      },
       objects: Object.fromEntries(manifest.objects.map((o) => [o.id, o])),
       spawnPoints: Object.fromEntries(
         manifest.spawnPoints.map((sp) => [sp.id, sp]),
       ),
       decals: Object.fromEntries(manifest.decals.map((d) => [d.id, d])),
       selection: { kind: "none", id: null },
+      elevationProfile,
+      splatToElevationMix,
+      atmosphere,
+      colorVariance,
     }),
     false,
   );
@@ -339,6 +551,34 @@ export async function newMapProject(): Promise<void> {
   pushRecentProject(dir, deriveProjectName(bundle.manifest_json, dir), Date.now());
   console.warn(
     `[map] Created project folder ${dir}. Manifest + heightmap + splatmap sidecars saved inside.`,
+  );
+}
+
+/**
+ * Create a new project from whatever is CURRENTLY in the store — used by
+ * the New Map modal flow: `setupNewMap()` populates the store with the
+ * user's chosen dimensions + biome, then this prompts for a folder and
+ * persists the snapshot. Behaviour mirrors `newMapProject` once the dir
+ * is chosen; the only difference is that the store has been
+ * pre-populated by the caller instead of using the default flat 129×129
+ * grass map.
+ */
+export async function newMapProjectFromCurrentState(): Promise<void> {
+  const dir = await saveDialog({
+    title: "Create Map Project Folder",
+    defaultPath: "untitled-map",
+  });
+  if (!dir) return;
+  const bundle = _buildBundleFromStore();
+  await invoke("create_map_project", { dir, bundle });
+  currentProjectDir = dir;
+  pushRecentProject(
+    dir,
+    deriveProjectName(bundle.manifest_json, dir),
+    Date.now(),
+  );
+  console.warn(
+    `[map] Created project folder ${dir} from current store state (New Map modal flow).`,
   );
 }
 

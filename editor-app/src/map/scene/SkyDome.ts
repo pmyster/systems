@@ -87,6 +87,25 @@ export class SkyDome {
     this.mesh.frustumCulled = false;
   }
 
+  /**
+   * Update the procedural-sky shader uniforms in place. Called by
+   * MapSceneManager when the store's `atmosphere` reference changes (New
+   * Map biome switch, project load). All three colors are 0..1 RGB tuples
+   * matching the BiomeAtmosphere convention.
+   */
+  setColors(
+    skyTop: readonly [number, number, number],
+    skyHorizon: readonly [number, number, number],
+    skyGround: readonly [number, number, number],
+  ): void {
+    const top = this.material.uniforms.topColor.value as THREE.Color;
+    top.setRGB(skyTop[0], skyTop[1], skyTop[2]);
+    const horizon = this.material.uniforms.horizonColor.value as THREE.Color;
+    horizon.setRGB(skyHorizon[0], skyHorizon[1], skyHorizon[2]);
+    const ground = this.material.uniforms.groundColor.value as THREE.Color;
+    ground.setRGB(skyGround[0], skyGround[1], skyGround[2]);
+  }
+
   dispose(): void {
     this.geometry.dispose();
     this.material.dispose();

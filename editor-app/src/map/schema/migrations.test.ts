@@ -21,7 +21,8 @@ describe("migrate v1 → v2", () => {
       terrain: { sidecar: "heightmap.r32", widthPx: 129, heightPx: 129 },
     };
     const out = migrate(v1) as { schemaVersion: number; decals: unknown[] };
-    expect(out.schemaVersion).toBe(2);
+    // v1 → v2 → v3 → v4 → v5 chain (current).
+    expect(out.schemaVersion).toBe(5);
     expect(out.decals).toEqual([]);
   });
 
@@ -40,12 +41,12 @@ describe("migrate v1 → v2", () => {
     });
   });
 
-  it("treats missing schemaVersion as v1 and migrates to v2", () => {
+  it("treats missing schemaVersion as v1 and migrates to current", () => {
     const noVersion = {
       terrain: { sidecar: "heightmap.r32", widthPx: 129, heightPx: 129 },
     };
     const out = migrate(noVersion) as { schemaVersion: number; decals: unknown[] };
-    expect(out.schemaVersion).toBe(2);
+    expect(out.schemaVersion).toBe(5);
     expect(out.decals).toEqual([]);
   });
 
@@ -58,8 +59,10 @@ describe("migrate v1 → v2", () => {
     migrate(v1);
     expect(v1).toEqual(snap);
   });
+});
 
-  it("leaves a v2 manifest unchanged", () => {
+describe("migrate v2 → v3", () => {
+  it("synthesizes Grassland elevation profile + splat mix when absent", () => {
     const v2 = {
       schemaVersion: 2,
       name: "v2",
@@ -71,7 +74,145 @@ describe("migrate v1 → v2", () => {
       },
       decals: [],
     };
-    const out = migrate(v2);
-    expect(out).toBe(v2); // identity — fast-path
+    const out = migrate(v2) as {
+      schemaVersion: number;
+      elevationProfile: {
+        mid: readonly number[];
+        high: readonly number[];
+        peak: readonly number[];
+      };
+      splatToElevationMix: number;
+    };
+    // v2 → v3 → v4 → v5 (current).
+    expect(out.schemaVersion).toBe(5);
+    expect(out.elevationProfile).toEqual({
+      mid: [0.35, 0.55, 0.22],
+      high: [0.45, 0.55, 0.3],
+      peak: [0.55, 0.55, 0.4],
+    });
+    expect(out.splatToElevationMix).toBe(0.75);
+  });
+
+  it("preserves existing v3 elevation profile / mix on a hand-edited manifest", () => {
+    const v2WithProfile = {
+      schemaVersion: 2,
+      name: "v2-handedit",
+      terrain: {
+        sidecar: "heightmap.r32",
+        widthPx: 129,
+        heightPx: 129,
+        splatmap: { sidecar: "splatmap.r8", widthPx: 128, heightPx: 128 },
+      },
+      decals: [],
+      elevationProfile: {
+        mid: [0.62, 0.3, 0.18],
+        high: [0.55, 0.22, 0.12],
+        peak: [0.45, 0.18, 0.1],
+      },
+      splatToElevationMix: 0.5,
+    };
+    const out = migrate(v2WithProfile) as {
+      schemaVersion: number;
+      elevationProfile: { mid: readonly number[] };
+      splatToElevationMix: number;
+    };
+    expect(out.schemaVersion).toBe(5);
+    expect(out.elevationProfile.mid).toEqual([0.62, 0.3, 0.18]);
+    expect(out.splatToElevationMix).toBe(0.5);
+  });
+
+  it("synthesizes default atmosphere + zero color variance for a v3 manifest", () => {
+    const v3 = {
+      schemaVersion: 3,
+      name: "v3",
+      terrain: {
+        sidecar: "heightmap.r32",
+        widthPx: 129,
+        heightPx: 129,
+        splatmap: { sidecar: "splatmap.r8", widthPx: 128, heightPx: 128 },
+      },
+      decals: [],
+      elevationProfile: {
+        mid: [0.35, 0.55, 0.22],
+        high: [0.45, 0.55, 0.3],
+        peak: [0.55, 0.55, 0.4],
+      },
+      splatToElevationMix: 0.75,
+    };
+    const out = migrate(v3) as {
+      schemaVersion: number;
+      atmosphere: { sunIntensity: number; fogNear: number; fogFar: number };
+      colorVariance: number;
+    };
+    expect(out.schemaVersion).toBe(5);
+    expect(out.atmosphere.sunIntensity).toBe(2.6);
+    expect(out.atmosphere.fogNear).toBe(100);
+    expect(out.atmosphere.fogFar).toBe(500);
+    expect(out.colorVariance).toBe(0);
+  });
+
+  it("leaves a v5 manifest unchanged", () => {
+    const v5 = {
+      schemaVersion: 5,
+      name: "v4",
+      terrain: {
+        sidecar: "heightmap.r32",
+        widthPx: 129,
+        heightPx: 129,
+        splatmap: { sidecar: "splatmap.r8", widthPx: 128, heightPx: 128 },
+        colorPaint: { sidecar: "colorpaint.r8", widthPx: 128, heightPx: 128 },
+      },
+      decals: [],
+      elevationProfile: {
+        mid: [0.35, 0.55, 0.22],
+        high: [0.45, 0.55, 0.3],
+        peak: [0.55, 0.55, 0.4],
+      },
+      splatToElevationMix: 0.75,
+      atmosphere: {
+        skyTop: [0.31, 0.56, 0.81],
+        skyHorizon: [0.78, 0.9, 1.0],
+        skyGround: [0.54, 0.63, 0.71],
+        sunColor: [1.0, 0.97, 0.91],
+        sunIntensity: 2.6,
+        hemiSky: [0.78, 0.9, 1.0],
+        hemiGround: [0.42, 0.63, 0.29],
+        hemiIntensity: 1.15,
+        fogColor: [0.78, 0.9, 1.0],
+        fogNear: 100,
+        fogFar: 500,
+      },
+      colorVariance: 0,
+    };
+    const out = migrate(v5);
+    expect(out).toBe(v5); // identity — fast-path
+  });
+});
+
+describe("migrate v4 → v5", () => {
+  it("synthesises a default colorPaint sidecar ref when absent", () => {
+    const v4 = {
+      schemaVersion: 4,
+      name: "v4",
+      terrain: {
+        sidecar: "heightmap.r32",
+        widthPx: 129,
+        heightPx: 129,
+        splatmap: { sidecar: "splatmap.r8", widthPx: 128, heightPx: 128 },
+      },
+      decals: [],
+    };
+    const out = migrate(v4) as {
+      schemaVersion: number;
+      terrain: {
+        colorPaint: { sidecar: string; widthPx: number; heightPx: number };
+      };
+    };
+    expect(out.schemaVersion).toBe(5);
+    expect(out.terrain.colorPaint).toEqual({
+      sidecar: "colorpaint.r8",
+      widthPx: 128,
+      heightPx: 128,
+    });
   });
 });

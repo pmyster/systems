@@ -27,7 +27,26 @@ describe("createEmptyManifest", () => {
 
   it("uses the current schemaVersion literal", () => {
     const m = createEmptyManifest("a", "b");
-    expect(m.schemaVersion).toBe(2);
+    expect(m.schemaVersion).toBe(5);
+  });
+
+  it("seeds the v3 elevation profile + splat mix with Grassland defaults", () => {
+    const m = createEmptyManifest("a", "b");
+    expect(m.elevationProfile).toEqual({
+      mid: [0.35, 0.55, 0.22],
+      high: [0.45, 0.55, 0.3],
+      peak: [0.55, 0.55, 0.4],
+    });
+    expect(m.splatToElevationMix).toBe(0.75);
+  });
+
+  it("seeds the v4 default atmosphere + zero color variance", () => {
+    const m = createEmptyManifest("a", "b");
+    expect(m.atmosphere).toBeDefined();
+    expect(m.atmosphere?.sunIntensity).toBe(2.6);
+    expect(m.atmosphere?.fogNear).toBe(100);
+    expect(m.atmosphere?.fogFar).toBe(500);
+    expect(m.colorVariance).toBe(0);
   });
 
   it("starts with empty objects, spawnPoints, and decals arrays", () => {
@@ -41,6 +60,15 @@ describe("createEmptyManifest", () => {
     const m = createEmptyManifest("a", "b");
     expect(m.terrain.splatmap).toEqual({
       sidecar: "splatmap.r8",
+      widthPx: 128,
+      heightPx: 128,
+    });
+  });
+
+  it("includes a default colorPaint sidecar reference on the terrain", () => {
+    const m = createEmptyManifest("a", "b");
+    expect(m.terrain.colorPaint).toEqual({
+      sidecar: "colorpaint.r8",
       widthPx: 128,
       heightPx: 128,
     });

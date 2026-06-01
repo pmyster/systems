@@ -49,6 +49,11 @@
 import * as THREE from "three";
 
 import { HEIGHTMAP_M_PER_PIXEL } from "../coords/constants";
+import type { ElevationProfile } from "./biomes";
+import {
+  DEFAULT_ELEVATION_PROFILE,
+  DEFAULT_SPLAT_TO_ELEVATION_MIX,
+} from "./biomes";
 
 /**
  * Optional pre-loaded splatmap material textures. Callers can hand these
@@ -65,7 +70,7 @@ export interface TerrainMaterials {
 /** Fallback colors — the legacy hardcoded shader values. Used when a
  *  texture file fails to load so we degrade visibly (not silently). */
 const FALLBACK_COLORS = {
-  grass:    [0.32, 0.45, 0.20] as const,
+  grass:    [0.34, 0.55, 0.22] as const,
   dirt:     [0.40, 0.30, 0.20] as const,
   sand:     [0.78, 0.68, 0.45] as const,
   scorched: [0.12, 0.10, 0.09] as const,
@@ -173,6 +178,13 @@ export class TerrainMesh {
      * arrive (so it's never black).
      */
     materials?: TerrainMaterials,
+    /**
+     * Optional color-paint overlay texture. When provided, the shader
+     * blends a painted RGBA tint over the material+atmosphere mix while
+     * preserving the underlying luminance (bump detail still reads
+     * through painted areas). Default = null = no overlay sampled.
+     */
+    colorPaint?: THREE.Texture,
   ) {
     const widthM = (widthPx - 1) * HEIGHTMAP_M_PER_PIXEL;
     const heightM = (heightPx - 1) * HEIGHTMAP_M_PER_PIXEL;
@@ -207,6 +219,8 @@ export class TerrainMesh {
 
     const splatTex = splatmap ?? null;
     const hasSplat = splatTex !== null;
+    const colorPaintTex = colorPaint ?? null;
+    const hasColorPaint = colorPaintTex !== null;
 
     // Initial material textures: either the caller's, or flat-color
     // placeholders we'll swap with real textures once they finish loading.
@@ -221,13 +235,52 @@ export class TerrainMesh {
     this.materials = initialMaterials;
 
     // Elevation-gradient + splatmap injection.
+    //
+    // The above-water elevation stops (mid / high / peak) are biome-driven
+    // uniforms instead of hardcoded vec3 literals — `setElevationProfile`
+    // writes them at runtime when MapSceneManager observes a store change.
+    // Water remains FIXED (universal blue) so wet edges read the same in
+    // every biome.
     this.material.onBeforeCompile = (shader) => {
-      // Expose the splatmap + 4 material textures as uniforms.
+      // Expose the splatmap + 4 material textures + elevation stops as uniforms.
       shader.uniforms.splatmap = { value: splatTex };
       shader.uniforms.matGrass    = { value: initialMaterials.grass };
       shader.uniforms.matDirt     = { value: initialMaterials.dirt };
       shader.uniforms.matSand     = { value: initialMaterials.sand };
       shader.uniforms.matScorched = { value: initialMaterials.scorched };
+      shader.uniforms.gradMid  = {
+        value: new THREE.Vector3(
+          DEFAULT_ELEVATION_PROFILE.mid[0],
+          DEFAULT_ELEVATION_PROFILE.mid[1],
+          DEFAULT_ELEVATION_PROFILE.mid[2],
+        ),
+      };
+      shader.uniforms.gradHigh = {
+        value: new THREE.Vector3(
+          DEFAULT_ELEVATION_PROFILE.high[0],
+          DEFAULT_ELEVATION_PROFILE.high[1],
+          DEFAULT_ELEVATION_PROFILE.high[2],
+        ),
+      };
+      shader.uniforms.gradPeak = {
+        value: new THREE.Vector3(
+          DEFAULT_ELEVATION_PROFILE.peak[0],
+          DEFAULT_ELEVATION_PROFILE.peak[1],
+          DEFAULT_ELEVATION_PROFILE.peak[2],
+        ),
+      };
+      shader.uniforms.splatMix = { value: DEFAULT_SPLAT_TO_ELEVATION_MIX };
+      // colorVariance — drives the in-shader noise-based tint shift on
+      // the elevation gradient. Default 0 = perfectly uniform (legacy
+      // behaviour); the MapSceneManager subscriber pushes the per-biome
+      // value once the terrain is in the scene.
+      shader.uniforms.colorVariance = { value: 0.0 };
+      // colorPaint — RGBA tint overlay sampled on top of the material +
+      // atmosphere blend. Optional uniform; only declared in the
+      // fragment shader when `hasColorPaint` is true.
+      if (hasColorPaint) {
+        shader.uniforms.colorPaint = { value: colorPaintTex };
+      }
       this.compiledShader = shader;
 
       shader.vertexShader = shader.vertexShader
@@ -253,23 +306,59 @@ uniform sampler2D matGrass;
 uniform sampler2D matDirt;
 uniform sampler2D matSand;
 uniform sampler2D matScorched;
+uniform vec3 gradMid;
+uniform vec3 gradHigh;
+uniform vec3 gradPeak;
+uniform float splatMix;
+uniform float colorVariance;
 ${hasSplat ? "uniform sampler2D splatmap;" : ""}
+${hasColorPaint ? "uniform sampler2D colorPaint;" : ""}
+
+// Cheap value-noise — hash + 2D bilinear smooth. Plenty for organic patchy
+// tint variation on a terrain-scale surface; we don't need fractal
+// quality here, just enough variation to break monotone gradients.
+float terrainHash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+float terrainNoise(vec2 uv) {
+  vec2 i = floor(uv);
+  vec2 f = fract(uv);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = terrainHash(i);
+  float b = terrainHash(i + vec2(1.0, 0.0));
+  float c = terrainHash(i + vec2(0.0, 1.0));
+  float d = terrainHash(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// Apply per-pixel hue/value variance to the elevation color. Uses two
+// frequencies — low for big patches, higher for grain — combined into a
+// signed scalar in [-1, 1] that shifts each RGB channel by a different
+// amount so the result looks like organic mottling, not a luminance dial.
+// Cheap exit when variance is zero so legacy maps pay nothing.
+vec3 applyVariance(vec3 base, vec2 uv) {
+  if (colorVariance < 0.001) return base;
+  float n = terrainNoise(uv * 6.0);
+  float n2 = terrainNoise(uv * 20.0) * 0.3;
+  float total = (n + n2) * 2.0 - 1.0;
+  vec3 shift = vec3(total * 0.15, total * 0.25, total * 0.1);
+  return base * (1.0 + shift * colorVariance);
+}
+
 vec3 elevationColor(float y) {
+  // Water is universally fixed across all biomes — only above-water
+  // (y > 0) reads from the biome-driven gradient uniforms.
   vec3 deepWater = vec3(0.10, 0.23, 0.42);
   vec3 shallow   = vec3(0.23, 0.54, 0.69);
   vec3 wetSand   = vec3(0.54, 0.44, 0.31);
-  vec3 drySand   = vec3(0.77, 0.63, 0.42);
-  vec3 grass     = vec3(0.35, 0.48, 0.23);
-  vec3 rock      = vec3(0.42, 0.38, 0.33);
-  vec3 snow      = vec3(0.91, 0.91, 0.92);
   if (y < -2.0)  return deepWater;
-  if (y < -0.5)  return mix(deepWater, shallow,  (y + 2.0)  / 1.5);
-  if (y < 0.0)   return mix(shallow,   wetSand,  (y + 0.5)  / 0.5);
-  if (y < 0.5)   return mix(wetSand,   drySand,  (y - 0.0)  / 0.5);
-  if (y < 2.0)   return mix(drySand,   grass,    (y - 0.5)  / 1.5);
-  if (y < 5.0)   return mix(grass,     rock,     (y - 2.0)  / 3.0);
-  if (y < 10.0)  return mix(rock,      snow,     (y - 5.0)  / 5.0);
-  return snow;
+  if (y < -0.5)  return mix(deepWater, shallow, (y + 2.0) / 1.5);
+  if (y < 0.0)   return mix(shallow,   wetSand, (y + 0.5) / 0.5);
+  if (y < 0.5)   return mix(wetSand,   gradMid, y / 0.5);
+  if (y < 2.0)   return gradMid;
+  if (y < 5.0)   return mix(gradMid,  gradHigh, (y - 2.0) / 3.0);
+  if (y < 8.0)   return mix(gradHigh, gradPeak, (y - 5.0) / 3.0);
+  return gradPeak;
 }
 ${
   hasSplat
@@ -287,14 +376,15 @@ ${
   vec2 splatLookup = vec2(uv.x, 1.0 - uv.y);
   vec4 w = texture2D(splatmap, splatLookup);
   float total = max(w.r + w.g + w.b + w.a, 0.001);
-  // Tile diffuse textures 8x across the map. At a 128m map that's
-  // ~16m per tile — readable at orbit distance without obvious
-  // close-up repetition. 16x (the previous value) was too grainy at
-  // distance and produced visible banding at grazing angles.
   vec2 tileUv = uv * 8.0;
-  vec3 grass    = texture2D(matGrass,    tileUv).rgb;
+  vec3 grassRaw = texture2D(matGrass,    tileUv).rgb;
+  // Vibrant pastures tint — slight green push, slight red/blue reduction.
+  vec3 grass    = grassRaw * vec3(0.85, 1.18, 0.75);
   vec3 dirt     = texture2D(matDirt,     tileUv).rgb;
-  vec3 sand     = texture2D(matSand,     tileUv).rgb;
+  vec3 sandRaw  = texture2D(matSand,     tileUv).rgb;
+  // Slight golden push on sand so Desert / Mars / alien biomes that
+  // tint with warm peaks read richer rather than washed-out.
+  vec3 sand     = sandRaw * vec3(1.10, 1.05, 0.90);
   vec3 scorched = texture2D(matScorched, tileUv).rgb;
   // R=grass, G=dirt, B=sand, A=scorched.
   return (grass*w.r + dirt*w.g + sand*w.b + scorched*w.a) / total;
@@ -304,29 +394,43 @@ ${
         )
         .replace(
           "vec4 diffuseColor = vec4( diffuse, opacity );",
-          hasSplat
-            ? // Elevation gradient takes over at extremes (deep water +
-              // high peaks) so the world reads coherently regardless of
-              // how the artist painted the splatmap. The smoothstep on
-              // world-Y picks the mix ratio:
-              //   y < -1   : 30% splat / 70% elevation (underwater is blue)
-              //   y >= 0   : 80% splat / 20% elevation (painted ground dominates)
-              //   y > 8    : 40% splat / 60% elevation (peaks tint toward snow)
-              // Implemented with two smoothsteps so the transition is
-              // continuous: lerp the splat WEIGHT from 0.3 → 0.8 across
-              // y∈[-1,0] (water-to-ground edge) and from 0.8 → 0.4 across
-              // y∈[5,8] (ground-to-snowline edge).
+          (hasSplat
+            ? // Per-biome `splatMix` uniform controls how much the painted
+              // splatmap dominates vs. the elevation gradient. Replaces the
+              // previous hardcoded smoothstep curve — each biome owns its
+              // own mix ratio (e.g. Mars 0.5, Bioluminescent 0.3).
               //
-              // The water-edge band sits at [-1, 0] (not [0, 1] as a
-              // previous version had) so that the DEFAULT flat-y=0
-              // terrain shows the painted splatmap colors directly
-              // instead of the elevation gradient's wetSand tan — the
-              // old curve rendered an all-grass splatmap as tan beach.
-              `float waterToGround = smoothstep(-1.0, 0.0, vWorldY);
-float groundToSnow  = smoothstep(5.0, 8.0, vWorldY);
-float splatWeight   = mix(mix(0.3, 0.8, waterToGround), 0.4, groundToSnow);
-vec4 diffuseColor = vec4(mix(elevationColor(vWorldY), splatColor(vSplatUv), splatWeight), opacity);`
-            : "vec4 diffuseColor = vec4( elevationColor(vWorldY), opacity );",
+              // Below sea level we ALWAYS show the elevation gradient (water
+              // tones) rather than the painted splatmap — wet sand on the
+              // shore should read coherently in every biome.
+              //
+              // colorVariance is applied to the elevation tint ONLY (not the
+              // splatmap), so painted material always reads as authored. The
+              // variance shader is a cheap no-op when colorVariance == 0.
+              `float underWater   = smoothstep(0.0, -0.5, vWorldY);
+float effMix       = mix(splatMix, 0.0, underWater);
+vec3 elevTinted    = applyVariance(elevationColor(vWorldY), vSplatUv);
+vec4 diffuseColor  = vec4(mix(elevTinted, splatColor(vSplatUv), effMix), opacity);`
+            : "vec4 diffuseColor = vec4( applyVariance(elevationColor(vWorldY), vSplatUv), opacity );") +
+            (hasColorPaint
+              ? `
+// Color-paint overlay — sample the painted RGBA tint and blend it
+// over the material+atmosphere mix while preserving the underlying
+// luminance so bump / PBR detail still reads through painted areas.
+// V flip matches the splatmap convention (worldZ=0 ↔ pxY=0).
+{
+  vec4 paint = texture2D(colorPaint, vec2(vSplatUv.x, 1.0 - vSplatUv.y));
+  if (paint.a > 0.0) {
+    // Pull a luminance estimate from the current diffuseColor and use
+    // it to modulate the painted color — values <0.5 stay darker,
+    // brighter spots stay brighter. The 1.6/0.2 affine keeps painted
+    // regions readable without crushing bump detail.
+    float matLum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+    vec3 tintedRgb = paint.rgb * (matLum * 1.6 + 0.2);
+    diffuseColor.rgb = mix(diffuseColor.rgb, tintedRgb, paint.a);
+  }
+}`
+              : ""),
         );
     };
     this.material.needsUpdate = true;
@@ -396,6 +500,19 @@ vec4 diffuseColor = vec4(mix(elevationColor(vWorldY), splatColor(vSplatUv), spla
   }
 
   /**
+   * Hot-swap the color-paint overlay texture uniform. Called by the
+   * scene manager whenever the store's colorPaint byte buffer gets
+   * replaced wholesale (new map / project load). The shader only
+   * declares the uniform when the constructor was given an initial
+   * color-paint texture — calls before that compile path are no-ops.
+   */
+  setColorPaintTexture(tex: THREE.Texture | null): void {
+    if (!this.compiledShader) return;
+    const u = this.compiledShader.uniforms.colorPaint;
+    if (u) u.value = tex;
+  }
+
+  /**
    * Swap the 4 PBR material textures. Disposes the previous placeholders
    * (if any) so we don't leak the 1×1 fallback DataTextures created in
    * the constructor.
@@ -419,6 +536,40 @@ vec4 diffuseColor = vec4(mix(elevationColor(vWorldY), splatColor(vSplatUv), spla
       }
     }
     this.materials = materials;
+  }
+
+  /**
+   * Push a new per-biome elevation profile + splat/elevation mix to the
+   * shader uniforms. Called by MapSceneManager when it observes a change
+   * in `mapStore.elevationProfile` / `splatToElevationMix` (which happens
+   * on New Map → biome switch and on project load).
+   *
+   * Safe to call before the shader has compiled — we early-return and the
+   * onBeforeCompile callback will use the DEFAULT values until the next
+   * call lands. In practice the compiledShader handle is populated on the
+   * first frame, so subsequent calls always take effect.
+   */
+  setElevationProfile(profile: ElevationProfile, splatMix: number): void {
+    if (!this.compiledShader) return;
+    const u = this.compiledShader.uniforms;
+    const mid = u.gradMid?.value as THREE.Vector3 | undefined;
+    if (mid) mid.set(profile.mid[0], profile.mid[1], profile.mid[2]);
+    const high = u.gradHigh?.value as THREE.Vector3 | undefined;
+    if (high) high.set(profile.high[0], profile.high[1], profile.high[2]);
+    const peak = u.gradPeak?.value as THREE.Vector3 | undefined;
+    if (peak) peak.set(profile.peak[0], profile.peak[1], profile.peak[2]);
+    if (u.splatMix) u.splatMix.value = splatMix;
+  }
+
+  /**
+   * Push the per-biome procedural color variance (0..1) into the shader.
+   * Cheap and idempotent — exit early if the shader hasn't compiled yet
+   * (onBeforeCompile seeds the uniform with 0.0 in that case).
+   */
+  setColorVariance(value: number): void {
+    if (!this.compiledShader) return;
+    const u = this.compiledShader.uniforms.colorVariance;
+    if (u) u.value = value;
   }
 
   setWireframe(on: boolean): void {

@@ -37,6 +37,13 @@ pub struct MapBundle {
     pub heightmap_bytes: Vec<u8>,
     #[serde(default)]
     pub splatmap_bytes: Vec<u8>,
+    /// Color-paint overlay bytes (`colorpaint.r8`, RGBA Uint8 per
+    /// pixel). Empty Vec means "no painted color anywhere" — we then
+    /// skip the file write so legacy maps don't gain an empty stub and
+    /// fresh maps stay clean until the user actually paints. Loaders
+    /// return an empty Vec when no `colorpaint.r8` is present.
+    #[serde(default)]
+    pub colorpaint_bytes: Vec<u8>,
     /// Optional PNG thumbnail bytes. Empty Vec means "no thumbnail this
     /// save" — we then skip the file write instead of clobbering an
     /// existing `thumbnail.png` with zero bytes. Loaders return an empty
@@ -88,6 +95,16 @@ pub fn open_map_project(dir: String) -> Result<MapBundle, String> {
         );
         Vec::new()
     };
+    // colorpaint.r8 is optional — pre-v5 projects don't have one, and
+    // fresh v5 projects skip the write until the user actually paints.
+    // Absent file → empty Vec → JS layer synthesises a zero-tint buffer.
+    let colorpaint_path = dir_path.join("colorpaint.r8");
+    let colorpaint_bytes = if colorpaint_path.exists() {
+        fs::read(&colorpaint_path)
+            .map_err(|e| format!("read colorpaint failed: {e}"))?
+    } else {
+        Vec::new()
+    };
     // Thumbnail is optional — older projects (or any project that has
     // never been saved with the thumbnail feature) won't have one. Empty
     // Vec signals "absent" to the JS side without failing the load.
@@ -106,6 +123,7 @@ pub fn open_map_project(dir: String) -> Result<MapBundle, String> {
         manifest_json,
         heightmap_bytes,
         splatmap_bytes,
+        colorpaint_bytes,
         thumbnail_bytes,
     })
 }
@@ -179,6 +197,12 @@ pub fn autosave_map_project(dir: String, bundle: MapBundle) -> Result<(), String
             &bundle.splatmap_bytes,
         )?;
     }
+    if !bundle.colorpaint_bytes.is_empty() {
+        write_atomic(
+            &autosave_dir.join("colorpaint.r8"),
+            &bundle.colorpaint_bytes,
+        )?;
+    }
     if !bundle.thumbnail_bytes.is_empty() {
         write_atomic(
             &autosave_dir.join("thumbnail.png"),
@@ -197,6 +221,12 @@ fn write_bundle_atomic(dir: &Path, bundle: &MapBundle) -> Result<(), String> {
     write_atomic(&dir.join("heightmap.r32"), &bundle.heightmap_bytes)?;
     if !bundle.splatmap_bytes.is_empty() {
         write_atomic(&dir.join("splatmap.r8"), &bundle.splatmap_bytes)?;
+    }
+    // Color-paint sidecar: skip when empty (no painted content) so
+    // legacy maps don't gain an empty stub file. The JS layer
+    // synthesises an empty buffer at load time when the file's absent.
+    if !bundle.colorpaint_bytes.is_empty() {
+        write_atomic(&dir.join("colorpaint.r8"), &bundle.colorpaint_bytes)?;
     }
     // Thumbnail is best-effort: skip writing when no bytes were provided
     // (autosave, headless test, capture failure) rather than overwriting
@@ -260,6 +290,10 @@ fn rotate_baks(dir: &Path) -> Result<(), String> {
     let splatmap = dir.join("splatmap.r8");
     if splatmap.exists() {
         let _ = fs::copy(&splatmap, stamp_dir.join("splatmap.r8"));
+    }
+    let colorpaint = dir.join("colorpaint.r8");
+    if colorpaint.exists() {
+        let _ = fs::copy(&colorpaint, stamp_dir.join("colorpaint.r8"));
     }
     let thumbnail = dir.join("thumbnail.png");
     if thumbnail.exists() {

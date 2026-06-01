@@ -23,12 +23,14 @@ import { useEffect, useState } from "react";
 
 import {
   getCurrentProjectDir,
-  newMapProject,
+  newMapProjectFromCurrentState,
   openMapProject,
   saveMapProject,
   saveMapProjectAs,
 } from "../../map/io/projectIo";
+import { setupNewMap } from "../../map/state/mapStore";
 
+import { NewMapModal } from "./NewMapModal";
 import { RecentProjectsPanel } from "./RecentProjectsPanel";
 
 function isEditingInput(target: EventTarget | null): boolean {
@@ -48,6 +50,7 @@ export function MapMenuBar() {
   );
   const [busy, setBusy] = useState(false);
   const [showRecents, setShowRecents] = useState(false);
+  const [showNewMap, setShowNewMap] = useState(false);
 
   // Wrap any handler in busy-state so a slow disk doesn't let the user
   // queue up overlapping saves. Errors surface via console.warn for now
@@ -64,6 +67,19 @@ export function MapMenuBar() {
       setBusy(false);
     }
   };
+
+  // New Map modal "Create" handler — runs setupNewMap to populate the
+  // store from the chosen dims + biome, closes the modal, then prompts
+  // for a project folder via the standard new-project save dialog.
+  async function handleNewModalCreate(params: {
+    widthPx: number;
+    heightPx: number;
+    biomeId: string;
+  }): Promise<void> {
+    setupNewMap(params.widthPx, params.heightPx, params.biomeId);
+    setShowNewMap(false);
+    await guarded(newMapProjectFromCurrentState);
+  }
 
   // Cmd/Ctrl+S / Cmd/Ctrl+Shift+S keyboard bindings.
   useEffect(() => {
@@ -91,7 +107,7 @@ export function MapMenuBar() {
         type="button"
         className="map-menu-button"
         disabled={busy}
-        onClick={() => void guarded(newMapProject)}
+        onClick={() => setShowNewMap(true)}
       >
         New
       </button>
@@ -139,6 +155,12 @@ export function MapMenuBar() {
     </div>
     {showRecents ? (
       <RecentProjectsPanel onClose={() => setShowRecents(false)} />
+    ) : null}
+    {showNewMap ? (
+      <NewMapModal
+        onCancel={() => setShowNewMap(false)}
+        onCreate={(p) => void handleNewModalCreate(p)}
+      />
     ) : null}
     </>
   );

@@ -37,7 +37,9 @@ export class RtsOrbitCamera {
   private readonly minElevation = 0.1;
   private readonly maxElevation = Math.PI / 2 - 0.05;
   private readonly minDistance = 5;
-  private readonly maxDistance = 500;
+  // Cap big enough to frame the largest preset map (2048m × 0.8 ≈ 1640m).
+  // The camera near/far clip is 0.1 / 5000, so 2500 still has 2× headroom.
+  private readonly maxDistance = 2500;
 
   private isOrbiting = false;
   private isPanning = false;
@@ -55,6 +57,30 @@ export class RtsOrbitCamera {
     canvas.addEventListener("pointercancel", this.onPointerUp);
     canvas.addEventListener("wheel", this.onWheel, { passive: false });
     canvas.addEventListener("contextmenu", this.onContextMenu);
+  }
+
+  /**
+   * Move the orbit focus point to a new world position. Used when the
+   * map dimensions change (setupNewMap) so the camera re-centres on the
+   * new map's middle. Mutates the existing focus object in place so any
+   * caller that captured a reference (rare — only the constructor) stays
+   * in sync.
+   */
+  setFocus(p: RtsFocusPoint): void {
+    this.focus.x = p.x;
+    this.focus.y = p.y;
+    this.focus.z = p.z;
+  }
+
+  /**
+   * Set the orbit distance from the focus point, clamped to the same
+   * min/max as wheel-zoom. Used to scale the view to a new map size.
+   */
+  setDistance(d: number): void {
+    this.distance = Math.max(
+      this.minDistance,
+      Math.min(this.maxDistance, d),
+    );
   }
 
   /** Apply current azimuth / elevation / distance to the camera. */

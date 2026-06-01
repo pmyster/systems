@@ -27,11 +27,23 @@
 
 import { create } from "zustand";
 
+import { mapCommandBus } from "../commands/CommandBus";
 import {
   DEFAULT_HEIGHTMAP_HEIGHT_PX,
   DEFAULT_HEIGHTMAP_WIDTH_PX,
 } from "../coords/constants";
 import {
+  biomeRegistry,
+  DEFAULT_ATMOSPHERE,
+  DEFAULT_COLOR_VARIANCE,
+  DEFAULT_ELEVATION_PROFILE,
+  DEFAULT_SPLAT_TO_ELEVATION_MIX,
+  type BiomeAtmosphere,
+  type ElevationProfile,
+} from "../scene/biomes";
+import {
+  DEFAULT_COLOR_PAINT_HEIGHT_PX,
+  DEFAULT_COLOR_PAINT_WIDTH_PX,
   DEFAULT_SPLATMAP_HEIGHT_PX,
   DEFAULT_SPLATMAP_WIDTH_PX,
 } from "../schema/manifest";
@@ -43,7 +55,8 @@ export type ToolKind =
   | "select"
   | "scatter"
   | "decal"
-  | "paint";
+  | "paint"
+  | "color-paint";
 export type BrushFalloff = "gaussian";
 export type MaterialIndex = 0 | 1 | 2 | 3;
 
@@ -109,6 +122,20 @@ export interface MapState {
     data: Uint8Array;
     revision: number;
   };
+  /**
+   * Color-paint overlay — an arbitrary RGBA tint sampled in the terrain
+   * shader on top of the material + atmosphere blend. RGB carries the
+   * painted color, A carries the overlay opacity (0 = no overlay, 255 =
+   * full overlay). Default = all zeros — no tint anywhere. Mutated in
+   * place by PaintColorCommand; the GPU subscriber re-uploads on
+   * revision bump.
+   */
+  colorPaint: {
+    widthPx: number;
+    heightPx: number;
+    data: Uint8Array;
+    revision: number;
+  };
   objects: Record<string, InstanceObject>;
   spawnPoints: Record<string, SpawnPoint>;
   decals: Record<string, DecalInstance>;
@@ -133,6 +160,18 @@ export interface MapState {
     strength: number;
     /** Which of the 4 hardcoded materials to paint. */
     materialIndex: MaterialIndex;
+  };
+  /**
+   * Color-paint tool authoring state (used while tool === "color-paint").
+   * `color` is a CSS hex string ("#rrggbb"); the controller parses it to
+   * an {r,g,b} triple per stroke. `eraseMode` toggles between additive
+   * (build up opacity) and subtractive (reduce opacity) behaviour.
+   */
+  colorPaintAuthoring: {
+    color: string;
+    strength: number;
+    radiusM: number;
+    eraseMode: boolean;
   };
   /** Prefab id the Place tool will spawn on next click. */
   activePrefabId: string;
@@ -161,9 +200,31 @@ export interface MapState {
    */
   prefabScaleOverrides: Record<string, number>;
 
+  /**
+   * Per-map elevation gradient + splat/elevation mix ratio (v3 schema).
+   * Drives the TerrainMesh shader uniforms — each biome OWNS what its
+   * above-water terrain looks like instead of a hardcoded global gradient.
+   */
+  elevationProfile: ElevationProfile;
+  splatToElevationMix: number;
+  /**
+   * Per-map atmosphere — sky, sun, hemi, fog values (v4 schema). The
+   * scene manager subscribes to this reference and pushes the values into
+   * the live THREE.js scene whenever it changes. Each biome owns its own
+   * sky/sun mood (Mars rust, Bioluminescent purple night, Volcanic smoke).
+   */
+  atmosphere: BiomeAtmosphere;
+  /**
+   * Procedural in-shader color variance applied to the elevation gradient,
+   * 0..1. Produces patchy organic tint variation — low for uniform alpine
+   * snow, high for rolling pastures or alien moss.
+   */
+  colorVariance: number;
+
   // --- Internal mutators (Commands only — UI must not call these) ---
   _markTerrainDirty(): void;
   _markSplatmapDirty(): void;
+  _markColorPaintDirty(): void;
   _setObjects(next: Record<string, InstanceObject>): void;
   _setSpawnPoints(next: Record<string, SpawnPoint>): void;
   _setDecals(next: Record<string, DecalInstance>): void;
@@ -187,6 +248,10 @@ export interface MapState {
   setPaintRadius(r: number): void;
   setPaintStrength(s: number): void;
   setPaintMaterial(i: MaterialIndex): void;
+  setColorPaintColor(c: string): void;
+  setColorPaintStrength(s: number): void;
+  setColorPaintRadius(r: number): void;
+  setColorPaintEraseMode(b: boolean): void;
 }
 
 function makeDefaultSplatmap(): Uint8Array {
@@ -197,6 +262,13 @@ function makeDefaultSplatmap(): Uint8Array {
     data[i] = 255;
   }
   return data;
+}
+
+/** Default color-paint buffer — all zeros (no painted tint anywhere). */
+function makeDefaultColorPaint(): Uint8Array {
+  return new Uint8Array(
+    DEFAULT_COLOR_PAINT_WIDTH_PX * DEFAULT_COLOR_PAINT_HEIGHT_PX * 4,
+  );
 }
 
 export const useMapStore = create<MapState>((set) => ({
@@ -212,6 +284,12 @@ export const useMapStore = create<MapState>((set) => ({
     widthPx: DEFAULT_SPLATMAP_WIDTH_PX,
     heightPx: DEFAULT_SPLATMAP_HEIGHT_PX,
     data: makeDefaultSplatmap(),
+    revision: 0,
+  },
+  colorPaint: {
+    widthPx: DEFAULT_COLOR_PAINT_WIDTH_PX,
+    heightPx: DEFAULT_COLOR_PAINT_HEIGHT_PX,
+    data: makeDefaultColorPaint(),
     revision: 0,
   },
   objects: {},
@@ -231,6 +309,12 @@ export const useMapStore = create<MapState>((set) => ({
     strength: 0.4,
     materialIndex: 0,
   },
+  colorPaintAuthoring: {
+    color: "#cc4020",
+    strength: 0.5,
+    radiusM: 6,
+    eraseMode: false,
+  },
   activePrefabId: "cube",
   activeDecalKind: "scorch",
   decalScale: 1,
@@ -238,6 +322,10 @@ export const useMapStore = create<MapState>((set) => ({
   decalRotation: 0,
   decalRandomRotation: true,
   prefabScaleOverrides: {},
+  elevationProfile: DEFAULT_ELEVATION_PROFILE,
+  splatToElevationMix: DEFAULT_SPLAT_TO_ELEVATION_MIX,
+  atmosphere: DEFAULT_ATMOSPHERE,
+  colorVariance: DEFAULT_COLOR_VARIANCE,
 
   _markTerrainDirty: () =>
     set((s) => ({
@@ -246,6 +334,13 @@ export const useMapStore = create<MapState>((set) => ({
   _markSplatmapDirty: () =>
     set((s) => ({
       splatmap: { ...s.splatmap, revision: s.splatmap.revision + 1 },
+    })),
+  _markColorPaintDirty: () =>
+    set((s) => ({
+      colorPaint: {
+        ...s.colorPaint,
+        revision: s.colorPaint.revision + 1,
+      },
     })),
   _setObjects: (next) => set({ objects: next }),
   _setSpawnPoints: (next) => set({ spawnPoints: next }),
@@ -279,6 +374,22 @@ export const useMapStore = create<MapState>((set) => ({
     set((s) => ({ paint: { ...s.paint, strength: st } })),
   setPaintMaterial: (i) =>
     set((s) => ({ paint: { ...s.paint, materialIndex: i } })),
+  setColorPaintColor: (c) =>
+    set((s) => ({
+      colorPaintAuthoring: { ...s.colorPaintAuthoring, color: c },
+    })),
+  setColorPaintStrength: (st) =>
+    set((s) => ({
+      colorPaintAuthoring: { ...s.colorPaintAuthoring, strength: st },
+    })),
+  setColorPaintRadius: (r) =>
+    set((s) => ({
+      colorPaintAuthoring: { ...s.colorPaintAuthoring, radiusM: r },
+    })),
+  setColorPaintEraseMode: (b) =>
+    set((s) => ({
+      colorPaintAuthoring: { ...s.colorPaintAuthoring, eraseMode: b },
+    })),
 }));
 
 /**
@@ -311,6 +422,7 @@ export const mapStore = useMapStore;
  */
 let pendingDirty: Set<number> | null = null;
 let pendingSplatDirty: Set<number> | null = null;
+let pendingColorPaintDirty: Set<number> | null = null;
 
 /** Called by Commands for each pixel they mutate. */
 export function _accumulateDirty(idx: number): void {
@@ -336,6 +448,101 @@ export function _drainSplatDirty(): Set<number> | null {
   const d = pendingSplatDirty;
   pendingSplatDirty = null;
   return d;
+}
+
+/** Called by PaintColorCommand for each color-paint pixel it mutates. */
+export function _accumulateColorPaintDirty(pixelIdx: number): void {
+  if (!pendingColorPaintDirty) pendingColorPaintDirty = new Set();
+  pendingColorPaintDirty.add(pixelIdx);
+}
+
+/** Called by the scene manager when reacting to a color-paint revision bump. */
+export function _drainColorPaintDirty(): Set<number> | null {
+  const d = pendingColorPaintDirty;
+  pendingColorPaintDirty = null;
+  return d;
+}
+
+/**
+ * Reset store for a NEW map with given dimensions + biome.
+ *
+ * Replaces the heightmap and splatmap with freshly generated buffers from
+ * the named biome. Clears all authored objects/decals/spawn points and the
+ * Command history (the previous undo trail no longer matches reality).
+ *
+ * Splatmap stays at roughly half resolution of the heightmap (matches the
+ * existing 128 vs 129 convention for the default map). We round down to
+ * the nearest even pixel and clamp to a 32×32 minimum.
+ *
+ * Loud-over-silent: an unknown biomeId logs a WARN and falls back to
+ * "grass" rather than throwing or silently doing nothing.
+ */
+export function setupNewMap(
+  widthPx: number,
+  heightPx: number,
+  biomeId: string,
+): void {
+  const biome = biomeRegistry.get(biomeId);
+  if (!biome) {
+    console.warn(
+      `[setupNewMap] Unknown biomeId "${biomeId}", falling back to "grass"`,
+    );
+  }
+  // Splatmap stays at half resolution: round down to nearest even
+  const splatW = Math.max(32, Math.floor((widthPx - 1) / 2) * 2);
+  const splatH = Math.max(32, Math.floor((heightPx - 1) / 2) * 2);
+  const def = biome ?? biomeRegistry.get("grass")!;
+  const { heightmap, splatmap } = def.generate(
+    widthPx,
+    heightPx,
+    splatW,
+    splatH,
+  );
+
+  useMapStore.setState(
+    (s) => ({
+      ...s,
+      terrain: {
+        widthPx,
+        heightPx,
+        heightmap,
+        revision: s.terrain.revision + 1,
+      },
+      objects: {},
+      spawnPoints: {},
+      decals: {},
+      selection: { kind: "none", id: null },
+      splatmap: {
+        widthPx: splatW,
+        heightPx: splatH,
+        data: splatmap,
+        revision: s.splatmap.revision + 1,
+      },
+      // Color-paint buffer follows the splatmap dimensions so the
+      // authoring grid stays equivalent. New map = fresh empty buffer
+      // (no painted tint anywhere — the biome's elevation/material
+      // blend reads through unchanged).
+      colorPaint: {
+        widthPx: splatW,
+        heightPx: splatH,
+        data: new Uint8Array(splatW * splatH * 4),
+        revision: s.colorPaint.revision + 1,
+      },
+      // Push the biome's elevation profile + mix into store so the scene
+      // manager subscriber re-writes the terrain shader uniforms. Without
+      // this, a "Mars" map would still render with the previous biome's
+      // gradient until the user reloaded.
+      elevationProfile: def.elevationProfile,
+      splatToElevationMix: def.splatToElevationMix,
+      // v4 — push the biome's atmosphere (sky/sun/hemi/fog) and color
+      // variance. The scene manager subscribes to these and rewrites the
+      // live THREE.js scene + terrain shader uniform on change.
+      atmosphere: def.atmosphere,
+      colorVariance: def.colorVariance,
+    }),
+    false,
+  );
+  mapCommandBus.clear();
 }
 
 /**
@@ -383,6 +590,12 @@ export function _resetMapStore(): void {
         data: makeDefaultSplatmap(),
         revision: 0,
       },
+      colorPaint: {
+        widthPx: DEFAULT_COLOR_PAINT_WIDTH_PX,
+        heightPx: DEFAULT_COLOR_PAINT_HEIGHT_PX,
+        data: makeDefaultColorPaint(),
+        revision: 0,
+      },
       objects: {},
       spawnPoints: {},
       decals: {},
@@ -400,6 +613,12 @@ export function _resetMapStore(): void {
         strength: 0.4,
         materialIndex: 0,
       },
+      colorPaintAuthoring: {
+        color: "#cc4020",
+        strength: 0.5,
+        radiusM: 6,
+        eraseMode: false,
+      },
       activePrefabId: "cube",
       activeDecalKind: "scorch",
       decalScale: 1,
@@ -407,9 +626,14 @@ export function _resetMapStore(): void {
       decalRotation: 0,
       decalRandomRotation: true,
       prefabScaleOverrides: {},
+      elevationProfile: DEFAULT_ELEVATION_PROFILE,
+      splatToElevationMix: DEFAULT_SPLAT_TO_ELEVATION_MIX,
+      atmosphere: DEFAULT_ATMOSPHERE,
+      colorVariance: DEFAULT_COLOR_VARIANCE,
     }),
     false,
   );
   pendingDirty = null;
   pendingSplatDirty = null;
+  pendingColorPaintDirty = null;
 }

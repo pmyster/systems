@@ -21,11 +21,16 @@ import {
 } from "../coords/constants";
 
 /** Current schema version. Bump and add a migration when shape changes. */
-export const MAP_SCHEMA_VERSION = 2 as const;
+export const MAP_SCHEMA_VERSION = 5 as const;
 
 /** Default splatmap dimensions in pixels (square, ~1 sample per meter at 128m map). */
 export const DEFAULT_SPLATMAP_WIDTH_PX = 128 as const;
 export const DEFAULT_SPLATMAP_HEIGHT_PX = 128 as const;
+
+/** Default color-paint sidecar dimensions — matches the splatmap so the
+ *  authoring grid feels equivalent between Material and Color tools. */
+export const DEFAULT_COLOR_PAINT_WIDTH_PX = 128 as const;
+export const DEFAULT_COLOR_PAINT_HEIGHT_PX = 128 as const;
 
 // ---------------------------------------------------------------------------
 // Primitive shapes
@@ -69,12 +74,28 @@ const SplatmapRef = z.object({
   heightPx: z.number().int().positive(),
 });
 
+/**
+ * Color-paint sidecar reference (v5+). Stored as `colorpaint.r8` — raw
+ * bytes, `widthPx * heightPx * 4` long. Each pixel is RGBA where RGB is
+ * the painted color and A is the tint opacity (0 = no overlay, 255 =
+ * full overlay). An empty / all-zero buffer means no painted color
+ * anywhere — the underlying material+atmosphere blend reads through
+ * unchanged. Optional on TerrainRef so the field tolerates pre-v5
+ * manifests at load time; the migration synthesises a default ref.
+ */
+const ColorPaintRef = z.object({
+  sidecar: z.literal("colorpaint.r8"),
+  widthPx: z.number().int().positive(),
+  heightPx: z.number().int().positive(),
+});
+
 const TerrainRef = z.object({
   sidecar: z.literal("heightmap.r32"),
   widthPx: z.number().int().positive(),
   heightPx: z.number().int().positive(),
   tileSizeM: z.number().positive(),
   splatmap: SplatmapRef.optional(),
+  colorPaint: ColorPaintRef.optional(),
   instances: z.string().optional(),
 });
 
@@ -119,6 +140,42 @@ const DecalInstance = z.object({
 
 export type DecalInstanceData = z.infer<typeof DecalInstance>;
 
+/**
+ * Per-biome above-water elevation gradient stops. v3+ — synthesized for
+ * pre-v3 manifests by the migration step (Grassland-default).
+ *
+ * Each tuple is `[r, g, b]` in 0..1 sRGB-ish (matches the renderer's
+ * fallback color convention). Stops are interpolated by the shader:
+ *   - mid:  ~0..2m   (sea-level to gentle hills)
+ *   - high: ~2..5m   (high ground)
+ *   - peak: >5m      (mountain peaks / spires)
+ */
+const ElevationProfile = z.object({
+  mid: z.tuple([z.number(), z.number(), z.number()]),
+  high: z.tuple([z.number(), z.number(), z.number()]),
+  peak: z.tuple([z.number(), z.number(), z.number()]),
+});
+
+/**
+ * Per-biome atmosphere (v4+). Sky / sun / hemi-light / fog values pushed
+ * into the live scene when the biome is selected. Synthesized by the
+ * v3→v4 migration with the previous hardcoded daylight rig so old maps
+ * render identically post-migration.
+ */
+const Atmosphere = z.object({
+  skyTop: z.tuple([z.number(), z.number(), z.number()]),
+  skyHorizon: z.tuple([z.number(), z.number(), z.number()]),
+  skyGround: z.tuple([z.number(), z.number(), z.number()]),
+  sunColor: z.tuple([z.number(), z.number(), z.number()]),
+  sunIntensity: z.number(),
+  hemiSky: z.tuple([z.number(), z.number(), z.number()]),
+  hemiGround: z.tuple([z.number(), z.number(), z.number()]),
+  hemiIntensity: z.number(),
+  fogColor: z.tuple([z.number(), z.number(), z.number()]),
+  fogNear: z.number(),
+  fogFar: z.number(),
+});
+
 // ---------------------------------------------------------------------------
 // Top-level manifest
 // ---------------------------------------------------------------------------
@@ -151,6 +208,21 @@ export const MapProjectManifestSchema = z.object({
    * presence flag — the actual bytes live next to manifest.json on disk.
    */
   thumbnail: z.string().optional(),
+  /**
+   * v3 — per-map elevation gradient + splat/elevation mix ratio. Optional
+   * for forward-compat (a fresh map without these fields falls back to
+   * Grassland defaults at load time). Pre-v3 manifests get the same
+   * defaults synthesized by the v2→v3 migration step.
+   */
+  elevationProfile: ElevationProfile.optional(),
+  splatToElevationMix: z.number().optional(),
+  /**
+   * v4 — per-biome atmosphere (sky/sun/hemi/fog) and procedural color
+   * variance. Optional for forward-compat; pre-v4 manifests get default
+   * daylight + zero-variance synthesized by the v3→v4 migration.
+   */
+  atmosphere: Atmosphere.optional(),
+  colorVariance: z.number().optional(),
 });
 
 export type MapProjectManifest = z.infer<typeof MapProjectManifestSchema>;
@@ -201,9 +273,41 @@ export function createEmptyManifest(
         widthPx: DEFAULT_SPLATMAP_WIDTH_PX,
         heightPx: DEFAULT_SPLATMAP_HEIGHT_PX,
       },
+      colorPaint: {
+        sidecar: "colorpaint.r8",
+        widthPx: DEFAULT_COLOR_PAINT_WIDTH_PX,
+        heightPx: DEFAULT_COLOR_PAINT_HEIGHT_PX,
+      },
     },
     objects: [],
     spawnPoints: [],
     decals: [],
+    // v3 — embed Grassland-default gradient so a fresh manifest looks
+    // exactly like a pre-v3 map after migration. The biome registry is
+    // the source of truth in the runtime; the schema layer just snapshots
+    // the same defaults to avoid a scene→schema import cycle.
+    elevationProfile: {
+      mid: [0.35, 0.55, 0.22],
+      high: [0.45, 0.55, 0.3],
+      peak: [0.55, 0.55, 0.4],
+    },
+    splatToElevationMix: 0.75,
+    // v4 — embed default daylight atmosphere + zero variance. Pre-v4 maps
+    // get the same values synthesized by the v3→v4 migration so they keep
+    // rendering exactly as they did before atmosphere existed.
+    atmosphere: {
+      skyTop: [0.31, 0.56, 0.81],
+      skyHorizon: [0.78, 0.9, 1.0],
+      skyGround: [0.54, 0.63, 0.71],
+      sunColor: [1.0, 0.97, 0.91],
+      sunIntensity: 2.6,
+      hemiSky: [0.78, 0.9, 1.0],
+      hemiGround: [0.42, 0.63, 0.29],
+      hemiIntensity: 1.15,
+      fogColor: [0.78, 0.9, 1.0],
+      fogNear: 100,
+      fogFar: 500,
+    },
+    colorVariance: 0,
   };
 }

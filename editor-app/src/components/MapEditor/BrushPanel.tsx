@@ -11,6 +11,7 @@
 import { useMapStore, _resetTerrainToFlat } from "../../map/state/mapStore";
 import type { MaterialIndex, ToolKind } from "../../map/state/mapStore";
 import { mapCommandBus } from "../../map/commands/CommandBus";
+import { ColorPalettePanel } from "./ColorPalettePanel";
 import { DecalLibraryPanel } from "./DecalLibraryPanel";
 import { PrefabLibraryPanel } from "./PrefabLibraryPanel";
 
@@ -35,6 +36,9 @@ function modeHint(tool: ToolKind): string {
   }
   if (tool === "paint") {
     return "Left-click drag to paint selected material on terrain.";
+  }
+  if (tool === "color-paint") {
+    return "Pick a color, then left-click drag to paint it onto the terrain. Toggle Erase to remove painted tint.";
   }
   if (tool === "select") {
     return "Left-click a cube to select; drag the gizmo to move it; Delete to remove.";
@@ -125,6 +129,15 @@ export function BrushPanel() {
           onClick={() => setTool("paint")}
         >
           Paint
+        </button>
+        <button
+          type="button"
+          className={
+            "brush-tool-button" + (tool === "color-paint" ? " is-active" : "")
+          }
+          onClick={() => setTool("color-paint")}
+        >
+          Color
         </button>
         <button
           type="button"
@@ -372,6 +385,8 @@ export function BrushPanel() {
           </div>
         </>
       )}
+
+      {tool === "color-paint" && <ColorPalettePanel />}
 
       <p className="brush-hint">{modeHint(tool)}</p>
 
