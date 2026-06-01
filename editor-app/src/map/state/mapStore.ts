@@ -142,6 +142,24 @@ export interface MapState {
   decalScale: number;
   /** Opacity the Decal tool gives to new decals. */
   decalOpacity: number;
+  /**
+   * Decal authoring rotation state. `rotation` is the explicit yaw in
+   * radians applied when `randomRotation === false`; when `randomRotation`
+   * is true the place controller substitutes `Math.random()*2π` per
+   * placement so successive stamps don't tile suspiciously.
+   */
+  decalRotation: number;
+  decalRandomRotation: boolean;
+  /**
+   * Per-prefab scale multipliers, applied on top of each prefab's
+   * `defaultScale` at placement time. Empty `{}` means every prefab uses
+   * the registered defaultScale unchanged (multiplier === 1.0).
+   *
+   * Lives in store rather than registry so the override is purely an
+   * authoring preference — manifest.json never carries it, and reloading
+   * a project doesn't change what a prefab "is".
+   */
+  prefabScaleOverrides: Record<string, number>;
 
   // --- Internal mutators (Commands only — UI must not call these) ---
   _markTerrainDirty(): void;
@@ -163,6 +181,9 @@ export interface MapState {
   setActiveDecalKind(k: string): void;
   setDecalScale(s: number): void;
   setDecalOpacity(o: number): void;
+  setDecalRotation(r: number): void;
+  setDecalRandomRotation(b: boolean): void;
+  setPrefabScale(prefabId: string, scale: number): void;
   setPaintRadius(r: number): void;
   setPaintStrength(s: number): void;
   setPaintMaterial(i: MaterialIndex): void;
@@ -214,6 +235,9 @@ export const useMapStore = create<MapState>((set) => ({
   activeDecalKind: "scorch",
   decalScale: 1,
   decalOpacity: 0.7,
+  decalRotation: 0,
+  decalRandomRotation: true,
+  prefabScaleOverrides: {},
 
   _markTerrainDirty: () =>
     set((s) => ({
@@ -244,6 +268,12 @@ export const useMapStore = create<MapState>((set) => ({
   setActiveDecalKind: (k) => set({ activeDecalKind: k }),
   setDecalScale: (s) => set({ decalScale: s }),
   setDecalOpacity: (o) => set({ decalOpacity: o }),
+  setDecalRotation: (r) => set({ decalRotation: r }),
+  setDecalRandomRotation: (b) => set({ decalRandomRotation: b }),
+  setPrefabScale: (prefabId, scale) =>
+    set((s) => ({
+      prefabScaleOverrides: { ...s.prefabScaleOverrides, [prefabId]: scale },
+    })),
   setPaintRadius: (r) => set((s) => ({ paint: { ...s.paint, radiusM: r } })),
   setPaintStrength: (st) =>
     set((s) => ({ paint: { ...s.paint, strength: st } })),
@@ -374,6 +404,9 @@ export function _resetMapStore(): void {
       activeDecalKind: "scorch",
       decalScale: 1,
       decalOpacity: 0.7,
+      decalRotation: 0,
+      decalRandomRotation: true,
+      prefabScaleOverrides: {},
     }),
     false,
   );

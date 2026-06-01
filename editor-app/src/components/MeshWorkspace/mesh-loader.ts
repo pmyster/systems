@@ -14,10 +14,32 @@
 
 import * as THREE from "three";
 import { invoke } from "@tauri-apps/api/core";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
+
+// ---------------------------------------------------------------------------
+// Lazy GLTFLoader — dynamic-imported on first use so Rollup emits a separate
+// chunk for ~80kB of glTF parsing code. Mirrors the pattern in
+// `src/map/scene/prefabLoader.ts`. A module-scoped promise dedupes concurrent
+// callers — the second one awaits the same promise the first kicked off.
+//
+// We intentionally type the resolved value as `any` here: pulling in the
+// concrete GLTFLoader type would force a static import (the type alias makes
+// Rollup keep the module in the main bundle), defeating the whole point of
+// the lazy load. Functions that await this getter only call `.parse(...)`
+// on the result — a narrow API surface that doesn't need the full type.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let gltfLoaderPromise: Promise<any> | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function getGltfLoader(): Promise<any> {
+  if (!gltfLoaderPromise) {
+    gltfLoaderPromise = import("three/addons/loaders/GLTFLoader.js").then(
+      (m) => new m.GLTFLoader(),
+    );
+  }
+  return gltfLoaderPromise;
+}
 
 // ---------------------------------------------------------------------------
 // Internal helpers.
@@ -374,8 +396,8 @@ export function loadStlFromBuffer(buffer: ArrayBuffer): THREE.Group {
  * Returns the root Group, centred and normalised to max 8 units.
  */
 export async function loadGlbFromBuffer(buffer: ArrayBuffer): Promise<THREE.Group> {
-  const loader = new GLTFLoader();
-  const gltf = await new Promise<Awaited<ReturnType<GLTFLoader["loadAsync"]>>>(
+  const loader = await getGltfLoader();
+  const gltf = await new Promise<{ scene: THREE.Group }>(
     (resolve, reject) => {
       loader.parse(buffer, "", resolve, reject);
     },

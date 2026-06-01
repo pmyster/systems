@@ -150,3 +150,115 @@ decalRegistry.register({
     return { material: makeDecalMaterial(canvas) };
   },
 });
+
+decalRegistry.register({
+  kind: "oil_spill",
+  displayName: "Oil spill",
+  baseSize: 2,
+  build: () => {
+    const canvas = makeRadialCanvas(256, (ctx) => {
+      ctx.clearRect(0, 0, 256, 256);
+      const cx = 128;
+      const cy = 128;
+      // Stamp ~22 dark blobs scattered around centre to break the perfect
+      // circle into an irregular spill outline. Radii are random so the
+      // silhouette ends up lobed rather than round.
+      ctx.fillStyle = "rgba(8,6,4,0.9)";
+      for (let i = 0; i < 22; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const dist = Math.random() * 70;
+        const x = cx + Math.cos(a) * dist;
+        const y = cy + Math.sin(a) * dist;
+        const rr = 24 + Math.random() * 22;
+        ctx.beginPath();
+        ctx.arc(x, y, rr, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Rainbow sheen ring on top — uses a radial gradient stroked at
+      // varying angular positions to fake the iridescence of light oil.
+      // Drawn with screen-style compositing for a glow over the dark base.
+      ctx.globalCompositeOperation = "lighter";
+      const sheen = ctx.createRadialGradient(cx, cy, 60, cx, cy, 110);
+      sheen.addColorStop(0,   "rgba(0,0,0,0)");
+      sheen.addColorStop(0.5, "rgba(60,40,120,0.25)");
+      sheen.addColorStop(0.7, "rgba(40,80,120,0.35)");
+      sheen.addColorStop(0.85,"rgba(80,140,80,0.30)");
+      sheen.addColorStop(0.95,"rgba(140,60,40,0.20)");
+      sheen.addColorStop(1,   "rgba(0,0,0,0)");
+      ctx.fillStyle = sheen;
+      ctx.fillRect(0, 0, 256, 256);
+      ctx.globalCompositeOperation = "source-over";
+    });
+    return { material: makeDecalMaterial(canvas) };
+  },
+});
+
+decalRegistry.register({
+  kind: "bullet_holes",
+  displayName: "Bullet holes",
+  baseSize: 1.5,
+  build: () => {
+    const canvas = makeRadialCanvas(256, (ctx) => {
+      ctx.clearRect(0, 0, 256, 256);
+      // 10 holes scattered within a tight area (radius 60 from centre)
+      // so the cluster looks like a burst rather than a sprinkle.
+      const cx = 128;
+      const cy = 128;
+      const holes = 10;
+      for (let i = 0; i < holes; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const dist = Math.random() * 60;
+        const x = cx + Math.cos(a) * dist;
+        const y = cy + Math.sin(a) * dist;
+        const r = 4 + Math.random() * 4; // 4–8px
+        // Outer crack ring — soft brown halo around each hole.
+        const ring = ctx.createRadialGradient(x, y, r, x, y, r * 3);
+        ring.addColorStop(0,    "rgba(80,50,30,0.55)");
+        ring.addColorStop(0.7,  "rgba(80,50,30,0.20)");
+        ring.addColorStop(1,    "rgba(80,50,30,0)");
+        ctx.fillStyle = ring;
+        ctx.fillRect(x - r * 3, y - r * 3, r * 6, r * 6);
+        // Hard dark dot — the hole itself.
+        ctx.fillStyle = "rgba(8,5,3,0.95)";
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+    return { material: makeDecalMaterial(canvas) };
+  },
+});
+
+decalRegistry.register({
+  kind: "footprints",
+  displayName: "Footprints",
+  baseSize: 2,
+  build: () => {
+    const canvas = makeRadialCanvas(256, (ctx) => {
+      ctx.clearRect(0, 0, 256, 256);
+      ctx.fillStyle = "rgba(25,18,12,0.75)";
+      // Two boot-shaped marks: an oval sole + a smaller oval heel above
+      // it, offset side-to-side and slightly rotated to mimic a stride.
+      function boot(cx: number, cy: number, rot: number) {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(rot);
+        // Sole — vertical ellipse.
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 14, 26, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Heel — smaller ellipse above the sole (a real boot print has a
+        // clear gap; we render it as two separate ovals for that look).
+        ctx.beginPath();
+        ctx.ellipse(0, -38, 11, 14, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      // Left foot — sits left of centre, sole pointing slightly outward.
+      boot(96,  108, -0.12);
+      // Right foot — shifted ~80px down (the "next step") and to the right.
+      boot(160, 188,  0.10);
+    });
+    return { material: makeDecalMaterial(canvas) };
+  },
+});

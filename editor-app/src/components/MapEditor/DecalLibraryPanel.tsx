@@ -34,6 +34,9 @@ export function DecalLibraryPanel() {
           </button>
         ))}
       </div>
+      <div className="decal-library-hint">
+        Left-click on terrain to place. Toggle Random rotation for variety.
+      </div>
     </div>
   );
 }

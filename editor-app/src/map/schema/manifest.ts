@@ -145,6 +145,12 @@ export const MapProjectManifestSchema = z.object({
    * `[]` synthesized by the migration step.
    */
   decals: z.array(DecalInstance),
+  /**
+   * Optional thumbnail sidecar filename (e.g. "thumbnail.png"). Present
+   * iff a thumbnail was captured at the last save. Acts purely as a
+   * presence flag — the actual bytes live next to manifest.json on disk.
+   */
+  thumbnail: z.string().optional(),
 });
 
 export type MapProjectManifest = z.infer<typeof MapProjectManifestSchema>;

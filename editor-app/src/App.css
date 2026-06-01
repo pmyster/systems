@@ -406,3 +406,57 @@ body,
   border-color: #6f8a4a;
   color: #f0f5e3;
 }
+
+.prefab-scale-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-top: 1px solid #2a3040;
+}
+
+.prefab-scale-label {
+  font-size: 11px;
+  color: #c8d2e0;
+}
+
+.prefab-scale-row input[type="range"] {
+  width: 100%;
+}
+
+.decal-control-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-top: 1px solid #2a3040;
+}
+
+.decal-control-row label {
+  font-size: 11px;
+  color: #c8d2e0;
+}
+
+.decal-control-row input[type="range"]:disabled {
+  opacity: 0.4;
+}
+
+.decal-random-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: #c8d2e0;
+}
+
+.decal-library-hint {
+  font-size: 10px;
+  color: #8a93a4;
+  padding: 6px 8px;
+  border-top: 1px solid #2a3040;
+  line-height: 1.4;
+}

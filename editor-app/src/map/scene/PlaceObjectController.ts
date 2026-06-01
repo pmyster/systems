@@ -71,12 +71,17 @@ export class PlaceObjectController {
     // is identity; on slopes the prefab leans naturally.
     const normal = sampleTerrainNormal(this.terrain.mesh, hit.x, hit.z);
     const rotation = normal ? alignToNormal(normal) : { x: 0, y: 0, z: 0 };
+    const mult = state.prefabScaleOverrides[activePrefabId] ?? 1.0;
     const instance: InstanceObject = {
       id: crypto.randomUUID(),
       prefabId: activePrefabId,
       position: { x: hit.x, y: hit.y, z: hit.z },
       rotation,
-      scale: { ...def.defaultScale },
+      scale: {
+        x: def.defaultScale.x * mult,
+        y: def.defaultScale.y * mult,
+        z: def.defaultScale.z * mult,
+      },
       properties: {},
     };
     const cmd = new PlaceObjectCommand(instance);

@@ -58,6 +58,8 @@ export function BrushPanel() {
   const paint = useMapStore((s) => s.paint);
   const decalScale = useMapStore((s) => s.decalScale);
   const decalOpacity = useMapStore((s) => s.decalOpacity);
+  const decalRotation = useMapStore((s) => s.decalRotation);
+  const decalRandomRotation = useMapStore((s) => s.decalRandomRotation);
   const setTool = useMapStore((s) => s.setTool);
   const setRadius = useMapStore((s) => s.setBrushRadius);
   const setStrength = useMapStore((s) => s.setBrushStrength);
@@ -69,6 +71,8 @@ export function BrushPanel() {
   );
   const setDecalScale = useMapStore((s) => s.setDecalScale);
   const setDecalOpacity = useMapStore((s) => s.setDecalOpacity);
+  const setDecalRotation = useMapStore((s) => s.setDecalRotation);
+  const setDecalRandomRotation = useMapStore((s) => s.setDecalRandomRotation);
   const setPaintRadius = useMapStore((s) => s.setPaintRadius);
   const setPaintStrength = useMapStore((s) => s.setPaintStrength);
   const setPaintMaterial = useMapStore((s) => s.setPaintMaterial);
@@ -283,6 +287,34 @@ export function BrushPanel() {
                 value={decalOpacity}
                 onChange={(e) => setDecalOpacity(parseFloat(e.target.value))}
               />
+            </label>
+            <label className="brush-slider-row">
+              <span className="brush-slider-label">
+                Rotation: {Math.round((decalRotation * 180) / Math.PI)}°
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={360}
+                step={1}
+                value={Math.round((decalRotation * 180) / Math.PI)}
+                disabled={decalRandomRotation}
+                onChange={(e) =>
+                  setDecalRotation(
+                    (parseFloat(e.target.value) * Math.PI) / 180,
+                  )
+                }
+              />
+            </label>
+            <label className="brush-slider-row">
+              <span className="brush-slider-label">
+                <input
+                  type="checkbox"
+                  checked={decalRandomRotation}
+                  onChange={(e) => setDecalRandomRotation(e.target.checked)}
+                />
+                {" "}Random rotation
+              </span>
             </label>
           </div>
         </>

@@ -115,6 +115,8 @@ export class ScatterController {
     }
     this.warnedMissingPrefab = false;
     const { radiusM, density, scaleJitter, randomRotation } = state.scatter;
+    const overrideMult =
+      state.prefabScaleOverrides[state.activePrefabId] ?? 1.0;
 
     const instances: InstanceObject[] = [];
     for (let i = 0; i < density; i++) {
@@ -139,9 +141,9 @@ export class ScatterController {
         position: { x: px, y: py, z: pz },
         rotation: { x: tilt.x, y: rotY, z: tilt.z },
         scale: {
-          x: def.defaultScale.x * scaleVal,
-          y: def.defaultScale.y * scaleVal,
-          z: def.defaultScale.z * scaleVal,
+          x: def.defaultScale.x * scaleVal * overrideMult,
+          y: def.defaultScale.y * scaleVal * overrideMult,
+          z: def.defaultScale.z * scaleVal * overrideMult,
         },
         properties: {},
       });

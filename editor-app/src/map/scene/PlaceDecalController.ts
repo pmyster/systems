@@ -60,13 +60,17 @@ export class PlaceDecalController {
       return;
     }
     e.preventDefault();
+    // Rotation: if randomRotation is on, jitter per-stamp to avoid the
+    // visible tiling pattern. Otherwise honour the manual yaw the user
+    // dialed in via the rotation slider.
+    const rotation = state.decalRandomRotation
+      ? Math.random() * Math.PI * 2
+      : state.decalRotation;
     const instance: DecalInstance = {
       id: crypto.randomUUID(),
       decalKind: kind,
       position: { x: hit.x, y: hit.y, z: hit.z },
-      // Random yaw avoids visible tiling when stamping multiple decals
-      // of the same kind near each other.
-      rotation: Math.random() * Math.PI * 2,
+      rotation,
       scale: state.decalScale,
       opacity: state.decalOpacity,
     };

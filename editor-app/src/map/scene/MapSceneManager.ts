@@ -14,6 +14,7 @@
 import * as THREE from "three";
 
 import { HEIGHTMAP_M_PER_PIXEL } from "../coords/constants";
+import { _setSceneManagerForThumbnails } from "../io/projectIo";
 import {
   _drainDirty,
   _drainSplatDirty,
@@ -33,6 +34,7 @@ import { SelectionController } from "./SelectionController";
 import { SkyDome } from "./SkyDome";
 import { SplatmapTexture } from "./SplatmapTexture";
 import { TerrainMesh } from "./TerrainMesh";
+import { captureThumbnail } from "./thumbnailCapture";
 import { WaterPlane } from "./WaterPlane";
 
 export class MapSceneManager {
@@ -276,6 +278,11 @@ export class MapSceneManager {
       }
     });
 
+    // Register with projectIo so Save can grab a viewport thumbnail
+    // without each call site having to thread the scene manager through.
+    // Cleared in dispose() to keep the module-singleton honest.
+    _setSceneManagerForThumbnails(this);
+
     const tick = (): void => {
       if (this.disposed) return;
       this.cameraController.update();
@@ -289,6 +296,15 @@ export class MapSceneManager {
     return this.terrain;
   }
 
+  /**
+   * Render the current scene + camera to a 256×256 PNG for use as a
+   * project thumbnail. Spins up a transient WebGLRenderer so the live
+   * viewport is untouched. See `./thumbnailCapture.ts` for the rationale.
+   */
+  captureThumbnail(size = 256): Uint8Array {
+    return captureThumbnail(this.scene, this.camera, size);
+  }
+
   private handleResize(): void {
     const { width, height } = this.container.getBoundingClientRect();
     if (width <= 0 || height <= 0) return;
@@ -300,6 +316,7 @@ export class MapSceneManager {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    _setSceneManagerForThumbnails(null);
     if (this.rafHandle !== null) cancelAnimationFrame(this.rafHandle);
     this.storeUnsub?.();
     this.resizeObserver?.disconnect();

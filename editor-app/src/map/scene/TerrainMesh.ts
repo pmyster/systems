@@ -25,16 +25,109 @@
  *   We want PBR lighting (so the directional sun + hemi fill read
  *   correctly), but the BASE COLOR comes from a blend of:
  *     1. An elevation gradient computed from world-space Y.
- *     2. A 4-material splatmap sampled at the vertex UV.
- *   The splatmap dominates at low elevation (painted ground), and the
- *   elevation gradient takes over at extremes (snow caps, deep water).
- *   onBeforeCompile lets us inject a sampler2D + helper functions into
+ *     2. A 4-material splatmap whose RGBA channels weight 4 tiled diffuse
+ *        textures (grass / dirt / sand / scorched).
+ *   The splatmap dominates at mid elevations (painted ground), and the
+ *   elevation gradient takes over at extremes (snow caps, deep water) via
+ *   a smoothstep on world-Y.
+ *   onBeforeCompile lets us inject samplers + helper functions into
  *   Three's built-in shader without re-implementing all the light loops.
+ *
+ * Material textures (Slice E2):
+ *   The 4 diffuse textures come from `/textures/terrain_{grass,dirt,sand,
+ *   scorched}.jpg` (CC0 from AmbientCG, 1K resolution). They tile 16x
+ *   across the map, giving good close-up detail without obvious repetition
+ *   at the typical orbit camera distance.
+ *
+ *   Defensive loading: textures are loaded async on construction. If any
+ *   load fails, that material slot falls back to a 1×1 DataTexture using
+ *   the original hardcoded color from the legacy shader — so terrain
+ *   never goes black on a missing asset (loud-over-silent: a WARN is
+ *   logged for every failure).
  */
 
 import * as THREE from "three";
 
 import { HEIGHTMAP_M_PER_PIXEL } from "../coords/constants";
+
+/**
+ * Optional pre-loaded splatmap material textures. Callers can hand these
+ * in directly (e.g. a test that wants deterministic colors) or omit the
+ * arg and let TerrainMesh load them lazily from `/textures/terrain_*.jpg`.
+ */
+export interface TerrainMaterials {
+  grass: THREE.Texture;
+  dirt: THREE.Texture;
+  sand: THREE.Texture;
+  scorched: THREE.Texture;
+}
+
+/** Fallback colors — the legacy hardcoded shader values. Used when a
+ *  texture file fails to load so we degrade visibly (not silently). */
+const FALLBACK_COLORS = {
+  grass:    [0.32, 0.45, 0.20] as const,
+  dirt:     [0.40, 0.30, 0.20] as const,
+  sand:     [0.78, 0.68, 0.45] as const,
+  scorched: [0.12, 0.10, 0.09] as const,
+};
+
+/**
+ * Build a 1×1 RGBA DataTexture filled with the given color (in 0..1).
+ * Used as a fallback when a real texture file fails to load. The pixel
+ * data is held by the texture (not freed), so the texture is safe to use
+ * for the lifetime of the material.
+ */
+function makeColorTexture(rgb: readonly [number, number, number]): THREE.DataTexture {
+  const data = new Uint8Array([
+    Math.round(rgb[0] * 255),
+    Math.round(rgb[1] * 255),
+    Math.round(rgb[2] * 255),
+    255,
+  ]);
+  const tex = new THREE.DataTexture(data, 1, 1, THREE.RGBAFormat);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** Load one texture file, returning a fallback DataTexture on failure. */
+async function loadTextureOrFallback(
+  loader: THREE.TextureLoader,
+  url: string,
+  fallback: readonly [number, number, number],
+  slotName: string,
+): Promise<THREE.Texture> {
+  try {
+    const tex = await loader.loadAsync(url);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    // Enable anisotropy for crisper tiling at grazing angles. The renderer
+    // will clamp this to its supported max; passing a high value is safe.
+    tex.anisotropy = 8;
+    return tex;
+  } catch (e) {
+    console.warn(
+      `[TerrainMesh] Failed to load terrain texture '${slotName}' from ${url} — using flat color fallback. Cause:`,
+      e,
+    );
+    return makeColorTexture(fallback);
+  }
+}
+
+/** Load all 4 terrain material textures from /textures/terrain_*.jpg. */
+async function loadDefaultTerrainMaterials(): Promise<TerrainMaterials> {
+  const loader = new THREE.TextureLoader();
+  const [grass, dirt, sand, scorched] = await Promise.all([
+    loadTextureOrFallback(loader, "/textures/terrain_grass.jpg",    FALLBACK_COLORS.grass,    "grass"),
+    loadTextureOrFallback(loader, "/textures/terrain_dirt.jpg",     FALLBACK_COLORS.dirt,     "dirt"),
+    loadTextureOrFallback(loader, "/textures/terrain_sand.jpg",     FALLBACK_COLORS.sand,     "sand"),
+    loadTextureOrFallback(loader, "/textures/terrain_scorched.jpg", FALLBACK_COLORS.scorched, "scorched"),
+  ]);
+  return { grass, dirt, sand, scorched };
+}
 
 export class TerrainMesh {
   readonly mesh: THREE.Mesh;
@@ -44,6 +137,8 @@ export class TerrainMesh {
   /** Cached compiled-shader handle so we can swap the splatmap texture later. */
   private compiledShader: { uniforms: Record<string, { value: unknown }> } | null =
     null;
+  /** Material textures actually bound to the shader (real or fallback). */
+  private materials: TerrainMaterials | null = null;
 
   constructor(
     private readonly widthPx: number,
@@ -51,10 +146,18 @@ export class TerrainMesh {
     initialHeightmap: Float32Array,
     /**
      * Optional splatmap texture. When provided, the shader blends 4
-     * hardcoded material colors weighted by the texture's RGBA channels,
-     * mixed 80/20 with the elevation gradient.
+     * tiled material textures weighted by the texture's RGBA channels,
+     * mixed with the elevation gradient via smoothstep on world-Y.
      */
     splatmap?: THREE.Texture,
+    /**
+     * Optional pre-loaded material textures (grass / dirt / sand /
+     * scorched). When omitted, TerrainMesh kicks off an async load from
+     * `/textures/terrain_*.jpg` and binds them when ready — the terrain
+     * uses fallback flat colors during the brief window before they
+     * arrive (so it's never black).
+     */
+    materials?: TerrainMaterials,
   ) {
     const widthM = (widthPx - 1) * HEIGHTMAP_M_PER_PIXEL;
     const heightM = (heightPx - 1) * HEIGHTMAP_M_PER_PIXEL;
@@ -90,10 +193,26 @@ export class TerrainMesh {
     const splatTex = splatmap ?? null;
     const hasSplat = splatTex !== null;
 
+    // Initial material textures: either the caller's, or flat-color
+    // placeholders we'll swap with real textures once they finish loading.
+    // (The shader needs SOMETHING bound to the samplers at compile time —
+    // a null uniform produces undefined-behaviour reads on some drivers.)
+    const initialMaterials: TerrainMaterials = materials ?? {
+      grass:    makeColorTexture(FALLBACK_COLORS.grass),
+      dirt:     makeColorTexture(FALLBACK_COLORS.dirt),
+      sand:     makeColorTexture(FALLBACK_COLORS.sand),
+      scorched: makeColorTexture(FALLBACK_COLORS.scorched),
+    };
+    this.materials = initialMaterials;
+
     // Elevation-gradient + splatmap injection.
     this.material.onBeforeCompile = (shader) => {
-      // Expose the splatmap as a uniform when provided.
+      // Expose the splatmap + 4 material textures as uniforms.
       shader.uniforms.splatmap = { value: splatTex };
+      shader.uniforms.matGrass    = { value: initialMaterials.grass };
+      shader.uniforms.matDirt     = { value: initialMaterials.dirt };
+      shader.uniforms.matSand     = { value: initialMaterials.sand };
+      shader.uniforms.matScorched = { value: initialMaterials.scorched };
       this.compiledShader = shader;
 
       shader.vertexShader = shader.vertexShader
@@ -115,6 +234,10 @@ vSplatUv = uv;`,
           `#include <common>
 varying float vWorldY;
 varying vec2 vSplatUv;
+uniform sampler2D matGrass;
+uniform sampler2D matDirt;
+uniform sampler2D matSand;
+uniform sampler2D matScorched;
 ${hasSplat ? "uniform sampler2D splatmap;" : ""}
 vec3 elevationColor(float y) {
   vec3 deepWater = vec3(0.10, 0.23, 0.42);
@@ -138,12 +261,14 @@ ${
     ? `vec3 splatColor(vec2 uv) {
   vec4 w = texture2D(splatmap, uv);
   float total = max(w.r + w.g + w.b + w.a, 0.001);
+  // Tile diffuse textures 16x across the map for close-up detail.
+  vec2 tileUv = uv * 16.0;
+  vec3 grass    = texture2D(matGrass,    tileUv).rgb;
+  vec3 dirt     = texture2D(matDirt,     tileUv).rgb;
+  vec3 sand     = texture2D(matSand,     tileUv).rgb;
+  vec3 scorched = texture2D(matScorched, tileUv).rgb;
   // R=grass, G=dirt, B=sand, A=scorched.
-  vec3 mat0 = vec3(0.32, 0.45, 0.20);
-  vec3 mat1 = vec3(0.40, 0.30, 0.20);
-  vec3 mat2 = vec3(0.78, 0.68, 0.45);
-  vec3 mat3 = vec3(0.12, 0.10, 0.09);
-  return (mat0*w.r + mat1*w.g + mat2*w.b + mat3*w.a) / total;
+  return (grass*w.r + dirt*w.g + sand*w.b + scorched*w.a) / total;
 }`
     : ""
 }`,
@@ -151,7 +276,21 @@ ${
         .replace(
           "vec4 diffuseColor = vec4( diffuse, opacity );",
           hasSplat
-            ? "vec4 diffuseColor = vec4(mix(elevationColor(vWorldY), splatColor(vSplatUv), 0.8), opacity);"
+            ? // Elevation gradient takes over at extremes (deep water +
+              // high peaks) so the world reads coherently regardless of
+              // how the artist painted the splatmap. The smoothstep on
+              // world-Y picks the mix ratio:
+              //   y < 0    : 30% splat / 70% elevation (underwater is blue)
+              //   y > 8    : 40% splat / 60% elevation (peaks tint toward snow)
+              //   middle   : 80% splat / 20% elevation (painted ground dominates)
+              // Implemented with two smoothsteps so the transition is
+              // continuous: lerp the splat WEIGHT from 0.3 → 0.8 across
+              // y∈[0,1] (water-to-ground edge) and from 0.8 → 0.4 across
+              // y∈[5,8] (ground-to-snowline edge).
+              `float waterToGround = smoothstep(0.0, 1.0, vWorldY);
+float groundToSnow  = smoothstep(5.0, 8.0, vWorldY);
+float splatWeight   = mix(mix(0.3, 0.8, waterToGround), 0.4, groundToSnow);
+vec4 diffuseColor = vec4(mix(elevationColor(vWorldY), splatColor(vSplatUv), splatWeight), opacity);`
             : "vec4 diffuseColor = vec4( elevationColor(vWorldY), opacity );",
         );
     };
@@ -159,6 +298,17 @@ ${
 
     this.mesh = new THREE.Mesh(this.geometry, this.material);
     this.mesh.name = "MapTerrainMesh";
+
+    // If the caller didn't provide materials, kick off the async load
+    // now. The fallback flat-color textures above are bound in the
+    // meantime so the shader never sees an uninitialised sampler. When
+    // the real textures arrive we swap them via the cached uniforms and
+    // dispose the placeholders. Errors per slot are already handled by
+    // `loadTextureOrFallback` (logged + fallback returned), so this
+    // top-level promise effectively never rejects.
+    if (!materials) {
+      loadDefaultTerrainMaterials().then((loaded) => this.setMaterials(loaded));
+    }
   }
 
   /**
@@ -210,6 +360,32 @@ ${
     if (u) u.value = tex;
   }
 
+  /**
+   * Swap the 4 PBR material textures. Disposes the previous placeholders
+   * (if any) so we don't leak the 1×1 fallback DataTextures created in
+   * the constructor.
+   *
+   * The shader uniforms hold references to the texture objects — pointing
+   * them at the new textures is all the render loop needs.
+   */
+  setMaterials(materials: TerrainMaterials): void {
+    if (this.compiledShader) {
+      const u = this.compiledShader.uniforms;
+      if (u.matGrass)    u.matGrass.value    = materials.grass;
+      if (u.matDirt)     u.matDirt.value     = materials.dirt;
+      if (u.matSand)     u.matSand.value     = materials.sand;
+      if (u.matScorched) u.matScorched.value = materials.scorched;
+    }
+    // Dispose only the placeholders we created — never the caller's.
+    const prev = this.materials;
+    if (prev) {
+      for (const tex of [prev.grass, prev.dirt, prev.sand, prev.scorched]) {
+        if (tex instanceof THREE.DataTexture) tex.dispose();
+      }
+    }
+    this.materials = materials;
+  }
+
   setWireframe(on: boolean): void {
     this.material.wireframe = on;
   }
@@ -229,5 +405,15 @@ ${
   dispose(): void {
     this.geometry.dispose();
     this.material.dispose();
+    // Dispose any placeholder DataTextures we still own. Real loaded
+    // textures may be shared with other meshes downstream (future), so
+    // we conservatively only dispose the 1×1 fallbacks we created.
+    const m = this.materials;
+    if (m) {
+      for (const tex of [m.grass, m.dirt, m.sand, m.scorched]) {
+        if (tex instanceof THREE.DataTexture) tex.dispose();
+      }
+    }
+    this.materials = null;
   }
 }

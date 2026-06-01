@@ -43,6 +43,34 @@ interface MapBundle {
   manifest_json: string;
   heightmap_bytes: number[];
   splatmap_bytes: number[];
+  /**
+   * Optional PNG bytes for `thumbnail.png`. Empty array signals "no
+   * thumbnail this save"; the Rust side then skips the file write rather
+   * than overwriting an existing thumbnail with zeros.
+   */
+  thumbnail_bytes: number[];
+}
+
+/**
+ * Scene manager handle for thumbnail capture at save time.
+ *
+ * The MapSceneManager registers itself here in its constructor (and
+ * clears the slot in dispose) so the save pipeline can grab a viewport
+ * thumbnail without each call site having to thread the manager through.
+ * Module-singleton fits the project — there is exactly one scene manager
+ * alive at a time (mirrors the dirty accumulators in mapStore).
+ *
+ * `null` when no scene manager is mounted (e.g. headless tests or
+ * pre-mount autosave races); we then save without a thumbnail.
+ */
+interface ThumbnailCapturer {
+  captureThumbnail(size?: number): Uint8Array;
+}
+let sceneManagerRef: ThumbnailCapturer | null = null;
+export function _setSceneManagerForThumbnails(
+  mgr: ThumbnailCapturer | null,
+): void {
+  sceneManagerRef = mgr;
 }
 
 function buildDefaultSplatmap(widthPx: number, heightPx: number): Uint8Array {
@@ -61,6 +89,20 @@ function buildDefaultSplatmap(widthPx: number, heightPx: number): Uint8Array {
 export function _buildBundleFromStore(): MapBundle {
   const s = useMapStore.getState();
   const nowIso = new Date().toISOString();
+  // Capture thumbnail if a scene manager has registered itself. If not
+  // (headless tests, autosave before mount), send an empty array — the
+  // Rust side then skips the file write instead of clobbering an existing
+  // thumbnail with zero bytes.
+  let thumbnailBytes: number[] = [];
+  if (sceneManagerRef) {
+    try {
+      thumbnailBytes = Array.from(sceneManagerRef.captureThumbnail());
+    } catch (err) {
+      // Loud-over-silent: thumbnail capture failing should not block save,
+      // but the failure must surface so we know the feature regressed.
+      console.warn("[projectIo] thumbnail capture failed:", err);
+    }
+  }
   const manifest: MapProjectManifest = {
     schemaVersion: MAP_SCHEMA_VERSION,
     name: `${s.terrain.widthPx}x${s.terrain.heightPx} map`,
@@ -94,11 +136,13 @@ export function _buildBundleFromStore(): MapBundle {
     objects: Object.values(s.objects),
     spawnPoints: Object.values(s.spawnPoints),
     decals: Object.values(s.decals),
+    ...(thumbnailBytes.length > 0 ? { thumbnail: "thumbnail.png" } : {}),
   };
   return {
     manifest_json: JSON.stringify(manifest, null, 2),
     heightmap_bytes: Array.from(encodeHeightmap(s.terrain.heightmap)),
     splatmap_bytes: Array.from(s.splatmap.data),
+    thumbnail_bytes: thumbnailBytes,
   };
 }
 

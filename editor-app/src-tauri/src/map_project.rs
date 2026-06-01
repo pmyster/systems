@@ -37,6 +37,12 @@ pub struct MapBundle {
     pub heightmap_bytes: Vec<u8>,
     #[serde(default)]
     pub splatmap_bytes: Vec<u8>,
+    /// Optional PNG thumbnail bytes. Empty Vec means "no thumbnail this
+    /// save" — we then skip the file write instead of clobbering an
+    /// existing `thumbnail.png` with zero bytes. Loaders return an empty
+    /// Vec when no thumbnail.png is present on disk.
+    #[serde(default)]
+    pub thumbnail_bytes: Vec<u8>,
 }
 
 /// Create a fresh project directory with manifest + sidecars.
@@ -82,10 +88,25 @@ pub fn open_map_project(dir: String) -> Result<MapBundle, String> {
         );
         Vec::new()
     };
+    // Thumbnail is optional — older projects (or any project that has
+    // never been saved with the thumbnail feature) won't have one. Empty
+    // Vec signals "absent" to the JS side without failing the load.
+    let thumbnail_path = dir_path.join("thumbnail.png");
+    let thumbnail_bytes = if thumbnail_path.exists() {
+        fs::read(&thumbnail_path).unwrap_or_else(|e| {
+            eprintln!(
+                "[map_project] thumbnail.png exists but read failed: {e}; returning empty"
+            );
+            Vec::new()
+        })
+    } else {
+        Vec::new()
+    };
     Ok(MapBundle {
         manifest_json,
         heightmap_bytes,
         splatmap_bytes,
+        thumbnail_bytes,
     })
 }
 
@@ -129,6 +150,12 @@ pub fn autosave_map_project(dir: String, bundle: MapBundle) -> Result<(), String
             &bundle.splatmap_bytes,
         )?;
     }
+    if !bundle.thumbnail_bytes.is_empty() {
+        write_atomic(
+            &autosave_dir.join("thumbnail.png"),
+            &bundle.thumbnail_bytes,
+        )?;
+    }
     Ok(())
 }
 
@@ -141,6 +168,12 @@ fn write_bundle_atomic(dir: &Path, bundle: &MapBundle) -> Result<(), String> {
     write_atomic(&dir.join("heightmap.r32"), &bundle.heightmap_bytes)?;
     if !bundle.splatmap_bytes.is_empty() {
         write_atomic(&dir.join("splatmap.r8"), &bundle.splatmap_bytes)?;
+    }
+    // Thumbnail is best-effort: skip writing when no bytes were provided
+    // (autosave, headless test, capture failure) rather than overwriting
+    // an existing good thumbnail with zeros.
+    if !bundle.thumbnail_bytes.is_empty() {
+        write_atomic(&dir.join("thumbnail.png"), &bundle.thumbnail_bytes)?;
     }
     Ok(())
 }
@@ -198,6 +231,10 @@ fn rotate_baks(dir: &Path) -> Result<(), String> {
     let splatmap = dir.join("splatmap.r8");
     if splatmap.exists() {
         let _ = fs::copy(&splatmap, stamp_dir.join("splatmap.r8"));
+    }
+    let thumbnail = dir.join("thumbnail.png");
+    if thumbnail.exists() {
+        let _ = fs::copy(&thumbnail, stamp_dir.join("thumbnail.png"));
     }
     let mut entries: Vec<_> = fs::read_dir(&bak_dir)
         .map_err(|e| format!("read .bak dir: {e}"))?

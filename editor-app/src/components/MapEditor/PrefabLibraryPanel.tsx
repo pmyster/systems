@@ -22,6 +22,8 @@ export function PrefabLibraryPanel() {
   const tool = useMapStore((s) => s.tool);
   const activePrefabId = useMapStore((s) => s.activePrefabId);
   const setActivePrefabId = useMapStore((s) => s.setActivePrefabId);
+  const prefabScaleOverrides = useMapStore((s) => s.prefabScaleOverrides);
+  const setPrefabScale = useMapStore((s) => s.setPrefabScale);
   // Force a re-render when async-loaded prefabs register themselves
   // after the initial mount. See file header for the rationale.
   const [, setTick] = useState(0);
@@ -40,6 +42,10 @@ export function PrefabLibraryPanel() {
   // would just be noise.
   if (tool !== "place" && tool !== "scatter") return null;
   const prefabs = prefabRegistry.list();
+  const activeScale = prefabScaleOverrides[activePrefabId] ?? 1.0;
+  // Only show the scale slider when the active prefab actually exists in
+  // the registry (avoid a confusing slider for an unregistered id).
+  const hasActive = prefabs.some((p) => p.id === activePrefabId);
 
   return (
     <div className="prefab-library">
@@ -59,6 +65,24 @@ export function PrefabLibraryPanel() {
           </button>
         ))}
       </div>
+      {hasActive ? (
+        <div className="prefab-scale-row">
+          <label className="prefab-scale-label" htmlFor="prefab-scale-slider">
+            Scale: {activeScale.toFixed(2)}x
+          </label>
+          <input
+            id="prefab-scale-slider"
+            type="range"
+            min={0.25}
+            max={4.0}
+            step={0.25}
+            value={activeScale}
+            onChange={(e) =>
+              setPrefabScale(activePrefabId, Number(e.target.value))
+            }
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

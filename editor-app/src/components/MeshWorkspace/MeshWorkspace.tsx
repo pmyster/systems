@@ -283,27 +283,10 @@ export function MeshWorkspace({
         const needsMigration = version !== "world_m";
         const ud = group.userData as { normalizeScale?: number };
         const s = typeof ud.normalizeScale === "number" ? ud.normalizeScale : 1;
-        // Diagnostic — intentionally left in place this session to debug
-        // stuck migration state. If hp[0].local_position values exceed the
-        // mesh's bbox size (NORMALIZE_TARGET_M = 8 m), the state was
-        // corrupted by a previous broken migration; reload mk01.json from
-        // disk via File→Open to get a clean pre-bake state.
-        // WARN-level so it stands out in the console (filterable with
-        // the "Warnings" tab in DevTools). Fires once per file-open
-        // via this effect, not per-frame.
-        // eslint-disable-next-line no-console
-        console.warn(
-          "[Migration check] id=",
-          unit.id,
-          "version=",
-          version,
-          "needsMigration=",
-          needsMigration,
-          "normalizeScale=",
-          s,
-          "hp[0]=",
-          unit.hardpoints?.[0]?.local_position,
-        );
+        // Diagnostic [Migration check] log removed — the Option C
+        // migration arc has stabilized and the per-file-open dump is
+        // noise. The completion warn below (fires only when migration
+        // actually runs) remains as the load-bearing signal.
         if (
           needsMigration &&
           s !== 1 &&
