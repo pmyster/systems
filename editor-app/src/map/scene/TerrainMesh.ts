@@ -21,10 +21,18 @@
  *     normals during the stroke; we run a single recompute on stroke end
  *     via `finalizeStroke()`.
  *
- * Why MeshStandardMaterial with flatShading:
- *   Cheap, matches the post-apocalyptic muted-earth feel we want, and
- *   flatShading lets us defer the expensive normal recompute to the
- *   stroke boundary instead of every brush tick.
+ * Why MeshStandardMaterial + onBeforeCompile shader injection:
+ *   We want PBR lighting (so the directional sun + hemi fill read
+ *   correctly), but the BASE COLOR comes from an elevation gradient
+ *   computed in the fragment shader from world-space Y. onBeforeCompile
+ *   lets us inject a varying + helper function into Three's built-in
+ *   shader without re-implementing all the light loops. Smooth shading
+ *   (flatShading=false) is required for the gradient to interpolate
+ *   nicely across triangle interiors — flat faces would produce visible
+ *   color banding between adjacent triangles.
+ *
+ *   Normal recompute strategy is unchanged: cheap during a stroke
+ *   (skipped), one pass on stroke end via finalizeStroke().
  */
 
 import * as THREE from "three";
@@ -62,13 +70,79 @@ export class TerrainMesh {
     this.applyHeightmap(initialHeightmap);
 
     this.material = new THREE.MeshStandardMaterial({
-      color: 0x4a5a3d, // muted post-apoc earth
-      roughness: 0.9,
+      // Base color is overridden by the gradient shader injected below;
+      // setting white here ensures the gradient color comes through
+      // unmodulated by the base `diffuse` uniform.
+      color: 0xffffff,
+      roughness: 0.95,
       metalness: 0.0,
-      flatShading: true, // see header — defers normal recompute.
+      // Smooth shading is required for the elevation gradient to
+      // interpolate cleanly between vertices. We previously used
+      // flatShading=true to defer the normal recompute during a stroke;
+      // that optimisation still holds because applyDirtyPixels skips
+      // computeVertexNormals — the gradient just reads stale normals
+      // for the in-flight frame, which is fine for color (lighting is
+      // independent).
+      flatShading: false,
       side: THREE.FrontSide,
       wireframe: false,
+      // fog reads through from MeshStandardMaterial without any extra
+      // wiring — the injected fragment shader runs BEFORE the
+      // fog-mix chunk in Three's pipeline.
     });
+
+    // Elevation-gradient injection. Stops in world meters:
+    //   y ≤ -2     deep blue water
+    //   y = -0.5   shallow blue/teal
+    //   y = 0      wet sand
+    //   y = 0.5    dry sand
+    //   y = 2      grass/dirt
+    //   y = 5      rock
+    //   y ≥ 10     snow
+    // The shader linearly interpolates between adjacent stops so the
+    // gradient is continuous (no banding) and reads like a hand-painted
+    // biome map without us authoring one.
+    this.material.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          "#include <common>",
+          `#include <common>
+varying float vWorldY;`,
+        )
+        .replace(
+          "#include <begin_vertex>",
+          `#include <begin_vertex>
+vWorldY = (modelMatrix * vec4(position, 1.0)).y;`,
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          "#include <common>",
+          `#include <common>
+varying float vWorldY;
+vec3 elevationColor(float y) {
+  vec3 deepWater = vec3(0.10, 0.23, 0.42);
+  vec3 shallow   = vec3(0.23, 0.54, 0.69);
+  vec3 wetSand   = vec3(0.54, 0.44, 0.31);
+  vec3 drySand   = vec3(0.77, 0.63, 0.42);
+  vec3 grass     = vec3(0.35, 0.48, 0.23);
+  vec3 rock      = vec3(0.42, 0.38, 0.33);
+  vec3 snow      = vec3(0.91, 0.91, 0.92);
+  if (y < -2.0)  return deepWater;
+  if (y < -0.5)  return mix(deepWater, shallow,  (y + 2.0)  / 1.5);
+  if (y < 0.0)   return mix(shallow,   wetSand,  (y + 0.5)  / 0.5);
+  if (y < 0.5)   return mix(wetSand,   drySand,  (y - 0.0)  / 0.5);
+  if (y < 2.0)   return mix(drySand,   grass,    (y - 0.5)  / 1.5);
+  if (y < 5.0)   return mix(grass,     rock,     (y - 2.0)  / 3.0);
+  if (y < 10.0)  return mix(rock,      snow,     (y - 5.0)  / 5.0);
+  return snow;
+}`,
+        )
+        .replace(
+          "vec4 diffuseColor = vec4( diffuse, opacity );",
+          "vec4 diffuseColor = vec4( elevationColor(vWorldY), opacity );",
+        );
+    };
+    this.material.needsUpdate = true;
 
     this.mesh = new THREE.Mesh(this.geometry, this.material);
     this.mesh.name = "MapTerrainMesh";

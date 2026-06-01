@@ -24,13 +24,12 @@ import { useMapStore } from "../state/mapStore";
 import type { InstanceObject } from "../state/mapStore";
 
 import { prefabRegistry } from "./prefabs";
+import { alignToNormal, sampleTerrainNormal } from "./_terrainSampling";
 import type { TerrainMesh } from "./TerrainMesh";
 
 export class PlaceObjectController {
   private raycaster = new THREE.Raycaster();
   private ndc = new THREE.Vector2();
-  /** Default prefab to spawn — Week 1 always uses 'cube'. */
-  private readonly activePrefabId = "cube";
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -58,19 +57,25 @@ export class PlaceObjectController {
     if (state.tool !== "place") return;
     const hit = this.screenToTerrainHit(e.clientX, e.clientY);
     if (!hit) return;
-    const def = prefabRegistry.get(this.activePrefabId);
+    const activePrefabId = state.activePrefabId;
+    const def = prefabRegistry.get(activePrefabId);
     if (!def) {
       console.warn(
-        `[PlaceObjectController] No prefab registered for '${this.activePrefabId}'.`,
+        `[PlaceObjectController] No prefab registered for '${activePrefabId}'.`,
       );
       return;
     }
     e.preventDefault();
+    // Slope-align: sample the terrain normal under the hit point and
+    // tilt the prefab's local +Y to match (clamped). On flat ground this
+    // is identity; on slopes the prefab leans naturally.
+    const normal = sampleTerrainNormal(this.terrain.mesh, hit.x, hit.z);
+    const rotation = normal ? alignToNormal(normal) : { x: 0, y: 0, z: 0 };
     const instance: InstanceObject = {
       id: crypto.randomUUID(),
-      prefabId: this.activePrefabId,
+      prefabId: activePrefabId,
       position: { x: hit.x, y: hit.y, z: hit.z },
-      rotation: { x: 0, y: 0, z: 0 },
+      rotation,
       scale: { ...def.defaultScale },
       properties: {},
     };

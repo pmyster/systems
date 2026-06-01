@@ -31,6 +31,7 @@ import {
   startMapAutosave,
   stopMapAutosave,
 } from "../../map/io/autosaveMap";
+import { loadPrefabManifest } from "../../map/scene/prefabLoader";
 import { useMapStore } from "../../map/state/mapStore";
 
 function isEditingInput(target: EventTarget | null): boolean {
@@ -65,6 +66,17 @@ export function MapEditor() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // Prefab manifest load — fires once on mount. We don't await this in
+  // render path; the PrefabLibraryPanel polls the registry for ~5 seconds
+  // after mount which covers the typical GLB fetch+parse window.
+  useEffect(() => {
+    void loadPrefabManifest().then((r) => {
+      console.info(
+        `[MapEditor] Prefab manifest: ${r.loaded} loaded, ${r.builtins} built-in, ${r.failed.length} failed${r.failed.length ? ` (${r.failed.join(", ")})` : ""}.`,
+      );
+    });
   }, []);
 
   // Autosave wiring: subscribe to the store, mark dirty on any change

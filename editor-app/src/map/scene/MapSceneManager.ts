@@ -27,6 +27,7 @@
 
 import * as THREE from "three";
 
+import { HEIGHTMAP_M_PER_PIXEL } from "../coords/constants";
 import { mapStore, _drainDirty } from "../state/mapStore";
 import { BrushController } from "./BrushController";
 import { BrushDecal } from "./BrushDecal";
@@ -34,8 +35,11 @@ import { GizmoController } from "./GizmoController";
 import { PlaceObjectController } from "./PlaceObjectController";
 import { PrefabRenderer } from "./PrefabRenderer";
 import { RtsOrbitCamera } from "./RtsOrbitCamera";
+import { ScatterController } from "./ScatterController";
 import { SelectionController } from "./SelectionController";
+import { SkyDome } from "./SkyDome";
 import { TerrainMesh } from "./TerrainMesh";
+import { WaterPlane } from "./WaterPlane";
 
 export class MapSceneManager {
   readonly scene: THREE.Scene;
@@ -51,9 +55,12 @@ export class MapSceneManager {
   private readonly brushController: BrushController;
   private readonly prefabRenderer: PrefabRenderer;
   private readonly placeController: PlaceObjectController;
+  private readonly scatterController: ScatterController;
   private readonly selectionController: SelectionController;
   private readonly gizmoController: GizmoController;
-  private readonly grid: THREE.GridHelper;
+  private readonly axes: THREE.AxesHelper;
+  private readonly skyDome: SkyDome;
+  private readonly waterPlane: WaterPlane;
   private lastUploadedRevision = -1;
   private lastBrushRadius: number;
   private lastTool: string;
@@ -66,7 +73,16 @@ export class MapSceneManager {
     private readonly container: HTMLElement,
   ) {
     this.scene = new THREE.Scene();
+    // Background color is kept as a fallback but the SkyDome (added
+    // below) actually fills the visible sky — we only see this color
+    // for a single frame at startup before the dome geometry uploads.
     this.scene.background = new THREE.Color(0x1a1d22);
+    // Linear fog blended toward the horizon color so distant terrain
+    // dissolves into the sunset rather than stopping abruptly at the
+    // map edge. near=80m, far=300m sits well past the 128m map extent
+    // so close-up sculpting is unaffected and the edge fades smoothly
+    // when the camera pulls back.
+    this.scene.fog = new THREE.Fog(0xc97a4a, 80, 300);
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(window.devicePixelRatio);
@@ -82,12 +98,31 @@ export class MapSceneManager {
       z: 64,
     });
 
-    // Lighting — same recipe as the Battlefield Preview so feels match.
-    const hemi = new THREE.HemisphereLight(0xc8e6ff, 0x4a4030, 0.8);
+    // Skydome — large inverted sphere with a procedural sunset gradient.
+    // Added BEFORE lights so its renderOrder=-1000 is the first thing
+    // drawn each frame (everything else overdraws it).
+    this.skyDome = new SkyDome(1500);
+    this.scene.add(this.skyDome.mesh);
+
+    // Atmospheric lighting — warm directional "sun" coming in at a low
+    // sunset angle, cool dusty-blue hemisphere fill, small cyan fill
+    // light from the opposite side to keep shadows readable. Same
+    // recipe philosophy as the Battlefield Preview but tuned for an
+    // outdoor post-apoc dusk rather than a clean daytime PBR setup.
+    // Slight intensity bump from the original recipe — the colored
+    // terrain palette was reading a touch muddy under the previous
+    // sunset values. 0.9 hemi + 1.6 sun preserves the warm/dusk feel
+    // while letting the green/brown bands come through cleanly.
+    const hemi = new THREE.HemisphereLight(0x6878a8, 0x5a4030, 0.9);
     this.scene.add(hemi);
-    const sun = new THREE.DirectionalLight(0xfff8e8, 1.2);
-    sun.position.set(100, 200, 80);
+    const sun = new THREE.DirectionalLight(0xffd9a5, 1.6);
+    sun.position.set(80, 60, 100);
+    sun.target.position.set(64, 0, 64);
     this.scene.add(sun);
+    this.scene.add(sun.target);
+    const fill = new THREE.DirectionalLight(0x6080b8, 0.3);
+    fill.position.set(-60, 40, -40);
+    this.scene.add(fill);
 
     // Terrain mesh — pulls the initial heightmap snapshot. Subsequent
     // changes flow through the store subscription below.
@@ -100,13 +135,22 @@ export class MapSceneManager {
     this.scene.add(this.terrain.mesh);
     this.lastUploadedRevision = initialState.terrain.revision;
 
-    // Faint grid as a spatial-reference overlay, sitting slightly below
-    // sea level so the terrain occludes it where it has any height.
-    this.grid = new THREE.GridHelper(128, 128, 0x303644, 0x21242c);
-    this.grid.position.set(64, -0.02, 64);
-    (this.grid.material as THREE.Material).transparent = true;
-    (this.grid.material as THREE.Material).opacity = 0.35;
-    this.scene.add(this.grid);
+    // Water plane at y=0 covering the full map extent. Depressions
+    // below sea level get the translucent blue overlay automatically.
+    const waterWidthM =
+      (initialState.terrain.widthPx - 1) * HEIGHTMAP_M_PER_PIXEL;
+    const waterDepthM =
+      (initialState.terrain.heightPx - 1) * HEIGHTMAP_M_PER_PIXEL;
+    this.waterPlane = new WaterPlane(waterWidthM, waterDepthM);
+    this.scene.add(this.waterPlane.mesh);
+
+    // Grid helper retired — the colored terrain + sky now provide the
+    // spatial reference the grid used to give us, and at y=-0.02 the
+    // grid was bleeding through the translucent water plane in an
+    // obvious shimmer. A small axes helper at origin replaces it as a
+    // sanity-check for orientation during development.
+    this.axes = new THREE.AxesHelper(4);
+    this.scene.add(this.axes);
 
     // Brush decal + controller.
     this.decal = new BrushDecal(initialState.brush.radiusM);
@@ -130,6 +174,11 @@ export class MapSceneManager {
     this.lastObjectsRef = initialState.objects;
 
     this.placeController = new PlaceObjectController(
+      canvas,
+      this.camera,
+      this.terrain,
+    );
+    this.scatterController = new ScatterController(
       canvas,
       this.camera,
       this.terrain,
@@ -264,6 +313,7 @@ export class MapSceneManager {
     this.resizeObserver?.disconnect();
     this.brushController.dispose();
     this.placeController.dispose();
+    this.scatterController.dispose();
     this.selectionController.dispose();
     this.gizmoController.dispose();
     this.cameraController.dispose();
@@ -272,8 +322,9 @@ export class MapSceneManager {
     this.terrain.dispose();
     this.decal.dispose();
     this.prefabRenderer.dispose();
-    this.grid.geometry.dispose();
-    (this.grid.material as THREE.Material).dispose();
+    this.axes.dispose();
+    this.skyDome.dispose();
+    this.waterPlane.dispose();
     this.renderer.dispose();
   }
 }

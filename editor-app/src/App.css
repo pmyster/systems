@@ -356,3 +356,53 @@ body,
 .brush-reset:hover {
   background: #4a2828;
 }
+
+.prefab-library {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #2a2a2f;
+}
+
+.prefab-library-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9aa0ad;
+}
+
+.prefab-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.prefab-list-item {
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: 3px;
+  border: 1px solid #2f3340;
+  background: #1c2028;
+  color: #c8cdd7;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+  letter-spacing: 0.02em;
+}
+
+.prefab-list-item:hover {
+  background: #232838;
+  border-color: #3a4150;
+}
+
+.prefab-list-item.is-active {
+  background: #3a4f2c;
+  border-color: #6f8a4a;
+  color: #f0f5e3;
+}

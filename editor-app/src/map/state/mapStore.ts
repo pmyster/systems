@@ -29,7 +29,12 @@ import {
   DEFAULT_HEIGHTMAP_WIDTH_PX,
 } from "../coords/constants";
 
-export type ToolKind = "sculpt-raise" | "sculpt-lower" | "place" | "select";
+export type ToolKind =
+  | "sculpt-raise"
+  | "sculpt-lower"
+  | "place"
+  | "select"
+  | "scatter";
 export type BrushFalloff = "gaussian";
 
 export interface InstanceObject {
@@ -68,6 +73,18 @@ export interface MapState {
   selection: Selection;
   tool: ToolKind;
   brush: { radiusM: number; strength: number; falloff: BrushFalloff };
+  /** Scatter-brush parameters (used while tool === "scatter"). */
+  scatter: {
+    radiusM: number;
+    /** Instances dropped per scatter tick (~12 ticks/sec while dragging). */
+    density: number;
+    /** Per-instance scale jitter (+/- fraction of defaultScale). */
+    scaleJitter: number;
+    /** Random Y rotation per instance. */
+    randomRotation: boolean;
+  };
+  /** Prefab id the Place tool will spawn on next click. */
+  activePrefabId: string;
 
   // --- Internal mutators (Commands only — UI must not call these) ---
   _markTerrainDirty(): void;
@@ -79,6 +96,11 @@ export interface MapState {
   setTool(t: ToolKind): void;
   setBrushRadius(r: number): void;
   setBrushStrength(s: number): void;
+  setActivePrefabId(id: string): void;
+  setScatterRadius(r: number): void;
+  setScatterDensity(n: number): void;
+  setScatterScaleJitter(j: number): void;
+  setScatterRandomRotation(b: boolean): void;
 }
 
 export const useMapStore = create<MapState>((set) => ({
@@ -95,6 +117,13 @@ export const useMapStore = create<MapState>((set) => ({
   selection: { kind: "none", id: null },
   tool: "sculpt-raise",
   brush: { radiusM: 4, strength: 0.5, falloff: "gaussian" },
+  scatter: {
+    radiusM: 8,
+    density: 4,
+    scaleJitter: 0.2,
+    randomRotation: true,
+  },
+  activePrefabId: "cube",
 
   _markTerrainDirty: () =>
     set((s) => ({
@@ -108,6 +137,15 @@ export const useMapStore = create<MapState>((set) => ({
   setBrushRadius: (r) => set((s) => ({ brush: { ...s.brush, radiusM: r } })),
   setBrushStrength: (st) =>
     set((s) => ({ brush: { ...s.brush, strength: st } })),
+  setActivePrefabId: (id) => set({ activePrefabId: id }),
+  setScatterRadius: (r) =>
+    set((s) => ({ scatter: { ...s.scatter, radiusM: r } })),
+  setScatterDensity: (n) =>
+    set((s) => ({ scatter: { ...s.scatter, density: n } })),
+  setScatterScaleJitter: (j) =>
+    set((s) => ({ scatter: { ...s.scatter, scaleJitter: j } })),
+  setScatterRandomRotation: (b) =>
+    set((s) => ({ scatter: { ...s.scatter, randomRotation: b } })),
 }));
 
 /**
@@ -192,6 +230,13 @@ export function _resetMapStore(): void {
       selection: { kind: "none", id: null },
       tool: "sculpt-raise",
       brush: { radiusM: 4, strength: 0.5, falloff: "gaussian" },
+      scatter: {
+        radiusM: 8,
+        density: 4,
+        scaleJitter: 0.2,
+        randomRotation: true,
+      },
+      activePrefabId: "cube",
     }),
     false,
   );
