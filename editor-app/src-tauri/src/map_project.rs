@@ -157,6 +157,60 @@ pub fn open_map_project_meta_only(dir: String) -> Result<MapBundleMeta, String> 
     })
 }
 
+/// Scan public/prefabs/user/ for .glb files. Returns just the filenames (no path).
+///
+/// The "user drop folder" workflow: users drop .glb files into this
+/// directory and the editor auto-registers them on next refresh — no
+/// manifest editing required. We deliberately return only the filename
+/// (not a path) so the JS side composes the URL relative to its
+/// `/prefabs/user/` fetch root, keeping path conventions in one place.
+///
+/// Defensive notes:
+/// - A missing folder is NOT an error; first-run before anyone drops a
+///   file is the normal case → return empty Vec.
+/// - Per-entry I/O errors propagate (loud over silent) — a directory
+///   that exists but can't be read is a real problem worth surfacing.
+/// - Sort the output so the UI order is stable across refreshes
+///   (filesystem read_dir order is unspecified on every platform).
+///
+/// TODO(prod): In Tauri dev `current_dir()` is `editor-app/src-tauri/`,
+/// so `../public/prefabs/user/` resolves correctly. For a packaged build
+/// the working dir is the install location and the public folder is
+/// inside the bundle — this will need to point at Tauri's app data dir
+/// instead. Marked here so the prod-build task picks it up.
+#[tauri::command]
+pub fn list_user_prefabs() -> Result<Vec<String>, String> {
+    let user_dir = std::env::current_dir()
+        .map_err(|e| format!("cwd: {e}"))?
+        .join("..")
+        .join("public")
+        .join("prefabs")
+        .join("user");
+
+    if !user_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut prefabs = Vec::new();
+    let entries = std::fs::read_dir(&user_dir)
+        .map_err(|e| format!("read_dir {}: {e}", user_dir.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("entry: {e}"))?;
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension() {
+                if ext.eq_ignore_ascii_case("glb") {
+                    if let Some(name) = path.file_name() {
+                        prefabs.push(name.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+    prefabs.sort();
+    Ok(prefabs)
+}
+
 /// Atomic save into an existing project directory.
 ///
 /// Rotates the prior manifest+heightmap+splatmap into `.bak/<unix_ts>/`

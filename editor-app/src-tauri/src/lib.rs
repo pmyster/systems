@@ -170,6 +170,7 @@ pub fn run() {
             map_project::open_map_project_meta_only,
             map_project::save_map_project,
             map_project::autosave_map_project,
+            map_project::list_user_prefabs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -32,6 +32,12 @@ import * as THREE from "three";
 
 import { prefabRegistry } from "./prefabs";
 
+// Tauri's invoke is imported lazily-by-presence: when running under the
+// editor shell we use it to enumerate the user/ drop folder; when
+// running under plain Vite (unit tests, browser-only dev) the import
+// resolves but the call throws — we catch and continue.
+import { invoke } from "@tauri-apps/api/core";
+
 /**
  * Lazy GLTFLoader getter — dynamic-imports the loader module the first
  * time we need it and caches the resulting instance forever.
@@ -108,6 +114,13 @@ export async function loadPrefabManifest(): Promise<LoadResult> {
           builtins++;
           continue;
         }
+        // Dedup on refresh: the GLB is already cached and registered,
+        // so re-running loadPrefabManifest() (from the Refresh button)
+        // should be a no-op for static-manifest entries — only newly
+        // dropped user/ files do real work.
+        if (loadedCache.has(entry.id)) {
+          continue;
+        }
         await registerGlbPrefab(entry);
         loaded++;
       } catch (e) {
@@ -121,7 +134,72 @@ export async function loadPrefabManifest(): Promise<LoadResult> {
   } catch (e) {
     console.warn("[prefabLoader] Manifest load failed:", e);
   }
+
+  // ---------------------------------------------------------------------
+  // User drop-folder pass — public/prefabs/user/*.glb
+  //
+  // The Rust `list_user_prefabs` command scans the folder and returns
+  // the bare filenames. We synthesize a manifest entry per file and
+  // funnel through the same `registerGlbPrefab` path the static manifest
+  // uses, so behaviour (auto-scale, re-floor, material clone, cache) is
+  // identical. Dedup via `loadedCache` keeps the Refresh button cheap.
+  //
+  // Loud-over-silent: a failed invoke (running under plain Vite or the
+  // command not registered yet) logs WARN and continues — built-in and
+  // static manifest prefabs are unaffected.
+  // ---------------------------------------------------------------------
+  try {
+    const userFiles = (await invoke("list_user_prefabs")) as string[];
+    for (const filename of userFiles) {
+      const id = `user-${filename.replace(/\.glb$/i, "")}`;
+      if (loadedCache.has(id)) {
+        // Already loaded on a prior pass — Refresh becomes a no-op for
+        // files that haven't changed since last scan.
+        continue;
+      }
+      try {
+        await registerGlbPrefab({
+          id,
+          displayName: prettifyFilename(filename),
+          category: "user",
+          glbPath: `user/${filename}`,
+          defaultScale: { x: 1, y: 1, z: 1 },
+        });
+        loaded++;
+      } catch (e) {
+        console.warn(
+          `[prefabLoader] Failed to load user prefab ${filename}:`,
+          e,
+        );
+        failed.push(id);
+      }
+    }
+  } catch (e) {
+    console.warn(
+      "[prefabLoader] list_user_prefabs failed (Tauri command missing or running under plain Vite?):",
+      e,
+    );
+  }
+
   return { loaded, failed, builtins };
+}
+
+/**
+ * Turn a bare filename into a human-readable display name.
+ *
+ *   concrete_bunker.glb       → "Concrete Bunker"
+ *   ruined-skyscraper-a.glb   → "Ruined Skyscraper A"
+ *   FooBar.glb                → "FooBar"   (preserves intra-word case)
+ *
+ * Intentionally simple: strip `.glb`, replace runs of `-`/`_` with a
+ * single space, then title-case the leading letter of every word. We
+ * don't touch interior letters so existing CamelCase survives.
+ */
+function prettifyFilename(name: string): string {
+  return name
+    .replace(/\.glb$/i, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 async function registerGlbPrefab(entry: ManifestEntry): Promise<void> {

@@ -11,10 +11,18 @@
  *   We poll for 5 seconds at 500ms cadence (10 ticks) which covers the
  *   typical "models finish loading within 2-3 seconds" case without
  *   introducing a permanent timer.
+ *
+ * Refresh button:
+ *   The user-prefab drop folder (`public/prefabs/user/`) can grow at any
+ *   time — the user drops a new .glb, comes back to the editor, and
+ *   wants the new prefab in the list without a full F5. The Refresh
+ *   button re-invokes `loadPrefabManifest`, which dedupes against
+ *   already-loaded ids and only does I/O for genuinely new files.
  */
 
 import { useEffect, useState } from "react";
 
+import { loadPrefabManifest } from "../../map/scene/prefabLoader";
 import { prefabRegistry } from "../../map/scene/prefabs";
 import { useMapStore } from "../../map/state/mapStore";
 
@@ -27,6 +35,7 @@ export function PrefabLibraryPanel() {
   // Force a re-render when async-loaded prefabs register themselves
   // after the initial mount. See file header for the rationale.
   const [, setTick] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => setTick((n) => n + 1), 500);
@@ -36,6 +45,18 @@ export function PrefabLibraryPanel() {
       clearTimeout(timeout);
     };
   }, []);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      await loadPrefabManifest();
+      // Force a re-list from the registry now that any new user prefabs
+      // are registered. Same tick mechanism the mount-time polling uses.
+      setTick((n) => n + 1);
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   // Show for both Place and Scatter — both need the user to pick which
   // prefab a click/drag will spawn. Hidden during Sculpt/Select where it
@@ -49,7 +70,18 @@ export function PrefabLibraryPanel() {
 
   return (
     <div className="prefab-library">
-      <div className="prefab-library-title">Prefabs ({prefabs.length})</div>
+      <div className="prefab-library-header">
+        <span className="prefab-library-title">Prefabs ({prefabs.length})</span>
+        <button
+          type="button"
+          className="prefab-library-refresh"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          title="Re-scan user prefabs folder"
+        >
+          {refreshing ? "…" : "⟳"}
+        </button>
+      </div>
       <div className="prefab-list">
         {prefabs.map((p) => (
           <button

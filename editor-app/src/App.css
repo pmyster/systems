@@ -634,6 +634,42 @@ body,
   color: #9aa0ad;
 }
 
+.prefab-library-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.prefab-library-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 3px;
+  border: 1px solid #2f3340;
+  background: #1c2028;
+  color: #c8cdd7;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  font-family: inherit;
+}
+
+.prefab-library-refresh:hover:not(:disabled) {
+  background: #232838;
+  border-color: #3a4150;
+  color: #f0f5e3;
+}
+
+.prefab-library-refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .prefab-list {
   display: flex;
   flex-direction: column;

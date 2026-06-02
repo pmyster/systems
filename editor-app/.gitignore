@@ -22,6 +22,10 @@ src-tauri/target/
 # Editor autosave files (per docs/editor-app-tauri-brief.md)
 *.autosave
 
+# User prefab drop folder — personal authoring assets, not shared via Git.
+# The folder itself is tracked via .gitkeep + README.md.
+public/prefabs/user/*.glb
+
 # Scoped tsc temp configs (sub-agents create these; Windows ACL on the mount
 # blocks Linux deletes, so we just ignore them).
 tsconfig.*.tmp.json
