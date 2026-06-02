@@ -92,6 +92,11 @@ export class InstancedUnitRenderer {
     const mat = Array.isArray(fm.material)
       ? fm.material[0].clone()
       : fm.material.clone();
+    // THREE.InstancedMesh raycast uses geometry.boundingSphere to early-out
+    // per-instance ray-vs-sphere; without it, all hits are missed silently.
+    // Compute once at register time so Week 2 selection raycasts hit.
+    if (!fm.geometry.boundingSphere) fm.geometry.computeBoundingSphere();
+    if (!fm.geometry.boundingBox) fm.geometry.computeBoundingBox();
     const inst = new THREE.InstancedMesh(fm.geometry, mat, maxInstances);
     inst.count = 0;
     inst.frustumCulled = false; // see header comment

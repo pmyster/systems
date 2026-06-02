@@ -26,6 +26,8 @@ import { SimClock } from "./clock";
 import { CommandBus } from "./commandBus";
 import { createSimWorld, type SimWorld } from "./world";
 import { SimRandom } from "./random";
+import { applyCommands } from "./systems/commandApplySystem";
+import { movementSystem } from "./systems/movementSystem";
 
 export interface SimRunnerOpts {
   /** Fixed sim rate. Project-wide = 30. */
@@ -74,11 +76,17 @@ export class SimRunner {
    * what we're proving, not behavior.
    */
   private simStep(tickId: number, dtSec: number): void {
-    // Drained per tick so the lockstep contract holds even when no
-    // system consumes commands yet — keeps the trace visible.
-    const _cmds = this.commands.forTick(tickId);
-    void _cmds;
-    void dtSec;
-    // Systems land here in later slices.
+    // 1. Inputs first. Commands queued by the UI at this tick land in
+    //    the world (MovementTarget writes, etc.) before any system
+    //    that consumes them runs.
+    const cmds = this.commands.forTick(tickId);
+    applyCommands(this.world, cmds);
+
+    // 2. Movement. Walks each entity toward its current MovementTarget
+    //    at MovementSpeed * dtSec; clears hasTarget on arrival so the
+    //    render-side PathFollowController can queue the next waypoint.
+    movementSystem(this.world, dtSec);
+
+    // 3. (Combat / AI / projectiles / hit feedback land in Week 3.)
   }
 }

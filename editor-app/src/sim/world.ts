@@ -71,6 +71,75 @@ export const UnitTypeId = defineComponent({ value: Types.ui16 });
  */
 export const Renderable = defineComponent({});
 
+// ---------------------------------------------------------------------
+// Phase 1 Week 2 — movement + selection + stance.
+//
+// These are the components the Week 2 systems consume:
+//   - MovementTarget: where this entity is trying to go (one waypoint).
+//   - MovementSpeed:  per-entity m/sec scalar.
+//   - Selected:       UI-only tag; sim does NOT branch on it. The render
+//                     side reads it to draw selection rings.
+//   - Stance:         BAR-style behavior mode. Stub for Week 2 (default
+//                     Defensive); the consumer is the combat / target
+//                     acquisition system that lands Week 3.
+//
+// Per the "data shape follows the consumer" rule, we deliberately keep
+// these minimal: ONE active waypoint per entity. The render-side
+// PathFollowController owns the rest of the recast path and writes the
+// next waypoint into MovementTarget when the sim signals arrival
+// (hasTarget transitions 1 → 0). The waypoint queue does not live in
+// the ECS — it lives in /runtime — because the path itself comes from
+// recast (a /runtime concept), not from deterministic sim state.
+// ---------------------------------------------------------------------
+
+/**
+ * Single active waypoint the movement system is steering toward.
+ *
+ * `hasTarget` is a 0/1 flag instead of a separate tag component so the
+ * arrival signal is a cheap typed-array write — no per-frame
+ * addComponent/removeComponent churn. The PathFollowController
+ * (render side) polls this each frame to advance to the next recast
+ * waypoint.
+ */
+export const MovementTarget = defineComponent({
+  x: Types.f32,
+  y: Types.f32,
+  z: Types.f32,
+  hasTarget: Types.ui8,
+});
+
+/** Per-entity scalar walk/run speed in meters per second. */
+export const MovementSpeed = defineComponent({ value: Types.f32 });
+
+/**
+ * UI-only selection tag. Empty schema — presence is the signal.
+ * The sim NEVER reads this; only the render side (selection ring
+ * pass, HUD count) checks it. Keeping it in ECS instead of a separate
+ * Set<eid> means it lives or dies with the entity, no cross-system
+ * sync to maintain.
+ */
+export const Selected = defineComponent({});
+
+/**
+ * BAR-style stance per the brief. Week 2 stubs all four values into a
+ * single ui8 slot — the gameplay branches that read it land Week 3
+ * with target acquisition + leash logic.
+ */
+export const Stance = defineComponent({ value: Types.ui8 });
+
+/**
+ * Stance enum values, in the order the brief specified. Exported as a
+ * `const` literal so callers can write `StanceValue.Defensive` and get
+ * type narrowing back. The Week 3 combat system will check these.
+ */
+export const StanceValue = {
+  Aggressive: 0,
+  Defensive: 1,
+  HoldGround: 2,
+  HoldFire: 3,
+} as const;
+export type StanceValueT = (typeof StanceValue)[keyof typeof StanceValue];
+
 /**
  * Project-local alias for bitECS's world type so callers can write
  * `world: SimWorld` without importing bitECS directly. (Sticking to one

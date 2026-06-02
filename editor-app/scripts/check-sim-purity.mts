@@ -1,7 +1,8 @@
 /**
  * check-sim-purity.mts
  *
- * Greps editor-app/src/sim/*.ts for banned globals that would break determinism.
+ * Greps editor-app/src/sim/**\/*.ts for banned globals that would break
+ * determinism. Recursive: catches violations under src/sim/systems/ too.
  * Exits 1 if any are found. Run as part of `npm run check:sim-purity`
  * (and in CI alongside tests).
  *
@@ -13,10 +14,17 @@
  * Anything that reads wall-clock time or system entropy breaks that contract.
  * The only allowed randomness source is the seeded SimRandom (mulberry32) in
  * src/sim/random.ts.
+ *
+ * Loud-over-silent rationale (Week 2 update): the original script only
+ * scanned the top-level src/sim/*.ts and quietly skipped subdirectories.
+ * The moment we added src/sim/systems/ for movementSystem + commandApplySystem
+ * the checker silently became blind to half the sim. Adaptive gate ⇒
+ * recurse the whole tree, surface every .ts under /sim with its relative
+ * path so the failure message points at the actual file.
  */
 
 import { readdirSync, readFileSync } from "fs";
-import { resolve } from "path";
+import { relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 
@@ -35,17 +43,31 @@ const SIM_DIR = resolve(__dirname, "../src/sim");
 let failures = 0;
 const filesScanned: string[] = [];
 
-for (const entry of readdirSync(SIM_DIR, { withFileTypes: true })) {
-  if (!entry.isFile()) continue;
-  if (!entry.name.endsWith(".ts")) continue;
-  // Tests can use Date.now / Math.random for setup since they're outside the sim runtime
-  if (entry.name.endsWith(".test.ts")) continue;
-  // Type declaration shims are fine
-  if (entry.name.endsWith(".d.ts")) continue;
+/** Recursively collect every .ts file under `dir`, skipping tests and .d.ts. */
+function collectTsFiles(dir: string, out: string[]): void {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = resolve(dir, entry.name);
+    if (entry.isDirectory()) {
+      collectTsFiles(full, out);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    if (!entry.name.endsWith(".ts")) continue;
+    // Tests can use Date.now / Math.random for setup since they're outside the sim runtime
+    if (entry.name.endsWith(".test.ts")) continue;
+    // Type declaration shims are fine
+    if (entry.name.endsWith(".d.ts")) continue;
+    out.push(full);
+  }
+}
 
-  const path = resolve(SIM_DIR, entry.name);
+const targets: string[] = [];
+collectTsFiles(SIM_DIR, targets);
+
+for (const path of targets) {
   const src = readFileSync(path, "utf8");
-  filesScanned.push(entry.name);
+  const rel = relative(SIM_DIR, path).replace(/\\/g, "/");
+  filesScanned.push(rel);
 
   for (const { pattern, reason } of BANNED) {
     // Look for any occurrence not preceded by a comment marker on the same line
@@ -57,7 +79,7 @@ for (const entry of readdirSync(SIM_DIR, { withFileTypes: true })) {
       const codeBeforeComment = line.split("//")[0];
       if (codeBeforeComment.includes(pattern)) {
         console.error(
-          `[sim purity] ${entry.name}:${i + 1} contains forbidden \`${pattern}\` — ${reason}`,
+          `[sim purity] ${rel}:${i + 1} contains forbidden \`${pattern}\` — ${reason}`,
         );
         console.error(`             > ${line.trim()}`);
         failures++;

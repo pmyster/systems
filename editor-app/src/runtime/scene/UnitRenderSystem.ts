@@ -28,6 +28,7 @@
  */
 
 import { query } from "bitecs";
+import type * as THREE from "three";
 
 import {
   Position,
@@ -37,6 +38,63 @@ import {
   type SimWorld,
 } from "../../sim/world";
 import type { InstancedUnitRenderer } from "./InstancedUnitRenderer";
+
+/**
+ * Maps (InstancedMesh, instanceId) → entityId so the SelectionController
+ * can resolve raycast hits back to the ECS. Rebuilt each frame from the
+ * same bucketing pass that drives the sync to avoid duplicating work.
+ *
+ * Why a class instead of a bare Map?
+ *   - Encapsulates the "(typeId, slot) → eid" lookup so SelectionController
+ *     doesn't need to know about the bucketing convention.
+ *   - Provides a `lookup(InstancedMesh, instanceId)` shape that matches
+ *     what THREE.Raycaster gives us.
+ *   - Owns the inverse map for "find which slot this eid sits in"
+ *     (Week 3 selection-ring renderer wants this).
+ */
+export class InstanceIndex {
+  /** typeId → ordered array of eids; eids[slot] = eid. */
+  private readonly slotToEid = new Map<number, number[]>();
+  /** Reverse: eid → { typeId, slot } for quick "where is this entity?" */
+  private readonly eidLocation = new Map<number, { typeId: number; slot: number }>();
+
+  /** Called by UnitRenderSystem after writing instanceMatrix for one type. */
+  setType(typeId: number, eids: readonly number[]): void {
+    // Defensive copy — bitECS query arrays are live views.
+    const list = eids.slice();
+    this.slotToEid.set(typeId, list);
+    for (let i = 0; i < list.length; i++) {
+      this.eidLocation.set(list[i], { typeId, slot: i });
+    }
+  }
+
+  /** Clear ALL stale per-frame state. Called at the START of each sync. */
+  clear(): void {
+    this.slotToEid.clear();
+    this.eidLocation.clear();
+  }
+
+  /**
+   * Map (mesh, instanceId) → eid by reading mesh.name (which the
+   * renderer stamps as `UnitType_${typeId}` on register). Returns null
+   * if the hit doesn't correspond to a tracked instance — defensive
+   * against debug overlays sneaking into the raycast result.
+   */
+  lookup(mesh: THREE.InstancedMesh, instanceId: number): number | null {
+    const name = mesh.name;
+    if (!name.startsWith("UnitType_")) return null;
+    const typeId = Number(name.slice("UnitType_".length));
+    if (!Number.isInteger(typeId)) return null;
+    const slots = this.slotToEid.get(typeId);
+    if (!slots || instanceId < 0 || instanceId >= slots.length) return null;
+    return slots[instanceId];
+  }
+
+  /** Where does this eid currently render? Used by selection-ring overlay. */
+  locationOf(eid: number): { typeId: number; slot: number } | null {
+    return this.eidLocation.get(eid) ?? null;
+  }
+}
 
 /**
  * bitECS 0.4 query terms — passed each frame to `query(world, [...])`
@@ -66,7 +124,9 @@ const RENDER_QUERY_TERMS = [Renderable, Position, Rotation, UnitTypeId];
 export function runUnitRenderSystem(
   world: SimWorld,
   renderer: InstancedUnitRenderer,
+  index?: InstanceIndex,
 ): void {
+  if (index) index.clear();
   const ents = query(world, RENDER_QUERY_TERMS);
   if (ents.length === 0) return;
 
@@ -85,7 +145,9 @@ export function runUnitRenderSystem(
     arr.push(eid);
   }
 
-  // Per-type flat-array build + sync.
+  // Per-type flat-array build + sync. The slot index within `eids` IS
+  // the InstancedMesh slot — Week 2 selection raycasts depend on this
+  // invariant (UnitType_${typeId} mesh, instanceId == slot).
   for (const [tid, eids] of byType) {
     const count = eids.length;
     const positions = new Float32Array(count * 3);
@@ -101,5 +163,6 @@ export function runUnitRenderSystem(
       rotations[i * 4 + 3] = Rotation.w[eid];
     }
     renderer.sync(tid, positions, rotations, count);
+    if (index) index.setType(tid, eids);
   }
 }

@@ -34,8 +34,21 @@ import {
   TeamId,
   UnitTypeId,
   Renderable,
+  MovementTarget,
+  MovementSpeed,
+  Stance,
+  StanceValue,
   type SimWorld,
 } from "./world";
+
+/**
+ * Default per-entity walk speed in m/sec. Picked as a "feels right"
+ * RTS pace for the Week 2 MVP — fast enough that the dev can verify
+ * pathing on a 128 m map within a few seconds, slow enough that
+ * crowd avoidance is visibly doing work. Real values land per-unit
+ * via the schematic in Week 3.
+ */
+const DEFAULT_MOVEMENT_SPEED_M_PER_SEC = 5;
 
 /**
  * bitECS 0.4 next-API note:
@@ -101,6 +114,29 @@ export function spawnUnit(world: SimWorld, p: SpawnParams): number {
   // Tag component — empty schema. Marks this entity as a candidate for
   // the InstancedUnitRenderer sync each frame.
   addComponent(world, eid, Renderable);
+
+  // ------------------------------------------------------------------
+  // Week 2 — movement + stance scaffolding.
+  //
+  // Stamp MovementTarget with hasTarget=0 so the movementSystem can
+  // unconditionally read it without a "does this entity have a target?"
+  // hasComponent check on the hot path. MovementSpeed defaults to the
+  // module constant; per-unit speed override lands when the schematic
+  // ships a movement.speed_m_per_sec field. Stance defaults to
+  // Defensive — the safest BAR-style behavior (return fire, leash on
+  // 0.5× scan range), matches the brief.
+  // ------------------------------------------------------------------
+  addComponent(world, eid, MovementTarget);
+  MovementTarget.x[eid] = 0;
+  MovementTarget.y[eid] = 0;
+  MovementTarget.z[eid] = 0;
+  MovementTarget.hasTarget[eid] = 0;
+
+  addComponent(world, eid, MovementSpeed);
+  MovementSpeed.value[eid] = DEFAULT_MOVEMENT_SPEED_M_PER_SEC;
+
+  addComponent(world, eid, Stance);
+  Stance.value[eid] = StanceValue.Defensive;
 
   return eid;
 }

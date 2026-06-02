@@ -1,5 +1,5 @@
 /**
- * GameRuntime — Phase 1 Week 1B view.
+ * GameRuntime — Phase 1 Week 2 view.
  *
  * Two-state view:
  *
@@ -8,36 +8,50 @@
  *      we transition to:
  *
  *   2. MatchScene — Three.js scene with the loaded RuntimeTerrain, a hemi
- *      + sun lighting rig, the InstancedUnitRenderer (with 0 active
- *      instances; Week 1C populates), and the FreeFlyCamera so the dev can
- *      look around to verify the data loaded. RuntimePhysics is constructed
- *      and held by the scene (no entities yet to step).
+ *      + sun lighting rig, the InstancedUnitRenderer, the RtsCamera, the
+ *      SelectionController, the CommandController, and an async navmesh
+ *      bake feeding the PathFollowController. RuntimePhysics is held but
+ *      not stepped (Rapier integration arrives Week 3).
  *
  * Architectural notes (rules locked by the brief):
- *   - `/sim` stays headless: only this view imports Three.js + Rapier.
- *   - Wall-clock time enters the sim ONLY through `sim.advance(nowSec)` —
- *     same as Week 1A. No new entry point added.
- *   - Cleanup is exhaustive: every Three.js + Rapier resource we built has a
- *     matched dispose() in the unmount path. The MatchData lives only while
- *     the scene is mounted; setMatch(null) tears it down and returns to
- *     setup so the dev can pick a different match.
+ *   - `/sim` stays headless: only this view (and the runtime-side
+ *     controllers) import Three.js / Rapier / recast.
+ *   - Wall-clock time enters the sim ONLY through `sim.advance(nowSec)`.
+ *   - Cleanup is exhaustive: every Three.js + Rapier + recast resource
+ *     has a matched dispose() in the unmount path.
+ *
+ * Week 2 add (above Week 1B):
+ *   - RtsCamera replaces FreeFlyCamera.
+ *   - SelectionController + CommandController bound to the canvas.
+ *   - NavMeshBaker runs async; "Building navmesh…" overlay until done.
+ *   - PathFollowController owns per-entity waypoint queues; the RAF
+ *     loop calls pollArrivals() each frame to advance waypoints.
+ *   - HUD adds Selected: N and Navmesh: building/ready/failed.
  */
 
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
+import { query } from "bitecs";
 
 import { SimRunner } from "../sim/simRunner";
-import { FreeFlyCamera } from "./FreeFlyCamera";
+import { Position, type SimWorld } from "../sim/world";
+import { RtsCamera } from "./scene/RtsCamera";
 import { MatchSetupScreen } from "./MatchSetupScreen";
 import type { MatchData } from "./MatchLoader";
 import { RuntimeTerrain } from "./scene/RuntimeTerrain";
 import { InstancedUnitRenderer } from "./scene/InstancedUnitRenderer";
-import { runUnitRenderSystem } from "./scene/UnitRenderSystem";
+import { InstanceIndex, runUnitRenderSystem } from "./scene/UnitRenderSystem";
 import { RuntimePhysics } from "./physics/RuntimePhysics";
 import { spawnInitialUnits } from "./spawning/MatchSpawner";
+import { bakeNavMesh, type NavMeshHandle } from "./pathfinding/NavMeshBaker";
+import { PathFollowController } from "./pathfinding/PathFollowController";
+import { SelectionController } from "./input/SelectionController";
+import { CommandController } from "./input/CommandController";
 
 const HZ = 30;
 const SEED = 42;
+
+type NavMeshStatus = "building" | "ready" | "failed";
 
 interface HudReadout {
   tick: number;
@@ -46,6 +60,9 @@ interface HudReadout {
   unitTypesRegistered: number;
   prefabsCached: number;
   entities: number;
+  selected: number;
+  navMeshStatus: NavMeshStatus;
+  navMeshError?: string;
 }
 
 const PER_TYPE_SPAWN_COUNT = 5;
@@ -81,6 +98,8 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
     unitTypesRegistered: 0,
     prefabsCached: 0,
     entities: 0,
+    selected: 0,
+    navMeshStatus: "building",
   });
 
   useEffect(() => {
@@ -92,16 +111,13 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
     scene.background = new THREE.Color(0x1a2030);
 
     // --- Terrain ---------------------------------------------------------
-    // RuntimeTerrain is render-only — it owns its geometry + material.
     const terrain = new RuntimeTerrain(match.map);
     scene.add(terrain.mesh);
 
     // --- Physics ---------------------------------------------------------
-    // Rapier was warmed up by the MatchLoader; the constructor is synchronous.
     const physics = new RuntimePhysics(match.map);
 
     // --- Lighting --------------------------------------------------------
-    // Defaults per brief: hemi + sun. Biome-baked atmosphere comes later.
     const hemi = new THREE.HemisphereLight(0xbcd9ff, 0x405028, 1.0);
     scene.add(hemi);
     const sun = new THREE.DirectionalLight(0xfff4dc, 1.8);
@@ -115,9 +131,10 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
       0.1,
       Math.max(2000, terrain.widthM * 4),
     );
-    // Park the camera so the whole map is visible. Looking diagonally down
-    // gives a recognisable RTS-style framing without committing to the
-    // future RtsOrbitCamera that lands in Week 2.
+    // Initial framing is overridden by the RtsCamera as soon as it
+    // constructs (which sets pos+lookAt from focus/yaw/pitch/distance),
+    // but we still set something sensible in case the controller
+    // construction throws.
     camera.position.set(
       terrain.widthM * 0.5,
       Math.max(40, terrain.widthM * 0.35),
@@ -130,34 +147,42 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
     renderer.setSize(mount.clientWidth, mount.clientHeight);
     mount.appendChild(renderer.domElement);
 
-    const fly = new FreeFlyCamera(camera, renderer.domElement);
+    // Disable the browser context menu so right-click is reserved
+    // for the CommandController.
+    const onContextMenu = (e: Event): void => e.preventDefault();
+    renderer.domElement.addEventListener("contextmenu", onContextMenu);
+
+    const rtsCamera = new RtsCamera({
+      camera,
+      domElement: renderer.domElement,
+      bounds: {
+        minX: 0,
+        maxX: terrain.widthM,
+        minZ: 0,
+        maxZ: terrain.depthM,
+      },
+      initialFocus: new THREE.Vector3(
+        terrain.widthM / 2,
+        0,
+        terrain.depthM / 2,
+      ),
+      edgePanEnabled: true,
+    });
 
     // --- Unit Instances --------------------------------------------------
-    // Pre-allocate one InstancedMesh per unit type. The MatchSpawner takes
-    // the UnitTypeRegistry built by MatchLoader, registers each type's
-    // prefab with the renderer (capacity 256 per type), and then spawns
-    // ECS entities. UnitRenderSystem syncs from ECS→InstancedMesh each
-    // frame (see the RAF loop below).
     const unitRenderer = new InstancedUnitRenderer();
     scene.add(unitRenderer.group);
+    const instanceIndex = new InstanceIndex();
 
     // --- Sim -------------------------------------------------------------
-    // SimRunner must exist BEFORE spawning so we have a world to write into.
     const sim = new SimRunner({ hz: HZ, seed: SEED });
 
     // --- Initial spawn ---------------------------------------------------
-    // Bilinear sampler over the heightmap so units sit on the ground. The
-    // heightmap is row-major (heightmap[row * widthPx + col]) with the
-    // (0,0) world corner at (0, 0). World→pixel: col = worldX / tileM.
     const tileM = match.map.manifest.terrain.tileSizeM ?? 1;
     const heightWpx = match.map.manifest.terrain.widthPx;
     const heightHpx = match.map.manifest.terrain.heightPx;
     const heightmap = match.map.heightmap;
     const heightAt = (worldX: number, worldZ: number): number => {
-      // Clamp into the grid so off-map queries return the nearest edge
-      // height (loud-over-silent: a caller asking for off-map is usually
-      // a spawn-placement bug; the clamp keeps physics from NaN-ing
-      // while the warn surfaces the misuse on next frame).
       const fx = Math.max(0, Math.min(heightWpx - 1, worldX / tileM));
       const fz = Math.max(0, Math.min(heightHpx - 1, worldZ / tileM));
       const c0 = Math.floor(fx);
@@ -192,6 +217,58 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
       `[GameRuntime] spawned ${spawnedCount} entities across ${match.typeRegistry.size()} unit type(s).`,
     );
 
+    // --- Navmesh bake + path follower (async) ---------------------------
+    let navHandle: NavMeshHandle | null = null;
+    let pathFollower: PathFollowController | null = null;
+    let selection: SelectionController | null = null;
+    let command: CommandController | null = null;
+    let disposed = false;
+
+    bakeNavMesh(terrain.mesh)
+      .then((handle) => {
+        if (disposed) {
+          handle.dispose();
+          return;
+        }
+        navHandle = handle;
+        pathFollower = new PathFollowController(sim.world, handle);
+
+        selection = new SelectionController({
+          world: sim.world,
+          camera,
+          domElement: renderer.domElement,
+          unitsGroup: unitRenderer.group,
+          instanceLookup: (mesh, instanceId) =>
+            instanceIndex.lookup(mesh, instanceId),
+          onSelectionChanged: (sel) => {
+            // HUD update on selection change is decoupled from the
+            // RAF FPS tick — keeps the count fresh without thrashing.
+            setHud((h) => ({ ...h, selected: sel.length }));
+          },
+        });
+        command = new CommandController({
+          camera,
+          domElement: renderer.domElement,
+          terrainMesh: terrain.mesh,
+          commands: sim.commands,
+          clock: sim.clock,
+          selection,
+          pathFollower,
+          cursorTarget: renderer.domElement,
+        });
+        setHud((h) => ({ ...h, navMeshStatus: "ready" }));
+      })
+      .catch((err: unknown) => {
+        if (disposed) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[GameRuntime] navmesh bake failed", err);
+        setHud((h) => ({
+          ...h,
+          navMeshStatus: "failed",
+          navMeshError: msg,
+        }));
+      });
+
     // --- Resize ----------------------------------------------------------
     const onResize = (): void => {
       if (!mount) return;
@@ -220,14 +297,22 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
 
       // Drive the sim — only place wall-clock enters /sim.
       const stepsThisFrame = sim.advance(nowSec);
-      // Physics is allocated but not stepped (no bodies yet — Week 1C
-      // spawns entities but the only behavior is "exist"; movement +
-      // collision wire into the step in Week 2).
 
-      fly.update(dtReal);
-      // ECS → InstancedMesh sync. Must run BEFORE renderer.render so the
-      // new instance matrices are uploaded this frame.
-      runUnitRenderSystem(sim.world, unitRenderer);
+      // RTS camera (real wall-clock seconds).
+      rtsCamera.update(dtReal);
+
+      // Path waypoint advancement — runs after the sim because
+      // arrival is signaled by the sim writing hasTarget = 0.
+      if (pathFollower) pathFollower.pollArrivals();
+
+      // Re-sample terrain height under each entity so units sit on
+      // the ground despite the sim's planar X/Z movement. The sample
+      // is render-side because the heightmap is a /runtime concept.
+      // (Cheap: ≤ ~100 entities per Phase 1 budget.)
+      resampleGroundedY(sim.world, heightAt);
+
+      // ECS → InstancedMesh sync + InstanceIndex rebuild for selection.
+      runUnitRenderSystem(sim.world, unitRenderer, instanceIndex);
       renderer.render(scene, camera);
 
       fpsAccum += dtReal;
@@ -237,25 +322,30 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
         fpsAccum = 0;
         fpsFrames = 0;
         lastHudPushSec = nowSec;
-        setHud({
+        setHud((h) => ({
+          ...h,
           tick: sim.clock.tickId,
           fps,
           simStepsThisFrame: stepsThisFrame,
           unitTypesRegistered: unitRenderer.typeCount(),
           prefabsCached: match.prefabBank.size(),
           entities: spawnedCount,
-        });
+        }));
       }
     };
     frame();
 
     return () => {
+      disposed = true;
       cancelAnimationFrame(rafId);
       window.removeEventListener("resize", onResize);
       ro.disconnect();
-      fly.dispose();
-      // Disposal order: renderer-side first (which holds geometry refs),
-      // then the bank that owns the source roots.
+      renderer.domElement.removeEventListener("contextmenu", onContextMenu);
+      command?.dispose();
+      selection?.dispose();
+      pathFollower?.dispose();
+      navHandle?.dispose();
+      rtsCamera.dispose();
       unitRenderer.dispose();
       terrain.dispose();
       physics.dispose();
@@ -265,9 +355,6 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
         mount.removeChild(renderer.domElement);
       }
     };
-    // We intentionally remount the entire scene when `match` changes (the
-    // outer GameRuntime swaps the component); the effect's dep array can
-    // safely be empty because match is captured at first render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -284,13 +371,38 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
         <div>Unit types: {hud.unitTypesRegistered}</div>
         <div>Prefabs cached: {hud.prefabsCached}</div>
         <div>Entities: {hud.entities}</div>
+        <div>Selected: {hud.selected}</div>
+        <div>
+          Navmesh: {hud.navMeshStatus}
+          {hud.navMeshError ? ` (${hud.navMeshError})` : ""}
+        </div>
         <div>Sim steps/frame: {hud.simStepsThisFrame}</div>
         <button type="button" onClick={onExit} style={EXIT_BUTTON_STYLE}>
           Exit Match
         </button>
       </div>
+      {hud.navMeshStatus === "building" ? (
+        <div style={NAVMESH_OVERLAY_STYLE}>Building navmesh…</div>
+      ) : null}
     </div>
   );
+}
+
+/**
+ * Resample terrain Y under each renderable entity so the visible mesh
+ * stays glued to the ground. Lives in the render loop because the
+ * heightmap is a render-side resource; the sim's movementSystem
+ * deliberately leaves Y alone.
+ */
+function resampleGroundedY(
+  world: SimWorld,
+  heightAt: (x: number, z: number) => number,
+): void {
+  const ents = query(world, [Position]);
+  for (let i = 0; i < ents.length; i++) {
+    const eid = ents[i];
+    Position.y[eid] = heightAt(Position.x[eid], Position.z[eid]);
+  }
 }
 
 const ROOT_STYLE: React.CSSProperties = {
@@ -325,4 +437,19 @@ const EXIT_BUTTON_STYLE: React.CSSProperties = {
   color: "#ffb0b0",
   font: "inherit",
   cursor: "pointer",
+};
+
+const NAVMESH_OVERLAY_STYLE: React.CSSProperties = {
+  position: "absolute",
+  top: "50%",
+  left: "50%",
+  transform: "translate(-50%, -50%)",
+  padding: "12px 20px",
+  background: "rgba(0,0,0,0.75)",
+  color: "#cfd8e3",
+  border: "1px solid #2a2a2f",
+  borderRadius: 4,
+  font: "13px ui-monospace, SFMono-Regular, Menlo, monospace",
+  pointerEvents: "none",
+  userSelect: "none",
 };
