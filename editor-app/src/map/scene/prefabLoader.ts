@@ -31,6 +31,7 @@
 import * as THREE from "three";
 
 import { prefabRegistry } from "./prefabs";
+import { settingsStore } from "../../state/settings";
 
 // Tauri's invoke is imported lazily-by-presence: when running under the
 // editor shell we use it to enumerate the user/ drop folder; when
@@ -149,7 +150,20 @@ export async function loadPrefabManifest(): Promise<LoadResult> {
   // static manifest prefabs are unaffected.
   // ---------------------------------------------------------------------
   try {
-    const userFiles = (await invoke("list_user_prefabs")) as string[];
+    // Honour the Settings override: empty string → Rust falls back to
+    // its dev default (../public/prefabs/user/). Tauri's optional-arg
+    // convention accepts `null` for "not provided".
+    const folder = settingsStore.getState().userPrefabFolder;
+    const invokeArgs = folder.trim().length > 0 ? { path: folder } : { path: null };
+    const userFiles = (await invoke("list_user_prefabs", invokeArgs)) as string[];
+    // External-folder path: Vite only serves files under `public/`, so a
+    // user-chosen folder like `D:\MyPrefabs\` cannot be reached via a
+    // `/prefabs/user/*.glb` URL. We route those through Tauri:
+    // `read_user_prefab_bytes` returns the raw bytes, we wrap them in a
+    // Blob URL, feed that to GLTFLoader, then revoke the URL. Same
+    // post-load pipeline (auto-scale, re-floor, registry insertion) via
+    // `finalizeLoadedGltf` — only the source of bytes differs.
+    const isExternalFolder = folder.trim().length > 0;
     for (const filename of userFiles) {
       const id = `user-${filename.replace(/\.glb$/i, "")}`;
       if (loadedCache.has(id)) {
@@ -158,13 +172,24 @@ export async function loadPrefabManifest(): Promise<LoadResult> {
         continue;
       }
       try {
-        await registerGlbPrefab({
-          id,
-          displayName: prettifyFilename(filename),
-          category: "user",
-          glbPath: `user/${filename}`,
-          defaultScale: { x: 1, y: 1, z: 1 },
-        });
+        if (isExternalFolder) {
+          await registerExternalGlbPrefab({
+            id,
+            displayName: prettifyFilename(filename),
+            category: "user",
+            folder,
+            filename,
+            defaultScale: { x: 1, y: 1, z: 1 },
+          });
+        } else {
+          await registerGlbPrefab({
+            id,
+            displayName: prettifyFilename(filename),
+            category: "user",
+            glbPath: `user/${filename}`,
+            defaultScale: { x: 1, y: 1, z: 1 },
+          });
+        }
         loaded++;
       } catch (e) {
         console.warn(
@@ -207,6 +232,75 @@ async function registerGlbPrefab(entry: ManifestEntry): Promise<void> {
   const path = `/prefabs/${entry.glbPath}`;
   const loader = await getLoader();
   const gltf = await loader.loadAsync(path);
+  finalizeLoadedGltf(
+    entry.id,
+    entry.displayName,
+    entry.category,
+    gltf,
+    entry.defaultScale,
+  );
+}
+
+/**
+ * Load a .glb whose bytes live OUTSIDE Vite's static root (e.g. the
+ * user's chosen folder `D:\MyPrefabs\`) by pulling raw bytes via a
+ * Tauri command, wrapping them in a Blob URL, and feeding that URL to
+ * GLTFLoader. Post-load handling (auto-scale, re-floor, registry
+ * insertion, material cloning) is identical to `registerGlbPrefab` —
+ * both paths funnel into `finalizeLoadedGltf` so behaviour stays in
+ * one place.
+ *
+ * The Blob URL is revoked in `finally` so we don't leak object URLs
+ * on every Refresh, regardless of whether the load succeeds or throws.
+ */
+async function registerExternalGlbPrefab(params: {
+  id: string;
+  displayName: string;
+  category: string;
+  folder: string;
+  filename: string;
+  defaultScale: { x: number; y: number; z: number };
+}): Promise<void> {
+  const bytes = (await invoke("read_user_prefab_bytes", {
+    folder: params.folder,
+    filename: params.filename,
+  })) as number[];
+  const blob = new Blob([new Uint8Array(bytes)], { type: "model/gltf-binary" });
+  const url = URL.createObjectURL(blob);
+  try {
+    const loader = await getLoader();
+    const gltf = await loader.loadAsync(url);
+    finalizeLoadedGltf(
+      params.id,
+      params.displayName,
+      params.category,
+      gltf,
+      params.defaultScale,
+    );
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/**
+ * Shared post-load pipeline for any GLB source (static manifest, user
+ * folder under public/, or external folder via Tauri bytes). Normalises
+ * scale, re-floors the model so its lowest vertex sits at y=0, caches
+ * the root so subsequent placements share geometry, and registers a
+ * `build()` factory with the prefab registry.
+ *
+ * Kept as a free function rather than an inline closure so the two
+ * load paths (URL fetch vs Blob URL) share the exact same behaviour —
+ * any future tweak (auto-scale target, material-clone strategy, group
+ * wrapping) lands in one place instead of drifting between paths.
+ */
+function finalizeLoadedGltf(
+  id: string,
+  displayName: string,
+  _category: string,
+  gltf: { scene: THREE.Object3D },
+  defaultScale: { x: number; y: number; z: number },
+): void {
   const sourceRoot = gltf.scene;
 
   // Auto-scale: normalize so the model's max bbox dimension is ~4m.
@@ -228,11 +322,11 @@ async function registerGlbPrefab(entry: ManifestEntry): Promise<void> {
   const flooredBox = new THREE.Box3().setFromObject(sourceRoot);
   sourceRoot.position.y -= flooredBox.min.y;
 
-  loadedCache.set(entry.id, sourceRoot);
+  loadedCache.set(id, sourceRoot);
 
   prefabRegistry.register({
-    id: entry.id,
-    name: entry.displayName,
+    id,
+    name: displayName,
     build: () => {
       // Object3D.clone(true) deep-clones the subtree; meshes share their
       // BufferGeometry with the source (cheap memory-wise).
@@ -255,6 +349,6 @@ async function registerGlbPrefab(entry: ManifestEntry): Promise<void> {
       group.add(inst);
       return group;
     },
-    defaultScale: entry.defaultScale,
+    defaultScale,
   });
 }

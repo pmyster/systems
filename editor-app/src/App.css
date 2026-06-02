@@ -1033,3 +1033,168 @@ body,
 .new-map-create:hover {
   background: #6a5424;
 }
+
+/* ===================================================================== */
+/* Settings gear icon + modal overlay                                    */
+/* ===================================================================== */
+
+.settings-gear {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: #9aa3ad;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 3px;
+  align-self: center;
+}
+.settings-gear:hover {
+  color: #c9a55c;
+  background: #2a2a2a;
+}
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+.settings-modal {
+  background: #1f1f1f;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  padding: 16px 20px;
+  width: 560px;
+  max-height: 80vh;
+  overflow-y: auto;
+  color: #e6e6e6;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+}
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #2a2a2a;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+}
+.settings-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #c9a55c;
+}
+.settings-close {
+  background: transparent;
+  border: none;
+  color: #9aa3ad;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 6px;
+  line-height: 1;
+}
+.settings-close:hover {
+  color: #c9a55c;
+}
+.settings-section {
+  margin-bottom: 16px;
+}
+.settings-section-title {
+  font-size: 11px;
+  color: #9aa3ad;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.settings-row-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.settings-label {
+  font-size: 12px;
+  color: #d8d8d8;
+}
+.settings-folder-row {
+  display: flex;
+  gap: 6px;
+}
+.settings-folder-input {
+  flex: 1;
+  background: #1a1a1a;
+  color: #e6e6e6;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+}
+.settings-folder-row button {
+  background: #2a2a2a;
+  color: #e6e6e6;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.settings-folder-row button:hover {
+  background: #3a3a3a;
+}
+.settings-hint {
+  font-size: 11px;
+  color: #6c727a;
+}
+.settings-scan-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.settings-scan-row button {
+  background: #2a2a2a;
+  color: #e6e6e6;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.settings-scan-row button:hover:not(:disabled) {
+  background: #3a3a3a;
+}
+.settings-scan-row button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.settings-scan-result {
+  font-size: 12px;
+  color: #9aa3ad;
+}
+.settings-footer {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid #2a2a2a;
+  padding-top: 12px;
+}
+.settings-footer button {
+  background: #c9a55c;
+  color: #1a1a1a;
+  border: none;
+  border-radius: 3px;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.settings-footer button:hover {
+  background: #d6b478;
+}

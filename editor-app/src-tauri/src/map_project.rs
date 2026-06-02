@@ -157,13 +157,21 @@ pub fn open_map_project_meta_only(dir: String) -> Result<MapBundleMeta, String> 
     })
 }
 
-/// Scan public/prefabs/user/ for .glb files. Returns just the filenames (no path).
+/// Scan a folder for .glb files. Returns just the filenames (no path).
 ///
-/// The "user drop folder" workflow: users drop .glb files into this
+/// The "user drop folder" workflow: users drop .glb files into a chosen
 /// directory and the editor auto-registers them on next refresh — no
 /// manifest editing required. We deliberately return only the filename
 /// (not a path) so the JS side composes the URL relative to its
-/// `/prefabs/user/` fetch root, keeping path conventions in one place.
+/// `/prefabs/user/` fetch root (for the dev default) or constructs an
+/// absolute file:// reference (for an override), keeping path
+/// conventions in one place.
+///
+/// If `path` is `Some(non-empty)`, scan THAT absolute path. Otherwise,
+/// fall back to the dev-only default `../public/prefabs/user/`
+/// resolved relative to the src-tauri cwd. Production builds should
+/// always pass an explicit path (the dev default does not exist when
+/// the public folder is bundled into the installer / app resources).
 ///
 /// Defensive notes:
 /// - A missing folder is NOT an error; first-run before anyone drops a
@@ -173,19 +181,19 @@ pub fn open_map_project_meta_only(dir: String) -> Result<MapBundleMeta, String> 
 /// - Sort the output so the UI order is stable across refreshes
 ///   (filesystem read_dir order is unspecified on every platform).
 ///
-/// TODO(prod): In Tauri dev `current_dir()` is `editor-app/src-tauri/`,
-/// so `../public/prefabs/user/` resolves correctly. For a packaged build
-/// the working dir is the install location and the public folder is
-/// inside the bundle — this will need to point at Tauri's app data dir
-/// instead. Marked here so the prod-build task picks it up.
+/// TODO(prod): unset the dev default at build time so production users
+/// MUST configure a folder via Settings before the scan can succeed.
 #[tauri::command]
-pub fn list_user_prefabs() -> Result<Vec<String>, String> {
-    let user_dir = std::env::current_dir()
-        .map_err(|e| format!("cwd: {e}"))?
-        .join("..")
-        .join("public")
-        .join("prefabs")
-        .join("user");
+pub fn list_user_prefabs(path: Option<String>) -> Result<Vec<String>, String> {
+    let user_dir: PathBuf = match path {
+        Some(p) if !p.trim().is_empty() => PathBuf::from(p),
+        _ => std::env::current_dir()
+            .map_err(|e| format!("cwd: {e}"))?
+            .join("..")
+            .join("public")
+            .join("prefabs")
+            .join("user"),
+    };
 
     if !user_dir.exists() {
         return Ok(Vec::new());
@@ -209,6 +217,45 @@ pub fn list_user_prefabs() -> Result<Vec<String>, String> {
     }
     prefabs.sort();
     Ok(prefabs)
+}
+
+/// Read a .glb file from an explicit folder + filename. Returns raw bytes.
+///
+/// Companion to `list_user_prefabs` for the external-folder case: Vite
+/// only serves files under `public/`, so when the Settings panel points
+/// the user-prefab folder at an arbitrary location (`D:\MyPrefabs\`),
+/// the JS GLTFLoader cannot fetch via a URL path. Instead the loader
+/// asks Rust for the bytes and wraps them in a Blob URL.
+///
+/// Defensive guards:
+/// - Empty folder is rejected outright (would canonicalise to cwd and
+///   then any file path would "escape" the wrong root).
+/// - Both folder and target are canonicalised, then we require the file
+///   to live inside the folder — blocks `..\..\Windows\...` traversal
+///   attempts via a crafted filename.
+/// - Only `.glb` extensions are accepted. The dialog already filters,
+///   but we re-check server-side so a programmatic caller cannot
+///   exfiltrate arbitrary files by reusing the command.
+#[tauri::command]
+pub fn read_user_prefab_bytes(folder: String, filename: String) -> Result<Vec<u8>, String> {
+    if folder.trim().is_empty() {
+        return Err("folder cannot be empty".to_string());
+    }
+    let path = PathBuf::from(&folder).join(&filename);
+    // Guard against directory traversal: ensure the resolved path stays inside the folder
+    let folder_canonical = std::fs::canonicalize(&folder)
+        .map_err(|e| format!("canonicalize folder {folder}: {e}"))?;
+    let path_canonical = std::fs::canonicalize(&path)
+        .map_err(|e| format!("canonicalize file {}: {e}", path.display()))?;
+    if !path_canonical.starts_with(&folder_canonical) {
+        return Err(format!("path escapes folder: {}", path_canonical.display()));
+    }
+    // Only allow .glb
+    match path_canonical.extension() {
+        Some(ext) if ext.eq_ignore_ascii_case("glb") => {}
+        _ => return Err(format!("not a .glb file: {}", path_canonical.display())),
+    }
+    std::fs::read(&path_canonical).map_err(|e| format!("read {}: {e}", path_canonical.display()))
 }
 
 /// Atomic save into an existing project directory.

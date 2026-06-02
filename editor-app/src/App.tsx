@@ -8,6 +8,7 @@ import { BattlefieldPreview } from "./components/BattlefieldPreview";
 import { MapEditor } from "./components/MapEditor/MapEditor";
 import { MenuBar } from "./components/MenuBar";
 import { MeshWorkspace } from "./components/MeshWorkspace";
+import { SettingsModal } from "./components/SettingsModal";
 import { startAutosave, getAutosavePath, type AutosaveHandle } from "./file-ops";
 import {
   UnitStateProvider,
@@ -62,7 +63,7 @@ function isAutosaveEnvelope(v: unknown): v is AutosaveEnvelope {
  * providers (they're cheap when unread) and the unit-side autosave keeps
  * running in the background regardless of which mode is showing.
  */
-function ModeTabs() {
+function ModeTabs({ onOpenSettings }: { onOpenSettings: () => void }) {
   const mode = useAppMode((s) => s.mode);
   const setMode = useAppMode((s) => s.setMode);
 
@@ -85,6 +86,15 @@ function ModeTabs() {
           {t.label}
         </button>
       ))}
+      <button
+        type="button"
+        className="settings-gear"
+        onClick={onOpenSettings}
+        title="Settings"
+        aria-label="Open settings"
+      >
+        ⚙
+      </button>
     </div>
   );
 }
@@ -101,6 +111,9 @@ function AppShell() {
 
   // Status notice surfaced by MenuBar (save errors, etc.).
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Settings modal visibility.
+  const [showSettings, setShowSettings] = useState(false);
 
   // Autosave recovery — non-null while the banner is visible.
   const [recoverData, setRecoverData] = useState<AutosaveEnvelope | null>(null);
@@ -197,7 +210,8 @@ function AppShell() {
 
   return (
     <div className="app-shell">
-      <ModeTabs />
+      <ModeTabs onOpenSettings={() => setShowSettings(true)} />
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       <header className="app-header">
         <MenuBar notice={notice} setNotice={setNotice} />
         {recoverData !== null && (

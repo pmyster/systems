@@ -33,6 +33,7 @@ import {
 } from "../../map/io/autosaveMap";
 import { loadPrefabManifest } from "../../map/scene/prefabLoader";
 import { useMapStore } from "../../map/state/mapStore";
+import { useSettings } from "../../state/settings";
 
 function isEditingInput(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -68,10 +69,16 @@ export function MapEditor() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  // Prefab manifest load — fires once on mount. We don't await this in
-  // render path; the PrefabLibraryPanel polls the registry for ~5 seconds
-  // after mount which covers the typical GLB fetch+parse window.
+  // Prefab manifest load — fires once on mount when Settings allows.
+  // We don't await this in render path; the PrefabLibraryPanel polls
+  // the registry for ~5 seconds after mount which covers the typical
+  // GLB fetch+parse window. If the user has disabled "Scan on startup",
+  // they trigger the scan manually via Settings → Scan now.
   useEffect(() => {
+    if (!useSettings.getState().scanOnStartup) {
+      console.info("[MapEditor] Prefab startup scan skipped (disabled in Settings).");
+      return;
+    }
     void loadPrefabManifest().then((r) => {
       console.info(
         `[MapEditor] Prefab manifest: ${r.loaded} loaded, ${r.builtins} built-in, ${r.failed.length} failed${r.failed.length ? ` (${r.failed.join(", ")})` : ""}.`,

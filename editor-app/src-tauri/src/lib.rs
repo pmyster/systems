@@ -171,6 +171,7 @@ pub fn run() {
             map_project::save_map_project,
             map_project::autosave_map_project,
             map_project::list_user_prefabs,
+            map_project::read_user_prefab_bytes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
