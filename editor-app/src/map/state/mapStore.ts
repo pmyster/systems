@@ -450,6 +450,41 @@ export function _drainSplatDirty(): Set<number> | null {
   return d;
 }
 
+/**
+ * Color-paint recents storage helper.
+ *
+ * Single source of truth for the `cl_color_recents` localStorage key —
+ * the ColorPalettePanel writes via `pickColor` and the eyedropper in
+ * PaintColorController writes via this helper. Both paths converge on
+ * the same key + same dedup-and-cap policy so the UI never disagrees
+ * with the underlying store.
+ *
+ * Loud-over-silent: a localStorage failure (private mode, quota, etc.)
+ * is intentionally swallowed because color recents are a UX nicety —
+ * the eyedropper still updates the active color via the store path even
+ * if recents persistence fails.
+ */
+const COLOR_RECENT_KEY = "cl_color_recents";
+const COLOR_RECENT_MAX = 12;
+
+export function _pushColorRecent(hex: string): void {
+  try {
+    const raw = localStorage.getItem(COLOR_RECENT_KEY);
+    const arr: unknown = raw ? JSON.parse(raw) : [];
+    const existing: string[] = Array.isArray(arr)
+      ? arr.filter((c): c is string => typeof c === "string")
+      : [];
+    const lower = hex.toLowerCase();
+    const next = [
+      lower,
+      ...existing.filter((c) => c.toLowerCase() !== lower),
+    ].slice(0, COLOR_RECENT_MAX);
+    localStorage.setItem(COLOR_RECENT_KEY, JSON.stringify(next));
+  } catch {
+    /* localStorage might be disabled — silent ok */
+  }
+}
+
 /** Called by PaintColorCommand for each color-paint pixel it mutates. */
 export function _accumulateColorPaintDirty(pixelIdx: number): void {
   if (!pendingColorPaintDirty) pendingColorPaintDirty = new Set();

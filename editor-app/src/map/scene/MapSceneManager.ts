@@ -437,6 +437,7 @@ export class MapSceneManager {
       this.canvas,
       this.camera,
       this.terrain,
+      this.renderer,
     );
     this.scatterController = new ScatterController(
       this.canvas,

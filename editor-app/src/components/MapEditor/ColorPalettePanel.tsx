@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { useMapStore } from "../../map/state/mapStore";
+import { _pushColorRecent, useMapStore } from "../../map/state/mapStore";
 
 interface PalettePreset {
   readonly id: string;
@@ -121,16 +121,9 @@ function loadRecentColors(): string[] {
   }
 }
 
-function saveRecentColors(colors: readonly string[]): void {
-  try {
-    localStorage.setItem(
-      RECENT_KEY,
-      JSON.stringify(colors.slice(0, RECENT_MAX)),
-    );
-  } catch {
-    /* localStorage might be disabled — silent ok */
-  }
-}
+// NOTE: writes to recents go through `_pushColorRecent` in mapStore —
+// single source of truth shared with the eyedropper in
+// PaintColorController. We only read from localStorage here.
 
 export function ColorPalettePanel() {
   const authoring = useMapStore((s) => s.colorPaintAuthoring);
@@ -143,21 +136,25 @@ export function ColorPalettePanel() {
   const [hexInput, setHexInput] = useState(authoring.color.toUpperCase());
   const [recents, setRecents] = useState<string[]>(() => loadRecentColors());
 
-  // Sync hex input when store color changes externally (native picker,
-  // hotkey, or undo).
+  // Sync hex input + recents when store color changes externally.
+  // The eyedropper (PaintColorController) writes to recents via the
+  // shared `_pushColorRecent` helper and updates `authoring.color` — so
+  // re-reading from localStorage on color change is enough to pick up
+  // those external writes without a `storage` event listener.
   useEffect(() => {
     setHexInput(authoring.color.toUpperCase());
+    setRecents(loadRecentColors());
   }, [authoring.color]);
 
   function pickColor(hex: string): void {
     const lower = hex.toLowerCase();
     setColor(lower);
+    _pushColorRecent(lower);
     const next = [
       lower,
       ...recents.filter((c) => c.toLowerCase() !== lower),
     ].slice(0, RECENT_MAX);
     setRecents(next);
-    saveRecentColors(next);
   }
 
   function commitHexInput(): void {
@@ -299,8 +296,8 @@ export function ColorPalettePanel() {
         </label>
       </div>
       <p className="brush-hint">
-        Left-click drag to paint. Erase mode reduces opacity in painted
-        regions.
+        Left-click drag to paint. Alt+click to sample a color from the
+        terrain. Erase mode reduces opacity in painted regions.
       </p>
     </div>
   );

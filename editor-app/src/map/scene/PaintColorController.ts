@@ -18,7 +18,7 @@ import * as THREE from "three";
 import { mapCommandBus } from "../commands/CommandBus";
 import { PaintColorCommand } from "../commands/PaintColorCommand";
 import { HEIGHTMAP_M_PER_PIXEL } from "../coords/constants";
-import { useMapStore } from "../state/mapStore";
+import { _pushColorRecent, useMapStore } from "../state/mapStore";
 
 import type { TerrainMesh } from "./TerrainMesh";
 
@@ -51,12 +51,87 @@ export class PaintColorController {
     private readonly canvas: HTMLCanvasElement,
     private readonly camera: THREE.PerspectiveCamera,
     private readonly terrain: TerrainMesh,
+    private readonly renderer: THREE.WebGLRenderer,
   ) {
     canvas.addEventListener("pointermove", this.onPointerMove);
     canvas.addEventListener("pointerdown", this.onPointerDown);
     canvas.addEventListener("pointerup", this.onPointerUp);
     canvas.addEventListener("pointerleave", this.onPointerLeave);
+    // Alt held → switch to crosshair so the user sees they're in
+    // eyedropper mode. Window-level because the keypress can happen
+    // while the cursor is outside the canvas.
+    window.addEventListener("keydown", this.onKeyDown);
+    window.addEventListener("keyup", this.onKeyUp);
   }
+
+  /**
+   * Sample the rendered pixel at `(clientX, clientY)` from the WebGL
+   * backbuffer and return it as a "#rrggbb" hex string. Returns null on
+   * read failure (e.g., context lost) — caller silently no-ops, which
+   * is fine because the user can simply click again.
+   *
+   * WebGL framebuffer coords are bottom-up, so the Y axis must be
+   * flipped relative to DOM client coords. DPI is also applied — on a
+   * retina display the framebuffer is 2× wider/taller than the CSS box.
+   *
+   * Note: this reads whatever is currently in the backbuffer. The
+   * pointerdown handler runs synchronously after the last
+   * requestAnimationFrame paint, so the pixel matches what the user
+   * actually clicked on.
+   */
+  private sampleColorAt(clientX: number, clientY: number): string | null {
+    const rect = this.canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const canvasX = Math.round((clientX - rect.left) * dpr);
+    const canvasYTop = Math.round((clientY - rect.top) * dpr);
+    const fbHeight = this.renderer.domElement.height;
+    const fbWidth = this.renderer.domElement.width;
+    const canvasYBottom = fbHeight - canvasYTop - 1;
+    // Bounds check — readPixels outside the framebuffer is a silent
+    // no-op that leaves the pixel buffer as zeros (i.e. would return
+    // black). Surface this with a warn rather than poisoning recents.
+    if (
+      canvasX < 0 ||
+      canvasX >= fbWidth ||
+      canvasYBottom < 0 ||
+      canvasYBottom >= fbHeight
+    ) {
+      console.warn(
+        `[Eyedropper] sample coords out of framebuffer: ` +
+          `(${canvasX}, ${canvasYBottom}) vs ${fbWidth}x${fbHeight}`,
+      );
+      return null;
+    }
+    const gl = this.renderer.getContext();
+    const pixel = new Uint8Array(4);
+    try {
+      gl.readPixels(
+        canvasX,
+        canvasYBottom,
+        1,
+        1,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        pixel,
+      );
+    } catch (e) {
+      console.warn("[Eyedropper] readPixels failed:", e);
+      return null;
+    }
+    const toHex = (v: number) => v.toString(16).padStart(2, "0");
+    return ("#" + toHex(pixel[0]) + toHex(pixel[1]) + toHex(pixel[2])).toLowerCase();
+  }
+
+  private onKeyDown = (e: KeyboardEvent): void => {
+    if (e.key !== "Alt") return;
+    if (useMapStore.getState().tool !== "color-paint") return;
+    this.canvas.style.cursor = "crosshair";
+  };
+
+  private onKeyUp = (e: KeyboardEvent): void => {
+    if (e.key !== "Alt") return;
+    this.canvas.style.cursor = "";
+  };
 
   private screenToWorldHit(
     clientX: number,
@@ -84,9 +159,24 @@ export class PaintColorController {
   private onPointerDown = (e: PointerEvent): void => {
     if (e.button !== 0) return;
     if (!this.isColorPaintTool()) return;
+    e.preventDefault();
+
+    // EYEDROPPER MODE — Alt+left-click samples the rendered pixel
+    // under the cursor and sets it as the active paint color. We
+    // intentionally do NOT enter drag mode here; the user releases and
+    // can immediately paint with the sampled color on the next click.
+    if (e.altKey) {
+      const hex = this.sampleColorAt(e.clientX, e.clientY);
+      if (hex) {
+        const state = useMapStore.getState();
+        state.setColorPaintColor(hex);
+        _pushColorRecent(hex);
+      }
+      return;
+    }
+
     const hit = this.screenToWorldHit(e.clientX, e.clientY);
     if (!hit) return;
-    e.preventDefault();
     this.canvas.setPointerCapture(e.pointerId);
     this.isDragging = true;
     this.tickStroke(hit.x, hit.z);
@@ -147,5 +237,8 @@ export class PaintColorController {
     this.canvas.removeEventListener("pointerdown", this.onPointerDown);
     this.canvas.removeEventListener("pointerup", this.onPointerUp);
     this.canvas.removeEventListener("pointerleave", this.onPointerLeave);
+    window.removeEventListener("keydown", this.onKeyDown);
+    window.removeEventListener("keyup", this.onKeyUp);
+    this.canvas.style.cursor = "";
   }
 }
