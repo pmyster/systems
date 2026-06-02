@@ -31,6 +31,7 @@ import {
 } from "./loader/schematicLoader";
 import { PrefabBank, meshAssetKey } from "./loader/prefabBank";
 import { initRapier } from "./physics/RuntimePhysics";
+import { UnitTypeRegistry } from "./UnitTypeRegistry";
 
 export type LoadPhase =
   | "manifest"
@@ -52,6 +53,13 @@ export interface MatchData {
   readonly map: LoadedMap;
   readonly schematics: readonly LoadedSchematic[];
   readonly prefabBank: PrefabBank;
+  /**
+   * Authored-id → numeric-typeId catalog, built from every successfully
+   * loaded schematic. The spawner reads this to know which prefabs to
+   * register with the InstancedUnitRenderer and what max-health to seed
+   * Health components with.
+   */
+  readonly typeRegistry: UnitTypeRegistry;
 }
 
 export class MatchLoader {
@@ -162,7 +170,18 @@ export class MatchLoader {
     // after this returns.
     await rapierWarmup;
 
+    // -------- Build the UnitTypeRegistry ---------------------------------
+    // After every prefab attempt is done, materialise the catalog. We
+    // register EVERY successfully-loaded schematic (even ones whose
+    // prefab failed to load) — the spawner will skip non-renderable
+    // entries with a clear log line. Keeping them in the registry means
+    // future systems (selection UI, debug overlays) can still see them.
+    const typeRegistry = new UnitTypeRegistry();
+    for (const s of schematics) {
+      typeRegistry.register(s.unit);
+    }
+
     onProgress({ phase: "ready", progress: 1.0, message: "Ready" });
-    return { map, schematics, prefabBank };
+    return { map, schematics, prefabBank, typeRegistry };
   }
 }
