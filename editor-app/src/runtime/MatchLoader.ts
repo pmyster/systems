@@ -24,6 +24,8 @@
  * once a load has succeeded.
  */
 
+import { join } from "@tauri-apps/api/path";
+
 import { loadMapFromDir, type LoadedMap } from "./loader/mapLoader";
 import {
   loadSchematicsByPaths,
@@ -32,6 +34,9 @@ import {
 import { PrefabBank, meshAssetKey } from "./loader/prefabBank";
 import { initRapier } from "./physics/RuntimePhysics";
 import { UnitTypeRegistry } from "./UnitTypeRegistry";
+import { ProjectileRegistry } from "./ProjectileRegistry";
+import { loadProjectile } from "../file-ops/projectile-ops";
+import { isWeapon } from "../types/part";
 
 export type LoadPhase =
   | "manifest"
@@ -60,7 +65,21 @@ export interface MatchData {
    * Health components with.
    */
   readonly typeRegistry: UnitTypeRegistry;
+  /**
+   * Phase 1 Week 3 — projectile catalog discovered from every weapon
+   * part's `projectile_id` field. The sim's projectileSpawnSystem and
+   * impactSystem read this to get the authored physics; the in-flight
+   * projectile entity carries only a numeric `ProjectileSchemaId`.
+   *
+   * Per-file load failures are logged + dropped (matches the schematic
+   * load pattern). A weapon whose projectile_id failed to load cannot
+   * fire — the weaponFireSystem skips it with a warn.
+   */
+  readonly projectileRegistry: ProjectileRegistry;
 }
+
+/** Absolute on-disk projectiles directory — mirrors WeaponSubform.tsx const. */
+const PROJECTILES_DIR = "C:\\dev\\Strategy Game\\units\\projectiles";
 
 export class MatchLoader {
   /**
@@ -181,7 +200,41 @@ export class MatchLoader {
       typeRegistry.register(s.unit);
     }
 
+    // -------- Discover + load projectiles --------------------------------
+    // Walk every loaded unit's parts[]; every weapon with a projectile_id
+    // gets enqueued for load. Dedup by id (multiple units may share one
+    // projectile). One bad projectile file warns + drops — the weapon
+    // using it simply can't fire.
+    const projectileRegistry = new ProjectileRegistry();
+    const projIdsToLoad = new Set<string>();
+    for (const s of schematics) {
+      for (const p of s.unit.parts ?? []) {
+        if (!isWeapon(p)) continue;
+        const pid = p.projectile_id;
+        if (pid && pid.length > 0) projIdsToLoad.add(pid);
+      }
+    }
+    if (projIdsToLoad.size > 0) {
+      onProgress({
+        phase: "prefabs",
+        progress: 0.96,
+        message: `Loading ${projIdsToLoad.size} projectile${projIdsToLoad.size === 1 ? "" : "s"}…`,
+      });
+      for (const pid of projIdsToLoad) {
+        try {
+          const path = await join(PROJECTILES_DIR, `${pid}.proj.json`);
+          const proj = await loadProjectile(path);
+          projectileRegistry.register(proj);
+        } catch (e) {
+          console.warn(
+            `[MatchLoader] failed to load projectile "${pid}":`,
+            e,
+          );
+        }
+      }
+    }
+
     onProgress({ phase: "ready", progress: 1.0, message: "Ready" });
-    return { map, schematics, prefabBank, typeRegistry };
+    return { map, schematics, prefabBank, typeRegistry, projectileRegistry };
   }
 }

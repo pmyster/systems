@@ -101,6 +101,18 @@ export class InstancedUnitRenderer {
     inst.count = 0;
     inst.frustumCulled = false; // see header comment
     inst.name = `UnitType_${typeId}`;
+    // Allocate per-instance color attribute up-front so Week 3 team-tint
+    // writes don't crash on a null instanceColor. THREE creates it
+    // lazily otherwise; doing it here makes the contract explicit.
+    inst.instanceColor = new THREE.InstancedBufferAttribute(
+      new Float32Array(maxInstances * 3),
+      3,
+    );
+    // Default fill: white = no tint.
+    for (let k = 0; k < maxInstances; k++) {
+      inst.instanceColor.setXYZ(k, 1, 1, 1);
+    }
+    inst.instanceColor.needsUpdate = true;
     this.group.add(inst);
     this.byTypeId.set(typeId, {
       typeId,
@@ -163,6 +175,28 @@ export class InstancedUnitRenderer {
     t.mesh.count = n;
     t.mesh.instanceMatrix.needsUpdate = true;
     t.activeCount = n;
+  }
+
+  /**
+   * Set the per-instance tint color for a slot. Caller is responsible
+   * for keeping slot indices in sync with sync() ordering — typical
+   * use: write a team tint right after sync() with the same slot
+   * iteration order. v1 supports Week 3 team-tint of dead/alive units.
+   */
+  setColorAt(
+    typeId: number,
+    slot: number,
+    r: number,
+    g: number,
+    b: number,
+  ): void {
+    const t = this.byTypeId.get(typeId);
+    if (!t) return;
+    if (slot < 0 || slot >= t.maxInstances) return;
+    const attr = t.mesh.instanceColor;
+    if (!attr) return;
+    attr.setXYZ(slot, r, g, b);
+    attr.needsUpdate = true;
   }
 
   /** Diagnostic: how many types are registered. */

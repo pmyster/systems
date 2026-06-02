@@ -24,6 +24,25 @@
 import { createWorld, type World } from "bitecs";
 import { defineComponent, Types } from "bitecs/legacy";
 
+// ---------------------------------------------------------------------
+// Sentinel "no entity" id. bitECS allocates eids starting at 1 (the
+// world reserves 0 as "no entity") so we can use 0 unambiguously here.
+// Used by TargetOf, WeaponTarget, OwnerEid as the "unset" marker.
+// ---------------------------------------------------------------------
+export const NO_ENTITY = 0 as const;
+
+/**
+ * Sentinel "no projectile type" — written into ProjectileTypeId when a
+ * weapon's projectile_id failed to load or was never authored. The
+ * weaponFireSystem checks this and refuses to fire (with a one-time
+ * warn). 0xFFFF == ui16 max.
+ *
+ * Mirrored by `NO_PROJECTILE_TYPE` in /runtime/ProjectileRegistry so
+ * runtime code reads the same constant via that path (which is where
+ * runtime/Sim layering says runtime code should look).
+ */
+export const NO_PROJECTILE_TYPE = 0xffff as const;
+
 /** 3-axis world position in meters. */
 export const Position = defineComponent({
   x: Types.f32,
@@ -139,6 +158,183 @@ export const StanceValue = {
   HoldFire: 3,
 } as const;
 export type StanceValueT = (typeof StanceValue)[keyof typeof StanceValue];
+
+// ---------------------------------------------------------------------
+// Phase 1 Week 3 — combat MVP components.
+//
+// Per A.3 of synthesis: per-hardpoint targeting. A unit with N
+// hardpoints spawns N WeaponInstance entities — one entity per weapon,
+// each carrying its own timing state, heat, and target. The "unit"
+// entity carries only the unit-wide acquisition state (TargetOf,
+// ScanRange, LeashOrigin, InCombat).
+//
+// Schema-field mapping (real authored names → ECS components):
+//
+//   UnitSchematic.vulnerability                 → consumed by impactSystem
+//   UnitSchematic.hardpoints[].weapon_part_id   → resolves to a WeaponPart
+//   WeaponPart.barrel_thermal_capacity_MJ       → WeaponThermalCapMj
+//   WeaponPart.per_shot_heat_MJ                 → WeaponHeatPerShot
+//   WeaponPart.cooling_rate_MJs                 → WeaponCoolRateMjs
+//   WeaponPart.charge_time_ms                   → WeaponTiming defaults
+//   WeaponPart.fire_rate_ms                     → WeaponTiming defaults
+//   WeaponPart.burst_count                      → WeaponTiming defaults
+//   WeaponPart.burst_delay_ms                   → WeaponTiming defaults
+//   WeaponPart.cooldown_ms                      → WeaponTiming defaults
+//   WeaponPart.projectile_id                    → ProjectileTypeId on the
+//                                                 weapon (looked up via
+//                                                 ProjectileRegistry at
+//                                                 fire time).
+//   ProjectileSchematic.delivery_params.kind    → ProjectileKind (ui8)
+//   ProjectileSchematic.mass_kg                 → ProjectileMassKg
+//   delivery_params (ballistic).muzzle_velocity_mps → projectile spawn vel
+//
+// Sim purity: this file imports ONLY bitECS. No render-side types.
+// The component ARRAY of authored fields is mirrored into ECS at spawn
+// time via the runtime-side MatchSpawner reading the schematic.
+// ---------------------------------------------------------------------
+
+/** Current acquired target for this unit. NO_ENTITY (=0) = no target. */
+export const TargetOf = defineComponent({ value: Types.eid });
+
+/** Unit's scan range in meters. Defaults to a weapon-derived value. */
+export const ScanRange = defineComponent({ value: Types.f32 });
+
+/** Stamped at spawn — origin of the leash that bounds pursuit. */
+export const LeashOrigin = defineComponent({ x: Types.f32, z: Types.f32 });
+
+/** Tag — currently engaged with a target. Empty schema. */
+export const InCombat = defineComponent({});
+
+/** Tag — entity is dead. atTick records the tick we tagged it for despawn. */
+export const Dead = defineComponent({ atTick: Types.ui32 });
+
+/** Weapon instance owner (eid of the owning unit). */
+export const OwnerEid = defineComponent({ value: Types.eid });
+
+/** Index into the unit's authored `hardpoints[]` for this weapon instance. */
+export const WeaponHardpointIdx = defineComponent({ value: Types.ui16 });
+
+/**
+ * Weapon state-machine state. Matches WeaponStateValue below.
+ * timerMs accumulates ms in the current state.
+ * burstShotsFired counts shots emitted in the current burst.
+ */
+export const WeaponTiming = defineComponent({
+  state: Types.ui8,
+  timerMs: Types.f32,
+  burstShotsFired: Types.ui8,
+});
+
+/** Authored timing fields cached on the weapon entity (ms). */
+export const WeaponTimingSpec = defineComponent({
+  chargeTimeMs: Types.f32,
+  fireRateMs: Types.f32,
+  burstCount: Types.ui16,
+  burstDelayMs: Types.f32,
+  cooldownMs: Types.f32,
+});
+
+/** Current barrel heat in MJ (mirrors WeaponPart.per_shot_heat_MJ accumulation). */
+export const WeaponHeat = defineComponent({ currentMj: Types.f32 });
+
+/** Authored thermal fields. */
+export const WeaponThermalSpec = defineComponent({
+  capacityMj: Types.f32, // barrel_thermal_capacity_MJ
+  heatPerShotMj: Types.f32, // per_shot_heat_MJ
+  coolRateMjs: Types.f32, // cooling_rate_MJs
+});
+
+/**
+ * 1=true overheated lockout, 0=ready. Hysteresis: set when heat > 70%
+ * capacity, cleared when heat < 60% capacity.
+ */
+export const WeaponOverheatLock = defineComponent({ value: Types.ui8 });
+
+/** Per-weapon target entity. NO_ENTITY = no target. */
+export const WeaponTarget = defineComponent({ value: Types.eid });
+
+/** Effective range of this weapon in meters (derived at spawn time). */
+export const WeaponRange = defineComponent({ value: Types.f32 });
+
+/**
+ * Index into the runtime ProjectileRegistry (mirrors UnitTypeId pattern).
+ * The registry is owned by /runtime; the sim only reads numeric ids.
+ * 0xFFFF = unassigned (weapon has no projectile linked, can't fire).
+ */
+export const ProjectileTypeId = defineComponent({ value: Types.ui16 });
+
+/** Tag — this entity is a weapon instance (not a unit). Empty schema. */
+export const WeaponInstanceTag = defineComponent({});
+
+// ---------------------------------------------------------------------
+// Projectile entity components.
+// ---------------------------------------------------------------------
+
+/** Tag — this entity is an in-flight projectile. */
+export const ProjectileTag = defineComponent({});
+
+/**
+ * The owning weapon (so impacts can attribute damage). NO_ENTITY if the
+ * weapon has been destroyed mid-flight (cleanup tolerates this).
+ */
+export const ProjectileOwner = defineComponent({ value: Types.eid });
+
+/** Team id (so units don't damage themselves). */
+export const ProjectileTeam = defineComponent({ value: Types.ui8 });
+
+/** The entity this projectile is aimed at (used for guided + as range ref). */
+export const ProjectileTarget = defineComponent({ value: Types.eid });
+
+/**
+ * Delivery kind discriminator. Matches DeliveryKindValue below.
+ * Only ballistic + beam supported in v1 — others land in Phase 2.
+ */
+export const ProjectileKind = defineComponent({ value: Types.ui8 });
+
+/** Index into runtime ProjectileRegistry for type-level data (schematic). */
+export const ProjectileSchemaId = defineComponent({ value: Types.ui16 });
+
+/** Distance traveled in m (for range falloff in impactSystem). */
+export const ProjectileDistance = defineComponent({ value: Types.f32 });
+
+/** Spawn origin (for distance tracking + beam render line). */
+export const ProjectileOrigin = defineComponent({
+  x: Types.f32,
+  y: Types.f32,
+  z: Types.f32,
+});
+
+/** Max range — projectile despawns past this with no impact. */
+export const ProjectileMaxRange = defineComponent({ value: Types.f32 });
+
+/** Lifetime in ms remaining (beams die after one frame; ballistic after timeout). */
+export const ProjectileLifetimeMs = defineComponent({ value: Types.f32 });
+
+// ---------------------------------------------------------------------
+// Enums (closed unions stored as ui8). Authored as `as const` so callers
+// get type narrowing.
+// ---------------------------------------------------------------------
+
+export const WeaponStateValue = {
+  Idle: 0,
+  Charging: 1,
+  Bursting: 2,
+  Cooldown: 3,
+  /** Burst pause — waiting burst_delay_ms between shots. */
+  BurstWait: 4,
+} as const;
+export type WeaponStateValueT =
+  (typeof WeaponStateValue)[keyof typeof WeaponStateValue];
+
+export const DeliveryKindValue = {
+  Ballistic: 0,
+  Beam: 1,
+  Guided: 2,
+  Placed: 3,
+  Dropped: 4,
+} as const;
+export type DeliveryKindValueT =
+  (typeof DeliveryKindValue)[keyof typeof DeliveryKindValue];
 
 /**
  * Project-local alias for bitECS's world type so callers can write

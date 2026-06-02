@@ -27,17 +27,34 @@
  *   optimizing.
  */
 
-import { query } from "bitecs";
+import { hasComponent, query } from "bitecs";
 import type * as THREE from "three";
 
 import {
+  Dead,
   Position,
+  ProjectileTag,
   Rotation,
+  TeamId,
   UnitTypeId,
   Renderable,
+  WeaponInstanceTag,
   type SimWorld,
 } from "../../sim/world";
 import type { InstancedUnitRenderer } from "./InstancedUnitRenderer";
+
+/** Per-team RGB tint (multiplicative). Team 0 blue, team 1 red. */
+const TEAM_TINTS: readonly { r: number; g: number; b: number }[] = [
+  { r: 0.6, g: 0.85, b: 1.2 }, // team 0 → cool blue tint
+  { r: 1.4, g: 0.65, b: 0.5 }, // team 1 → warm red tint
+  { r: 1.0, g: 1.0, b: 1.0 }, // team 2+ neutral
+];
+
+const DEAD_TINT = { r: 0.25, g: 0.25, b: 0.25 };
+
+function tintFor(teamId: number): { r: number; g: number; b: number } {
+  return TEAM_TINTS[teamId] ?? TEAM_TINTS[TEAM_TINTS.length - 1];
+}
 
 /**
  * Maps (InstancedMesh, instanceId) → entityId so the SelectionController
@@ -133,9 +150,15 @@ export function runUnitRenderSystem(
   // Bucket entities by typeId. A Map<number, number[]> is fine for the
   // small entity counts Phase 1 targets; a typed-array pool would be the
   // next step if profiling shows GC pressure.
+  //
+  // Skip projectile + weapon-instance entities — they're Renderable but
+  // not units. Projectiles render via ProjectileRenderer; weapon
+  // instances have no visual of their own.
   const byType = new Map<number, number[]>();
   for (let i = 0; i < ents.length; i++) {
     const eid = ents[i];
+    if (hasComponent(world, eid, ProjectileTag)) continue;
+    if (hasComponent(world, eid, WeaponInstanceTag)) continue;
     const tid = UnitTypeId.value[eid];
     let arr = byType.get(tid);
     if (!arr) {
@@ -164,5 +187,15 @@ export function runUnitRenderSystem(
     }
     renderer.sync(tid, positions, rotations, count);
     if (index) index.setType(tid, eids);
+    // Per-instance team / dead tint. Slot order matches eids order.
+    for (let i = 0; i < count; i++) {
+      const eid = eids[i];
+      if (hasComponent(world, eid, Dead)) {
+        renderer.setColorAt(tid, i, DEAD_TINT.r, DEAD_TINT.g, DEAD_TINT.b);
+        continue;
+      }
+      const t = tintFor(TeamId.value[eid]);
+      renderer.setColorAt(tid, i, t.r, t.g, t.b);
+    }
   }
 }

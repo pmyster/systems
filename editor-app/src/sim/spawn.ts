@@ -38,6 +38,23 @@ import {
   MovementSpeed,
   Stance,
   StanceValue,
+  TargetOf,
+  ScanRange,
+  LeashOrigin,
+  OwnerEid,
+  WeaponHardpointIdx,
+  WeaponTiming,
+  WeaponTimingSpec,
+  WeaponHeat,
+  WeaponThermalSpec,
+  WeaponOverheatLock,
+  WeaponTarget,
+  WeaponRange,
+  WeaponInstanceTag,
+  WeaponStateValue,
+  ProjectileTypeId,
+  NO_ENTITY,
+  NO_PROJECTILE_TYPE,
   type SimWorld,
 } from "./world";
 
@@ -137,6 +154,121 @@ export function spawnUnit(world: SimWorld, p: SpawnParams): number {
 
   addComponent(world, eid, Stance);
   Stance.value[eid] = StanceValue.Defensive;
+
+  // ------------------------------------------------------------------
+  // Week 3 — combat-acquisition scaffolding.
+  //
+  // TargetOf is NO_ENTITY (=0) until the targetAcquisitionSystem
+  // assigns one. ScanRange defaults to a "feels-right" 80m so the
+  // mk01-vs-mk01 fight at the spawn distance (60m apart) acquires on
+  // tick 0 — keeps the 30-second engagement readable. Real values get
+  // overridden by MatchSpawner after looking up the unit's weapons.
+  //
+  // LeashOrigin pins where pursuit decisions get measured from. We
+  // stamp it to the spawn position so a unit ordered to attack a
+  // distant enemy doesn't infinitely chase it across the map.
+  // ------------------------------------------------------------------
+  addComponent(world, eid, TargetOf);
+  TargetOf.value[eid] = NO_ENTITY;
+
+  addComponent(world, eid, ScanRange);
+  ScanRange.value[eid] = 80;
+
+  addComponent(world, eid, LeashOrigin);
+  LeashOrigin.x[eid] = p.x;
+  LeashOrigin.z[eid] = p.z;
+
+  return eid;
+}
+
+/**
+ * Parameters for spawning ONE weapon-instance entity attached to a
+ * unit. Per A.3, units with N hardpoints get N weapon entities —
+ * each runs its own state machine and acquires its own target. The
+ * caller (MatchSpawner) reads the authored hardpoint + weapon part
+ * and translates the fields here.
+ */
+export interface SpawnWeaponParams {
+  readonly ownerEid: number;
+  /** Index into the unit schematic's `hardpoints[]` array. */
+  readonly hardpointIdx: number;
+  /** Numeric id from the ProjectileRegistry. NO_PROJECTILE_TYPE = inert. */
+  readonly projectileTypeId: number;
+  /** From WeaponPart.charge_time_ms ?? 0. */
+  readonly chargeTimeMs: number;
+  /** From WeaponPart.fire_rate_ms ?? 0. */
+  readonly fireRateMs: number;
+  /** From WeaponPart.burst_count ?? 1. */
+  readonly burstCount: number;
+  /** From WeaponPart.burst_delay_ms ?? fire_rate_ms ?? 0. */
+  readonly burstDelayMs: number;
+  /** From WeaponPart.cooldown_ms ?? 0. */
+  readonly cooldownMs: number;
+  /** From WeaponPart.barrel_thermal_capacity_MJ ?? 50. */
+  readonly thermalCapMj: number;
+  /** From WeaponPart.per_shot_heat_MJ ?? 0. */
+  readonly heatPerShotMj: number;
+  /** From WeaponPart.cooling_rate_MJs ?? 1. */
+  readonly coolRateMjs: number;
+  /** Derived effective range in meters. */
+  readonly rangeM: number;
+}
+
+/**
+ * Spawn one weapon-instance entity. Returns the new eid for tests +
+ * MatchSpawner logging. The weapon-instance entity carries NO
+ * Position/Rotation of its own — the render-side reads the owning
+ * unit's Position + the authored hardpoint local_position to place
+ * muzzle flashes + projectile origins.
+ */
+export function spawnWeaponInstance(
+  world: SimWorld,
+  p: SpawnWeaponParams,
+): number {
+  const eid = addEntity(world);
+
+  addComponent(world, eid, WeaponInstanceTag);
+
+  addComponent(world, eid, OwnerEid);
+  OwnerEid.value[eid] = p.ownerEid;
+
+  addComponent(world, eid, WeaponHardpointIdx);
+  WeaponHardpointIdx.value[eid] = p.hardpointIdx;
+
+  addComponent(world, eid, WeaponTiming);
+  WeaponTiming.state[eid] = WeaponStateValue.Idle;
+  WeaponTiming.timerMs[eid] = 0;
+  WeaponTiming.burstShotsFired[eid] = 0;
+
+  addComponent(world, eid, WeaponTimingSpec);
+  WeaponTimingSpec.chargeTimeMs[eid] = p.chargeTimeMs;
+  WeaponTimingSpec.fireRateMs[eid] = p.fireRateMs;
+  WeaponTimingSpec.burstCount[eid] = Math.max(1, p.burstCount);
+  WeaponTimingSpec.burstDelayMs[eid] = p.burstDelayMs;
+  WeaponTimingSpec.cooldownMs[eid] = p.cooldownMs;
+
+  addComponent(world, eid, WeaponHeat);
+  WeaponHeat.currentMj[eid] = 0;
+
+  addComponent(world, eid, WeaponThermalSpec);
+  WeaponThermalSpec.capacityMj[eid] = p.thermalCapMj;
+  WeaponThermalSpec.heatPerShotMj[eid] = p.heatPerShotMj;
+  WeaponThermalSpec.coolRateMjs[eid] = p.coolRateMjs;
+
+  addComponent(world, eid, WeaponOverheatLock);
+  WeaponOverheatLock.value[eid] = 0;
+
+  addComponent(world, eid, WeaponTarget);
+  WeaponTarget.value[eid] = NO_ENTITY;
+
+  addComponent(world, eid, WeaponRange);
+  WeaponRange.value[eid] = p.rangeM;
+
+  addComponent(world, eid, ProjectileTypeId);
+  ProjectileTypeId.value[eid] =
+    p.projectileTypeId >= 0 && p.projectileTypeId < NO_PROJECTILE_TYPE
+      ? p.projectileTypeId
+      : NO_PROJECTILE_TYPE;
 
   return eid;
 }
