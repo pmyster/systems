@@ -25,10 +25,18 @@ import {
 } from "./loader/mapLoader";
 import { pickAndLoadSchematics } from "./loader/schematicLoader";
 import { MatchLoader, type LoadProgress, type MatchData } from "./MatchLoader";
+import { pickAndLoadReplay, type ReplaySession } from "./replay/ReplayPlayer";
 
 export interface MatchSetupScreenProps {
-  /** Called once the loader finishes; the parent mounts the runtime scene. */
-  readonly onLoaded: (data: MatchData) => void;
+  /**
+   * Called once the loader finishes; the parent mounts the runtime scene.
+   *
+   * `replaySession` is non-null when the user loaded a `.replay.json`
+   * and then re-picked the matching map + schematics — the parent puts
+   * MatchScene into replay-mode (input disabled, command bus pre-loaded,
+   * final-hash drift check at end).
+   */
+  readonly onLoaded: (data: MatchData, replaySession?: ReplaySession | null) => void;
 }
 
 export function MatchSetupScreen(
@@ -51,6 +59,14 @@ export function MatchSetupScreen(
   const [progress, setProgress] = useState<LoadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * If non-null, the user loaded a replay file and is preparing to
+   * play it back. They still need to pick the matching map + schematics
+   * because v1 of the asset-resolver doesn't know how to find a project
+   * by name alone (Week 5 backlog: resolve mapProjectName + asset keys
+   * against a recent-projects manifest).
+   */
+  const [replaySession, setReplaySession] = useState<ReplaySession | null>(null);
 
   const onPickMap = useCallback(async () => {
     setError(null);
@@ -92,13 +108,27 @@ export function MatchSetupScreen(
       const data = await loader.load(mapDir, schematicPaths, (p) => {
         setProgress(p);
       });
-      onLoaded(data);
+      // Forward the (possibly-null) replay session — non-null means
+      // the user wants this match to play back the recorded log.
+      onLoaded(data, replaySession);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(`Match load failed: ${msg}`);
       setBusy(false);
     }
-  }, [mapDir, schematicPaths, onLoaded]);
+  }, [mapDir, schematicPaths, onLoaded, replaySession]);
+
+  const onLoadReplay = useCallback(async () => {
+    setError(null);
+    try {
+      const session = await pickAndLoadReplay();
+      if (session === null) return; // user cancelled
+      setReplaySession(session);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(`Replay load failed: ${msg}`);
+    }
+  }, []);
 
   const canLoad = mapDir !== null && !busy;
 
@@ -117,6 +147,17 @@ export function MatchSetupScreen(
             : mapDir
               ? mapDir
               : "no map picked"}
+        </div>
+      </section>
+
+      <section style={SECTION_STYLE}>
+        <button type="button" onClick={onLoadReplay} disabled={busy} style={BUTTON_STYLE}>
+          Load Replay…
+        </button>
+        <div style={CHIP_STYLE}>
+          {replaySession
+            ? `replay: ${replaySession.file.mapProjectName} · ${replaySession.file.commands.length} cmds · ${replaySession.file.finalTickCount} ticks`
+            : "no replay loaded"}
         </div>
       </section>
 

@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 mod map_project;
+mod replay_io;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -172,6 +173,9 @@ pub fn run() {
             map_project::autosave_map_project,
             map_project::list_user_prefabs,
             map_project::read_user_prefab_bytes,
+            replay_io::save_replay_file,
+            replay_io::load_replay_file,
+            replay_io::save_video_clip,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

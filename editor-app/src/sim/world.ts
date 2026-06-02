@@ -346,3 +346,132 @@ export type SimWorld = World;
 export function createSimWorld(): SimWorld {
   return createWorld();
 }
+
+// ---------------------------------------------------------------------
+// COMPONENT_REGISTRY — every entry here participates in determinism
+// hashing (see /sim/replay.ts → hashSimState).
+//
+// If you add a component that's RENDER-DERIVED (no sim consequence — a
+// muzzle-flash timer, a UI tag) leave it OUT and add a comment in the
+// component definition above saying why. The registry is the SOURCE of
+// truth for "what is sim state"; anything not here cannot influence
+// replay outcome and is invisible to the hash.
+//
+// Adaptive-over-specific (CLAUDE.md): the hash iterates THIS array, not
+// a hardcoded list of components inside replay.ts. A new sim component
+// becomes visible to the hash by one line here — no second edit needed
+// in the hasher. Conversely, a non-determinism-relevant component stays
+// out by simple omission, which is the desired loud-over-silent gate.
+//
+// Field order within a component is the order the keys appear here. Keep
+// it stable; a reordering changes the hash output for the SAME world
+// state, which would falsely look like drift.
+// ---------------------------------------------------------------------
+
+/** One field within a component's hashing record. */
+export interface ComponentRegistryField {
+  readonly name: string;
+  /** The typed-array storage bucket on the component. */
+  readonly arr: ArrayLike<number>;
+}
+
+/** One component participating in determinism hashing. */
+export interface ComponentRegistryEntry {
+  readonly name: string;
+  /** Used with `hasComponent(world, eid, component)` to filter live entities. */
+  readonly component: object;
+  readonly fields: readonly ComponentRegistryField[];
+}
+
+export const COMPONENT_REGISTRY: readonly ComponentRegistryEntry[] = [
+  // Foundation
+  { name: "Position", component: Position, fields: [
+    { name: "x", arr: Position.x }, { name: "y", arr: Position.y }, { name: "z", arr: Position.z },
+  ]},
+  { name: "Rotation", component: Rotation, fields: [
+    { name: "x", arr: Rotation.x }, { name: "y", arr: Rotation.y },
+    { name: "z", arr: Rotation.z }, { name: "w", arr: Rotation.w },
+  ]},
+  { name: "Velocity", component: Velocity, fields: [
+    { name: "x", arr: Velocity.x }, { name: "y", arr: Velocity.y }, { name: "z", arr: Velocity.z },
+  ]},
+  { name: "Health", component: Health, fields: [
+    { name: "current", arr: Health.current }, { name: "max", arr: Health.max },
+  ]},
+  { name: "TeamId", component: TeamId, fields: [{ name: "value", arr: TeamId.value }] },
+  { name: "UnitTypeId", component: UnitTypeId, fields: [{ name: "value", arr: UnitTypeId.value }] },
+  // Selected is INTENTIONALLY EXCLUDED — UI-only tag, no sim consequence.
+  // Renderable is INTENTIONALLY EXCLUDED — render-mirror flag only.
+  // Movement
+  { name: "MovementTarget", component: MovementTarget, fields: [
+    { name: "x", arr: MovementTarget.x }, { name: "y", arr: MovementTarget.y },
+    { name: "z", arr: MovementTarget.z }, { name: "hasTarget", arr: MovementTarget.hasTarget },
+  ]},
+  { name: "MovementSpeed", component: MovementSpeed, fields: [{ name: "value", arr: MovementSpeed.value }] },
+  { name: "Stance", component: Stance, fields: [{ name: "value", arr: Stance.value }] },
+  // Combat — unit-level
+  { name: "TargetOf", component: TargetOf, fields: [{ name: "value", arr: TargetOf.value }] },
+  { name: "ScanRange", component: ScanRange, fields: [{ name: "value", arr: ScanRange.value }] },
+  { name: "LeashOrigin", component: LeashOrigin, fields: [
+    { name: "x", arr: LeashOrigin.x }, { name: "z", arr: LeashOrigin.z },
+  ]},
+  { name: "Dead", component: Dead, fields: [{ name: "atTick", arr: Dead.atTick }] },
+  // InCombat is a tag — presence matters; encode as "tag" with no fields.
+  // Combat — weapon instance
+  { name: "OwnerEid", component: OwnerEid, fields: [{ name: "value", arr: OwnerEid.value }] },
+  { name: "WeaponHardpointIdx", component: WeaponHardpointIdx, fields: [{ name: "value", arr: WeaponHardpointIdx.value }] },
+  { name: "WeaponTiming", component: WeaponTiming, fields: [
+    { name: "state", arr: WeaponTiming.state },
+    { name: "timerMs", arr: WeaponTiming.timerMs },
+    { name: "burstShotsFired", arr: WeaponTiming.burstShotsFired },
+  ]},
+  { name: "WeaponTimingSpec", component: WeaponTimingSpec, fields: [
+    { name: "chargeTimeMs", arr: WeaponTimingSpec.chargeTimeMs },
+    { name: "fireRateMs", arr: WeaponTimingSpec.fireRateMs },
+    { name: "burstCount", arr: WeaponTimingSpec.burstCount },
+    { name: "burstDelayMs", arr: WeaponTimingSpec.burstDelayMs },
+    { name: "cooldownMs", arr: WeaponTimingSpec.cooldownMs },
+  ]},
+  { name: "WeaponHeat", component: WeaponHeat, fields: [{ name: "currentMj", arr: WeaponHeat.currentMj }] },
+  { name: "WeaponThermalSpec", component: WeaponThermalSpec, fields: [
+    { name: "capacityMj", arr: WeaponThermalSpec.capacityMj },
+    { name: "heatPerShotMj", arr: WeaponThermalSpec.heatPerShotMj },
+    { name: "coolRateMjs", arr: WeaponThermalSpec.coolRateMjs },
+  ]},
+  { name: "WeaponOverheatLock", component: WeaponOverheatLock, fields: [{ name: "value", arr: WeaponOverheatLock.value }] },
+  { name: "WeaponTarget", component: WeaponTarget, fields: [{ name: "value", arr: WeaponTarget.value }] },
+  { name: "WeaponRange", component: WeaponRange, fields: [{ name: "value", arr: WeaponRange.value }] },
+  { name: "ProjectileTypeId", component: ProjectileTypeId, fields: [{ name: "value", arr: ProjectileTypeId.value }] },
+  // Projectile entity
+  { name: "ProjectileOwner", component: ProjectileOwner, fields: [{ name: "value", arr: ProjectileOwner.value }] },
+  { name: "ProjectileTeam", component: ProjectileTeam, fields: [{ name: "value", arr: ProjectileTeam.value }] },
+  { name: "ProjectileTarget", component: ProjectileTarget, fields: [{ name: "value", arr: ProjectileTarget.value }] },
+  { name: "ProjectileKind", component: ProjectileKind, fields: [{ name: "value", arr: ProjectileKind.value }] },
+  { name: "ProjectileSchemaId", component: ProjectileSchemaId, fields: [{ name: "value", arr: ProjectileSchemaId.value }] },
+  { name: "ProjectileDistance", component: ProjectileDistance, fields: [{ name: "value", arr: ProjectileDistance.value }] },
+  { name: "ProjectileOrigin", component: ProjectileOrigin, fields: [
+    { name: "x", arr: ProjectileOrigin.x }, { name: "y", arr: ProjectileOrigin.y }, { name: "z", arr: ProjectileOrigin.z },
+  ]},
+  { name: "ProjectileMaxRange", component: ProjectileMaxRange, fields: [{ name: "value", arr: ProjectileMaxRange.value }] },
+  { name: "ProjectileLifetimeMs", component: ProjectileLifetimeMs, fields: [{ name: "value", arr: ProjectileLifetimeMs.value }] },
+];
+
+/**
+ * Tag components (empty schemas) that still influence sim outcome and
+ * therefore must appear in the hash via "presence/absence" markers.
+ * Kept as a separate list because they have no fields to enumerate but
+ * their presence/absence is determinism-relevant.
+ *
+ * EXCLUDED on purpose:
+ *   - Selected, Renderable — UI/render-only.
+ *   - ProjectileTag, WeaponInstanceTag — discriminators consumed only
+ *     by render-side queries; sim systems use ProjectileSchemaId /
+ *     OwnerEid for their own filtering and never branch on these tags.
+ *     They are part of the entity's "shape" but never change values
+ *     mid-life, so excluding them does not hide drift.
+ *   - InCombat — derived per-tick from TargetOf; presence here would
+ *     double-count the same state.
+ */
+export const COMPONENT_TAG_REGISTRY: readonly { name: string; component: object }[] = [
+  // (Empty for v1. Reserve for future tags whose presence-only state matters.)
+];

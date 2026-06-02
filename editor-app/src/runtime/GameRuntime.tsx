@@ -60,6 +60,11 @@ import { ProjectileRenderer } from "./scene/combat/ProjectileRenderer";
 import { CombatVfxManager } from "./scene/combat/CombatVfxManager";
 import type { ProjectileSchematic } from "../types/projectile";
 import type { ArmorZone, ZoneArmor } from "../types/vulnerability";
+import { ReplayRecorder } from "./replay/ReplayRecorder";
+import { verifyReplayDrift, type ReplaySession } from "./replay/ReplayPlayer";
+import { ClipRecorder } from "./recording/ClipRecorder";
+import { AudioBus, AudioCue } from "./audio/AudioBus";
+import type { SimEvent } from "../sim/events";
 
 const HZ = 30;
 const SEED = 42;
@@ -91,27 +96,65 @@ const TEAM_SPACING_M = 60;
 
 export function GameRuntime(): React.JSX.Element {
   const [match, setMatch] = useState<MatchData | null>(null);
+  /**
+   * If non-null we're in REPLAY MODE — the loaded session was paired
+   * with a matching match config. The MatchScene gates input controllers
+   * off, pre-loads the command bus from the session, and runs a drift
+   * check when the recorded tick count is reached.
+   */
+  const [replaySession, setReplaySession] = useState<ReplaySession | null>(null);
 
   if (match === null) {
-    return <MatchSetupScreen onLoaded={setMatch} />;
+    return (
+      <MatchSetupScreen
+        onLoaded={(m, session) => {
+          setMatch(m);
+          setReplaySession(session ?? null);
+        }}
+      />
+    );
   }
 
   return (
     <MatchScene
       match={match}
-      onExit={() => setMatch(null)}
+      replaySession={replaySession}
+      onExit={() => {
+        setMatch(null);
+        setReplaySession(null);
+      }}
     />
   );
 }
 
 interface MatchSceneProps {
   readonly match: MatchData;
+  readonly replaySession: ReplaySession | null;
   readonly onExit: () => void;
 }
 
 function MatchScene(props: MatchSceneProps): React.JSX.Element {
-  const { match, onExit } = props;
+  const { match, replaySession, onExit } = props;
   const mountRef = useRef<HTMLDivElement | null>(null);
+  // Recording HUD signals — driven by refs (inside RAF) and surfaced to React via state.
+  const [recHud, setRecHud] = useState<{ recording: boolean; durSec: number; clipBufSec: number }>({
+    recording: false,
+    durSec: 0,
+    clipBufSec: 0,
+  });
+  const [replayHud, setReplayHud] = useState<{ active: boolean; finalTick: number; driftStatus: "pending" | "match" | "drift" | null }>({
+    active: replaySession !== null,
+    finalTick: replaySession?.file.finalTickCount ?? 0,
+    driftStatus: replaySession !== null ? "pending" : null,
+  });
+  const [toast, setToast] = useState<string | null>(null);
+
+  // Auto-clear toast after 4s — same UX as the editor's save toasts.
+  useEffect(() => {
+    if (toast === null) return;
+    const id = window.setTimeout(() => setToast(null), 4000);
+    return () => window.clearTimeout(id);
+  }, [toast]);
   const [hud, setHud] = useState<HudReadout>({
     tick: 0,
     fps: 0,
@@ -205,7 +248,65 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
     const instanceIndex = new InstanceIndex();
 
     // --- Sim -------------------------------------------------------------
-    const sim = new SimRunner({ hz: HZ, seed: SEED });
+    // In replay mode we honour the recording's seed exactly — that's the
+    // determinism contract. Otherwise we use the local default.
+    const effectiveSeed = replaySession?.file.simSeed ?? SEED;
+    const sim = new SimRunner({ hz: HZ, seed: effectiveSeed });
+
+    // --- Audio bus + listener attached to camera ------------------------
+    const audioListener = new THREE.AudioListener();
+    camera.add(audioListener);
+    const audioBus = new AudioBus(audioListener);
+    // The very first user gesture is required to start the AudioContext
+    // on most browsers. We attach a one-shot resume call.
+    const onFirstGesture = (): void => {
+      void audioBus.resume();
+      window.removeEventListener("pointerdown", onFirstGesture);
+      window.removeEventListener("keydown", onFirstGesture);
+    };
+    window.addEventListener("pointerdown", onFirstGesture, { once: true });
+    window.addEventListener("keydown", onFirstGesture, { once: true });
+
+    // --- Clip recorder (rolling 60s) ------------------------------------
+    const clipRecorder = new ClipRecorder(renderer.domElement);
+    clipRecorder.start();
+
+    // --- Replay recorder (lockstep command log) -------------------------
+    // We always construct it; F11 toggles whether it's actively recording.
+    // Team spawn descriptors are LIVE-MODE only; in replay mode we record
+    // nothing (the source replay already exists on disk).
+    const replayRecorder = new ReplayRecorder({
+      runner: sim,
+      seed: effectiveSeed,
+      mapProjectName: match.map.manifest.name,
+      schematicAssetKeys: match.schematics.map((s) => s.unit.id),
+      teams: [
+        {
+          teamId: TEAM_0,
+          spawnYawRad: Math.PI / 2,
+          spawnCenterXZ: [
+            terrain.widthM / 2 - TEAM_SPACING_M / 2,
+            terrain.depthM / 2,
+          ],
+          unitTypeIdxs: match.schematics.map((_, i) => i),
+        },
+        {
+          teamId: TEAM_1,
+          spawnYawRad: -Math.PI / 2,
+          spawnCenterXZ: [
+            terrain.widthM / 2 + TEAM_SPACING_M / 2,
+            terrain.depthM / 2,
+          ],
+          unitTypeIdxs: match.schematics.map((_, i) => i),
+        },
+      ],
+    });
+
+    // --- Replay playback: pre-load the command bus ----------------------
+    let driftChecked = false;
+    if (replaySession) {
+      sim.commands.loadFromLog(replaySession.file.commands);
+    }
 
     // --- Initial spawn ---------------------------------------------------
     const tileM = match.map.manifest.terrain.tileSizeM ?? 1;
@@ -361,6 +462,14 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
         navHandle = handle;
         pathFollower = new PathFollowController(sim.world, handle);
 
+        // Replay mode: pathfinder still mounts (needed by movement
+        // arrival path) but selection + command controllers DO NOT —
+        // the lockstep log is the only input source during playback.
+        if (replaySession !== null) {
+          setHud((h) => ({ ...h, navMeshStatus: "ready" }));
+          return;
+        }
+
         selection = new SelectionController({
           world: sim.world,
           camera,
@@ -396,6 +505,51 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
           navMeshError: msg,
         }));
       });
+
+    // --- Hotkeys: F10 = save clip, F11 = toggle replay record ----------
+    const onKeyDown = (e: KeyboardEvent): void => {
+      // F10 — save last 60s clip.
+      if (e.key === "F10") {
+        e.preventDefault();
+        clipRecorder
+          .saveLast60s()
+          .then((path) => {
+            if (path) setToast(`Clip saved: ${path}`);
+          })
+          .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("[GameRuntime] clip save failed", err);
+            setToast(`Clip save failed: ${msg}`);
+          });
+        return;
+      }
+      // F11 — toggle replay recording. Disabled in replay mode (would be
+      // recording the replay-of-the-replay, which is just the source file).
+      if (e.key === "F11") {
+        e.preventDefault();
+        if (replaySession !== null) {
+          setToast("Recording disabled in replay mode");
+          return;
+        }
+        if (replayRecorder.isRecording()) {
+          replayRecorder
+            .stopAndSave()
+            .then((path) => {
+              if (path) setToast(`Replay saved: ${path}`);
+            })
+            .catch((err: unknown) => {
+              const msg = err instanceof Error ? err.message : String(err);
+              console.error("[GameRuntime] replay save failed", err);
+              setToast(`Replay save failed: ${msg}`);
+            });
+        } else {
+          replayRecorder.start();
+          setToast("Recording started");
+        }
+        return;
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
 
     // --- Resize ----------------------------------------------------------
     const onResize = (): void => {
@@ -447,6 +601,59 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
       vfx.update();
       vfx.pruneDamageNumbers(performance.now(), 800);
 
+      // Audio cue dispatch (Phase 1 Week 4 placeholder synth).
+      // Distance attenuation is handled inside AudioBus; here we only
+      // map sim event → cue id and supply the world position.
+      for (let i = 0; i < drained.length; i++) {
+        const ev: SimEvent = drained[i];
+        switch (ev.kind) {
+          case "weapon_fired":
+            audioBus.play(
+              AudioCue.WeaponFireShort,
+              new THREE.Vector3(ev.x, ev.y, ev.z),
+            );
+            break;
+          case "impact":
+            audioBus.play(
+              AudioCue.ImpactKinetic,
+              new THREE.Vector3(ev.x, ev.y, ev.z),
+            );
+            break;
+          case "death":
+            audioBus.play(AudioCue.UnitDeath);
+            break;
+          // projectile_spawned / projectile_despawned: render-only, no audio.
+          default:
+            break;
+        }
+      }
+
+      // Replay drift verification — fired once when playback reaches
+      // (or passes) the recorded final tick count.
+      if (
+        replaySession &&
+        !driftChecked &&
+        sim.clock.tickId >= replaySession.file.finalTickCount
+      ) {
+        driftChecked = true;
+        verifyReplayDrift(sim.world, replaySession.file.finalStateHash)
+          .then(({ matched, actualHash }) => {
+            if (matched) {
+              setReplayHud((h) => ({ ...h, driftStatus: "match" }));
+              setToast("Replay verified — no drift");
+            } else {
+              setReplayHud((h) => ({ ...h, driftStatus: "drift" }));
+              setToast(
+                `Replay DRIFT — expected ${replaySession.file.finalStateHash.slice(0, 12)}…, got ${actualHash.slice(0, 12)}…`,
+              );
+            }
+          })
+          .catch((err: unknown) => {
+            console.error("[GameRuntime] drift check failed", err);
+          });
+      }
+
+
       // ECS → InstancedMesh sync + InstanceIndex rebuild for selection.
       runUnitRenderSystem(sim.world, unitRenderer, instanceIndex);
       projRenderer.update(sim.world);
@@ -482,6 +689,18 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
           activeProjectiles: tally.activeProjectiles,
           matchWinner: winner,
         }));
+        // Recording HUD — duration since start + current clip buffer.
+        const recActive = replayRecorder.isRecording();
+        const startedIso = replayRecorder.getStartedAtIso();
+        const durSec =
+          recActive && startedIso
+            ? (Date.now() - new Date(startedIso).getTime()) / 1000
+            : 0;
+        setRecHud({
+          recording: recActive,
+          durSec,
+          clipBufSec: clipRecorder.bufferedSec(),
+        });
         // Surface current damage numbers to the HUD overlay.
         const dn = vfx.getDamageNumbers();
         setDamageNumbers(dn.map((d) => ({
@@ -500,6 +719,8 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
       disposed = true;
       cancelAnimationFrame(rafId);
       window.removeEventListener("resize", onResize);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("pointerdown", onFirstGesture);
       ro.disconnect();
       renderer.domElement.removeEventListener("contextmenu", onContextMenu);
       command?.dispose();
@@ -513,6 +734,12 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
       terrain.dispose();
       physics.dispose();
       match.prefabBank.dispose();
+      // Recording teardown order: stop active recording (no save), then
+      // dispose audio so the AudioContext doesn't outlive its listener.
+      replayRecorder.cancel();
+      clipRecorder.dispose();
+      audioBus.dispose();
+      camera.remove(audioListener);
       renderer.dispose();
       if (renderer.domElement.parentNode === mount) {
         mount.removeChild(renderer.domElement);
@@ -523,6 +750,31 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
 
   return (
     <div ref={mountRef} className="game-runtime-root" style={ROOT_STYLE}>
+      {/* REC indicator — top-left, only when actively recording. */}
+      {recHud.recording && (
+        <div style={REC_INDICATOR_STYLE} aria-label="Replay recording indicator">
+          <span style={REC_DOT_STYLE}>●</span> REC {recHud.durSec.toFixed(1)}s
+        </div>
+      )}
+      {/* Replay-mode banner — top-center when playing back. */}
+      {replayHud.active && (
+        <div style={REPLAY_BANNER_STYLE} aria-label="Replay playback banner">
+          REPLAY {Math.min(hud.tick, replayHud.finalTick)}/{replayHud.finalTick}
+          {replayHud.driftStatus === "match" && " (verified)"}
+          {replayHud.driftStatus === "drift" && " (DRIFT)"}
+        </div>
+      )}
+      {/* Hotkey hints — bottom-left corner. */}
+      <div style={HOTKEY_HINTS_STYLE} aria-hidden>
+        <div>[F10] Save last 60s clip ({recHud.clipBufSec}s buffered)</div>
+        {replayHud.active ? null : (
+          <div>
+            [F11] {recHud.recording ? "Stop + save" : "Start"} replay recording
+          </div>
+        )}
+      </div>
+      {/* Transient toast — auto-clears after a few seconds via effect below. */}
+      {toast && <div style={TOAST_STYLE}>{toast}</div>}
       <div style={HUD_STYLE} aria-label="Runtime HUD">
         <div>Map: {match.map.manifest.name}</div>
         <div>
@@ -758,6 +1010,73 @@ const DAMAGE_OVERLAY_STYLE: React.CSSProperties = {
   flexDirection: "column",
   gap: 1,
   minWidth: 70,
+};
+
+const REC_INDICATOR_STYLE: React.CSSProperties = {
+  position: "absolute",
+  top: 10,
+  left: 10,
+  padding: "4px 10px",
+  background: "rgba(0,0,0,0.75)",
+  color: "#ff7878",
+  border: "1px solid #6e2d2d",
+  borderRadius: 3,
+  font: "bold 12px ui-monospace, SFMono-Regular, Menlo, monospace",
+  pointerEvents: "none",
+  userSelect: "none",
+};
+
+const REC_DOT_STYLE: React.CSSProperties = {
+  color: "#ff3030",
+  marginRight: 4,
+};
+
+const REPLAY_BANNER_STYLE: React.CSSProperties = {
+  position: "absolute",
+  top: 10,
+  left: "50%",
+  transform: "translateX(-50%)",
+  padding: "4px 12px",
+  background: "rgba(0,0,0,0.75)",
+  color: "#ffd05a",
+  border: "1px solid #6e5a2d",
+  borderRadius: 3,
+  font: "bold 12px ui-monospace, SFMono-Regular, Menlo, monospace",
+  pointerEvents: "none",
+  userSelect: "none",
+};
+
+const HOTKEY_HINTS_STYLE: React.CSSProperties = {
+  position: "absolute",
+  bottom: 10,
+  left: 10,
+  padding: "4px 8px",
+  background: "rgba(0,0,0,0.55)",
+  color: "#9aa3b0",
+  border: "1px solid #2a2a2f",
+  borderRadius: 3,
+  font: "11px ui-monospace, SFMono-Regular, Menlo, monospace",
+  pointerEvents: "none",
+  userSelect: "none",
+  display: "flex",
+  flexDirection: "column",
+  gap: 2,
+};
+
+const TOAST_STYLE: React.CSSProperties = {
+  position: "absolute",
+  bottom: 60,
+  left: 10,
+  padding: "6px 12px",
+  background: "rgba(20,28,40,0.92)",
+  color: "#e8eef5",
+  border: "1px solid #3a4252",
+  borderRadius: 3,
+  font: "12px ui-monospace, SFMono-Regular, Menlo, monospace",
+  pointerEvents: "none",
+  userSelect: "none",
+  maxWidth: 600,
+  whiteSpace: "pre-wrap",
 };
 
 const MATCH_END_STYLE: React.CSSProperties = {

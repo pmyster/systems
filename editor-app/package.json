@@ -13,8 +13,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
-    "test:determinism": "vitest run src/sim/simRunner.test.ts",
-    "check:sim-purity": "npx tsx scripts/check-sim-purity.mts"
+    "test:determinism": "vitest run src/sim/simRunner.test.ts src/sim/determinism.test.ts",
+    "check:sim-purity": "npx tsx scripts/check-sim-purity.mts",
+    "verify": "tsc --noEmit && npm run check:sim-purity && npm test && npm run test:determinism && npm run build"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.12.0",
