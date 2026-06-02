@@ -9,6 +9,7 @@ import { MapEditor } from "./components/MapEditor/MapEditor";
 import { MenuBar } from "./components/MenuBar";
 import { MeshWorkspace } from "./components/MeshWorkspace";
 import { SettingsModal } from "./components/SettingsModal";
+import { GameRuntime } from "./runtime/GameRuntime";
 import { startAutosave, getAutosavePath, type AutosaveHandle } from "./file-ops";
 import {
   UnitStateProvider,
@@ -70,6 +71,7 @@ function ModeTabs({ onOpenSettings }: { onOpenSettings: () => void }) {
   const tabs: ReadonlyArray<{ id: AppMode; label: string }> = [
     { id: "unit", label: "Unit Editor" },
     { id: "map", label: "Map Editor" },
+    { id: "play", label: "Play" },
   ];
 
   return (
@@ -230,7 +232,7 @@ function AppShell() {
           </div>
         )}
       </header>
-      {mode === "unit" ? (
+      {mode === "unit" && (
         <main className="workspace">
           <section className="pane pane-left" aria-label="Mesh workspace">
             <div className="pane-header">Mesh Workspace</div>
@@ -256,19 +258,26 @@ function AppShell() {
             </div>
           </section>
         </main>
-      ) : (
+      )}
+      {mode === "map" && (
         <main className="workspace workspace-map">
           <MapEditor />
         </main>
       )}
+      {mode === "play" && (
+        <main className="workspace workspace-play">
+          <GameRuntime />
+        </main>
+      )}
       <footer className="app-footer">
         <span className="status">
-          {mode === "unit"
-            ? (state.file.path
-                ? "Path: " + state.file.path
-                : "Unsaved - File then Save to set a path") +
-              (isDirty ? " | unsaved changes" : "")
-            : "Map Editor (Day 1 scaffold)"}
+          {mode === "unit" &&
+            (state.file.path
+              ? "Path: " + state.file.path
+              : "Unsaved - File then Save to set a path") +
+              (isDirty ? " | unsaved changes" : "")}
+          {mode === "map" && "Map Editor (Day 1 scaffold)"}
+          {mode === "play" && "Play (Week 1A runtime foundation)"}
         </span>
       </footer>
     </div>

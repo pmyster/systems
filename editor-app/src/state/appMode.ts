@@ -13,7 +13,7 @@
 
 import { create } from "zustand";
 
-export type AppMode = "unit" | "map";
+export type AppMode = "unit" | "map" | "play";
 
 interface AppModeState {
   mode: AppMode;
