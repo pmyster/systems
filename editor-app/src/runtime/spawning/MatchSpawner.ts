@@ -37,6 +37,7 @@ import type {
   UnitTypeRegistry,
 } from "../UnitTypeRegistry";
 import type { PrefabBank } from "../loader/prefabBank";
+import type { LoadDiagnostics } from "../loader/LoadDiagnostics";
 import {
   NO_PROJECTILE_TYPE,
   type ProjectileRegistry,
@@ -102,6 +103,15 @@ export function spawnInitialUnits(
   schematics?: readonly LoadedSchematic[],
   /** Initial facing yaw radians (rotation around Y axis). 0 = +Z forward. */
   facingYawRad?: number,
+  /**
+   * Optional diagnostics collector — same one MatchLoader threads
+   * through the load chain. Spawn-time skips (no mesh_asset, prefab
+   * missing) push here so the HUD's "Load warnings" chip surfaces the
+   * cause→effect chain (e.g. "prefab failed → spawner skipped → 0
+   * entities") instead of the user seeing only the empty result.
+   * Optional for the existing test bed.
+   */
+  diagnostics?: LoadDiagnostics,
 ): number {
   const spacingM = plan.spacingM ?? DEFAULT_SPACING_M;
   const allTypes = registry.all();
@@ -115,22 +125,35 @@ export function spawnInitialUnits(
   const renderableTypes: UnitTypeEntry[] = [];
   for (const type of allTypes) {
     if (!type.meshRef) {
-      console.warn(
-        `[MatchSpawner] unit type "${type.schematicId}" has no mesh_asset; skipping spawn.`,
-      );
+      const msg = `unit type "${type.schematicId}" has no mesh_asset; skipping spawn.`;
+      if (diagnostics) diagnostics.add({ source: "MatchSpawner", message: msg });
+      else console.warn(`[MatchSpawner] ${msg}`);
       continue;
     }
     const prefab = prefabBank.get(type.meshRef);
     if (!prefab) {
-      console.warn(
-        `[MatchSpawner] no prefab cached for unit type "${type.schematicId}"; skipping spawn.`,
-      );
+      const msg = `no prefab cached for unit type "${type.schematicId}"; skipping spawn (see prior prefabBank warning for the underlying cause).`;
+      if (diagnostics) diagnostics.add({ source: "MatchSpawner", message: msg });
+      else console.warn(`[MatchSpawner] ${msg}`);
       continue;
     }
     renderer.register(type.typeId, prefab, DEFAULT_MAX_INSTANCES_PER_TYPE);
     renderableTypes.push(type);
   }
-  if (renderableTypes.length === 0) return 0;
+  if (renderableTypes.length === 0) {
+    // The cause-chain ended in zero renderable types — every type was
+    // skipped above. Push a SUMMARY entry so the HUD chip shows a
+    // top-level "everyone got skipped" line in addition to the
+    // per-type detail. Without this, the user sees "0 entities" and
+    // the per-type lines might scroll past in long-warning cases.
+    if (diagnostics) {
+      diagnostics.add({
+        source: "MatchSpawner",
+        message: `all ${allTypes.length} unit type(s) were skipped at spawn time — nothing will render. See preceding entries for per-type causes.`,
+      });
+    }
+    return 0;
+  }
 
   // -------------------------------------------------------------------
   // Phase 2: spawn entities. Each type's instances form a small square

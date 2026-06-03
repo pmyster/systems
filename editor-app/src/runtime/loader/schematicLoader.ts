@@ -1,5 +1,5 @@
 /**
- * schematicLoader — Phase 1 Week 1B
+ * schematicLoader — Phase 1 Week 1B (Week 3 hardening pass)
  *
  * Read + Zod-parse one or more unit Schematic JSON files for the runtime.
  *
@@ -16,8 +16,11 @@
  *     load path normally, but for the runtime we expose the parsed shape as-is
  *     because vulnerability isn't read by Week 1B (no combat yet)
  *
- * Loud-over-silent: every dropped file emits a console.warn carrying the
- * path + the Zod issues, so authoring problems surface during dev.
+ * Loud-over-silent (CLAUDE.md rule #1): every dropped file emits both a
+ * console.warn AND a structured LoadDiagnostics entry (when a collector
+ * is provided) so authoring problems surface in the HUD's "Load
+ * warnings" chip — NOT only in the dev console where most owners never
+ * look.
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -25,6 +28,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
 import { UnitSchematicSchema } from "../../lib/zod-schemas";
 import type { UnitSchematic } from "../../types/unit";
+import type { LoadDiagnostics } from "./LoadDiagnostics";
 
 export interface LoadedSchematic {
   /** Absolute path of the JSON file. */
@@ -42,9 +46,12 @@ export interface LoadedSchematic {
 /**
  * Show a multi-select JSON file picker, then load + parse each selection.
  * Returns the successfully-loaded schematics; failures are logged but do
- * NOT abort the batch.
+ * NOT abort the batch. Per-file failures push to the optional `diagnostics`
+ * collector so they surface in the HUD.
  */
-export async function pickAndLoadSchematics(): Promise<LoadedSchematic[]> {
+export async function pickAndLoadSchematics(
+  diagnostics?: LoadDiagnostics,
+): Promise<LoadedSchematic[]> {
   const picked = await openDialog({
     multiple: true,
     directory: false,
@@ -59,16 +66,21 @@ export async function pickAndLoadSchematics(): Promise<LoadedSchematic[]> {
     : typeof picked === "string"
       ? [picked]
       : [];
-  return await loadSchematicsByPaths(paths);
+  return await loadSchematicsByPaths(paths, diagnostics);
 }
 
 /**
  * Load + parse a known list of paths. Exposed so the React shell can wire
  * up batched loads from any source (drag-drop, Recent Units, etc.) without
  * going through the dialog.
+ *
+ * Per-file failures push a structured entry into the optional
+ * `diagnostics` collector. Per CLAUDE.md rule #1 the failure surfaces in
+ * BOTH places — console (existing path) AND the collector (new HUD path).
  */
 export async function loadSchematicsByPaths(
   paths: readonly string[],
+  diagnostics?: LoadDiagnostics,
 ): Promise<LoadedSchematic[]> {
   const result: LoadedSchematic[] = [];
   for (const path of paths) {
@@ -77,15 +89,40 @@ export async function loadSchematicsByPaths(
       // bypasses the fs-plugin scope because dialog-picked paths can live
       // anywhere on disk.
       const text = await invoke<string>("read_unit_file", { path });
-      const parsed: unknown = JSON.parse(text);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch (jsonErr) {
+        diagnostics?.addFromError(
+          "schematicLoader",
+          `JSON parse failed for ${path}`,
+          jsonErr,
+        );
+        // Still log to console even when no collector is wired (e.g. tests).
+        if (!diagnostics) {
+          console.warn(`[schematicLoader] JSON parse failed for ${path}:`, jsonErr);
+        }
+        continue;
+      }
       const validated = UnitSchematicSchema.safeParse(parsed);
       if (!validated.success) {
         // Loud-over-silent: surface every dropped file with the Zod issues
-        // so authoring bugs are obvious in the dev console.
-        console.warn(
-          `[schematicLoader] schema validation failed for ${path}:`,
-          validated.error.issues,
-        );
+        // so authoring bugs are obvious in the dev console AND the HUD.
+        const issueSummary = validated.error.issues
+          .slice(0, 3)
+          .map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`)
+          .join("; ");
+        diagnostics?.add({
+          source: "schematicLoader",
+          message: `schema validation failed for ${path}: ${issueSummary}${validated.error.issues.length > 3 ? ` (+${validated.error.issues.length - 3} more)` : ""}`,
+          detail: validated.error.issues,
+        });
+        if (!diagnostics) {
+          console.warn(
+            `[schematicLoader] schema validation failed for ${path}:`,
+            validated.error.issues,
+          );
+        }
         continue;
       }
       // The cast is the same one used in `file-ops/open.ts`: vulnerability
@@ -93,7 +130,14 @@ export async function loadSchematicsByPaths(
       // Week 1B doesn't read it. Week 3 will port the defaulting helper.
       result.push({ path, unit: validated.data as unknown as UnitSchematic });
     } catch (e) {
-      console.warn(`[schematicLoader] failed to load ${path}:`, e);
+      diagnostics?.addFromError(
+        "schematicLoader",
+        `failed to load ${path}`,
+        e,
+      );
+      if (!diagnostics) {
+        console.warn(`[schematicLoader] failed to load ${path}:`, e);
+      }
     }
   }
   return result;

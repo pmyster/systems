@@ -32,6 +32,7 @@ import {
   type LoadedSchematic,
 } from "./loader/schematicLoader";
 import { PrefabBank, meshAssetKey } from "./loader/prefabBank";
+import { LoadDiagnostics } from "./loader/LoadDiagnostics";
 import { initRapier } from "./physics/RuntimePhysics";
 import { UnitTypeRegistry } from "./UnitTypeRegistry";
 import { ProjectileRegistry } from "./ProjectileRegistry";
@@ -76,6 +77,15 @@ export interface MatchData {
    * fire — the weaponFireSystem skips it with a warn.
    */
   readonly projectileRegistry: ProjectileRegistry;
+  /**
+   * All warnings collected during the load — schematic parse failures,
+   * prefab load failures, unknown mesh_asset kinds, MatchSpawner skips,
+   * etc. The HUD reads this to surface a "Load warnings: N" chip so the
+   * owner doesn't need to open the F12 dev console to learn why a unit
+   * type silently produced zero entities. Per CLAUDE.md rule #1 (loud
+   * over silent).
+   */
+  readonly diagnostics: LoadDiagnostics;
 }
 
 /** Absolute on-disk projectiles directory — mirrors WeaponSubform.tsx const. */
@@ -93,6 +103,9 @@ export class MatchLoader {
     schematicPaths: readonly string[],
     onProgress: (p: LoadProgress) => void,
   ): Promise<MatchData> {
+    // Single diagnostics collector threaded through every phase. Every
+    // layer that drops/skips data pushes here; the HUD reads it back.
+    const diagnostics = new LoadDiagnostics();
     // -------- Phase 1: manifest -------------------------------------------
     onProgress({ phase: "manifest", progress: 0.0, message: "Loading map manifest…" });
     const map = await loadMapFromDir(mapDir);
@@ -121,7 +134,16 @@ export class MatchLoader {
       progress: 0.3,
       message: `Loading ${schematicPaths.length} unit Schematic${schematicPaths.length === 1 ? "" : "s"}…`,
     });
-    const schematics = await loadSchematicsByPaths(schematicPaths);
+    const schematics = await loadSchematicsByPaths(schematicPaths, diagnostics);
+    if (schematics.length < schematicPaths.length) {
+      // The collector already has per-file detail; surface the count
+      // at the load-orchestrator level too so a glance at the warnings
+      // chip shows the magnitude (e.g. "3 of 5 dropped").
+      diagnostics.add({
+        source: "MatchLoader",
+        message: `${schematicPaths.length - schematics.length} of ${schematicPaths.length} schematics failed to load; see prior entries.`,
+      });
+    }
     onProgress({
       phase: "schematics",
       progress: 0.5,
@@ -130,6 +152,7 @@ export class MatchLoader {
 
     // -------- Phase 4: prefabs -------------------------------------------
     const prefabBank = new PrefabBank();
+    prefabBank.setDiagnostics(diagnostics);
     // Dedup pass: collect unique mesh asset refs. Two tanks of the same
     // template share one cache entry; a player can pick "tank.json" twice
     // and only pay one buildGeometry() cost.
@@ -138,11 +161,13 @@ export class MatchLoader {
     for (const s of schematics) {
       const ref = s.unit.mesh_asset;
       if (!ref) {
-        // Unit without a mesh_asset can't render. Loud-over-silent: log it
-        // so the author knows to set the mesh before re-saving.
-        console.warn(
-          `[MatchLoader] unit "${s.unit.id}" has no mesh_asset; it cannot render. Skipping prefab load.`,
-        );
+        // Unit without a mesh_asset can't render. Loud-over-silent: log
+        // it in BOTH console (existing) AND diagnostics (HUD chip) so the
+        // author knows to set the mesh before re-saving.
+        diagnostics.add({
+          source: "MatchLoader",
+          message: `unit "${s.unit.id}" has no mesh_asset; cannot render — skipping prefab load.`,
+        });
         continue;
       }
       const key = meshAssetKey(ref);
@@ -162,10 +187,16 @@ export class MatchLoader {
         await prefabBank.load(ref);
       } catch (e) {
         // Per-prefab isolation: one failed GLB doesn't kill the load.
-        console.warn(
-          `[MatchLoader] prefab for unit "${unitId}" (${meshAssetKey(ref)}) failed:`,
-          e,
-        );
+        // Push to diagnostics so the HUD chip shows the unit + cause.
+        const msg = e instanceof Error ? e.message : String(e);
+        diagnostics.add({
+          source: "MatchLoader",
+          message: `prefab for unit "${unitId}" (${meshAssetKey(ref)}) failed: ${msg}`,
+          detail:
+            e instanceof Error
+              ? { name: e.name, message: e.message, stack: e.stack }
+              : { value: String(e) },
+        });
       }
       loaded++;
       const fraction = meshRefs.length > 0 ? loaded / meshRefs.length : 1;
@@ -226,15 +257,33 @@ export class MatchLoader {
           const proj = await loadProjectile(path);
           projectileRegistry.register(proj);
         } catch (e) {
-          console.warn(
-            `[MatchLoader] failed to load projectile "${pid}":`,
+          diagnostics.addFromError(
+            "MatchLoader",
+            `failed to load projectile "${pid}"`,
             e,
           );
         }
       }
     }
 
+    // Final summary line for the dev console — gives a single
+    // greppable "here's how the load went" entry alongside the
+    // structured collector.
+    if (diagnostics.hasAny()) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[MatchLoader] load completed with ${diagnostics.count()} warning(s). See "Load warnings" in the HUD or [load:*] entries above.`,
+      );
+    }
+
     onProgress({ phase: "ready", progress: 1.0, message: "Ready" });
-    return { map, schematics, prefabBank, typeRegistry, projectileRegistry };
+    return {
+      map,
+      schematics,
+      prefabBank,
+      typeRegistry,
+      projectileRegistry,
+      diagnostics,
+    };
   }
 }

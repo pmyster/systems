@@ -87,6 +87,20 @@ interface HudReadout {
   team1Dead: number;
   activeProjectiles: number;
   matchWinner: number | null;
+  /**
+   * Total number of warnings the MatchLoader + MatchSpawner pushed
+   * during the load. > 0 means at least one schematic, prefab, or
+   * spawn step was dropped — the HUD chip expands to show the first
+   * few messages. Per CLAUDE.md rule #1 (loud over silent): the
+   * failure path must surface in a UI bucket, not just the console.
+   */
+  loadWarningCount: number;
+  /**
+   * First five warning lines, pre-formatted for the HUD chip. Kept
+   * as strings (not the structured LoadWarning) so the HUD doesn't
+   * need to know about diagnostics internals.
+   */
+  loadWarningLines: readonly string[];
 }
 
 const PER_TYPE_SPAWN_COUNT = 3;
@@ -155,6 +169,13 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
     const id = window.setTimeout(() => setToast(null), 4000);
     return () => window.clearTimeout(id);
   }, [toast]);
+  // Seed the HUD's load-warning chip from the just-completed load so
+  // the first paint already shows any drops. (RAF tick refreshes the
+  // tally fields, but warnings are static post-load.)
+  const initialWarningLines = match.diagnostics
+    .all()
+    .slice(0, 5)
+    .map((w) => `[${w.source}] ${w.message}`);
   const [hud, setHud] = useState<HudReadout>({
     tick: 0,
     fps: 0,
@@ -170,7 +191,13 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
     team1Dead: 0,
     activeProjectiles: 0,
     matchWinner: null,
+    loadWarningCount: match.diagnostics.count(),
+    loadWarningLines: initialWarningLines,
   });
+  // Click-to-expand state for the load-warnings chip. Default
+  // collapsed so the chip is just "Load warnings: N"; clicking
+  // expands to show the first 5 lines.
+  const [warningsExpanded, setWarningsExpanded] = useState(false);
   const [damageNumbers, setDamageNumbers] = useState<
     { id: number; value: number; x: number; y: number; z: number; bornMs: number }[]
   >([]);
@@ -352,6 +379,7 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
       match.projectileRegistry,
       match.schematics,
       Math.PI / 2, // yaw 90° → face +X (toward team 1)
+      match.diagnostics,
     );
     const team1Count = spawnInitialUnits(
       sim.world,
@@ -368,11 +396,26 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
       match.projectileRegistry,
       match.schematics,
       -Math.PI / 2, // yaw -90° → face -X (toward team 0)
+      match.diagnostics,
     );
     const spawnedCount = team0Count + team1Count;
     console.info(
       `[GameRuntime] spawned ${spawnedCount} entities (team 0: ${team0Count}, team 1: ${team1Count}) across ${match.typeRegistry.size()} unit type(s).`,
     );
+    // Spawn pass may have added more warnings (per-type "no prefab"
+    // lines + the all-skipped summary). Refresh the HUD chip so the
+    // very first paint reflects the full picture, not just the
+    // pre-spawn snapshot.
+    if (match.diagnostics.count() > 0) {
+      setHud((h) => ({
+        ...h,
+        loadWarningCount: match.diagnostics.count(),
+        loadWarningLines: match.diagnostics
+          .all()
+          .slice(0, 5)
+          .map((w) => `[${w.source}] ${w.message}`),
+      }));
+    }
 
     // --- Combat bindings ---------------------------------------------
     // Pure callbacks the sim uses to resolve runtime-side data
@@ -799,6 +842,43 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
           {hud.navMeshError ? ` (${hud.navMeshError})` : ""}
         </div>
         <div>Sim steps/frame: {hud.simStepsThisFrame}</div>
+        {hud.loadWarningCount > 0 && (
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setWarningsExpanded((v) => !v)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setWarningsExpanded((v) => !v);
+              }
+            }}
+            style={LOAD_WARN_STYLE}
+            aria-label={`${hud.loadWarningCount} load warning(s); click to ${warningsExpanded ? "collapse" : "expand"}.`}
+          >
+            <div>
+              Load warnings: {hud.loadWarningCount}{" "}
+              <span style={LOAD_WARN_TOGGLE_STYLE}>
+                {warningsExpanded ? "▾" : "▸"}
+              </span>
+            </div>
+            {warningsExpanded && (
+              <div style={LOAD_WARN_DETAIL_STYLE}>
+                {hud.loadWarningLines.map((line, i) => (
+                  <div key={i} style={LOAD_WARN_LINE_STYLE}>
+                    {line}
+                  </div>
+                ))}
+                {hud.loadWarningCount > hud.loadWarningLines.length && (
+                  <div style={LOAD_WARN_MORE_STYLE}>
+                    +{hud.loadWarningCount - hud.loadWarningLines.length} more
+                    in console
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         <button type="button" onClick={onExit} style={EXIT_BUTTON_STYLE}>
           Exit Match
         </button>
@@ -1077,6 +1157,46 @@ const TOAST_STYLE: React.CSSProperties = {
   userSelect: "none",
   maxWidth: 600,
   whiteSpace: "pre-wrap",
+};
+
+const LOAD_WARN_STYLE: React.CSSProperties = {
+  marginTop: 4,
+  padding: "4px 6px",
+  background: "rgba(60, 30, 8, 0.65)",
+  border: "1px solid #a85a1c",
+  borderRadius: 3,
+  color: "#ffc97a",
+  cursor: "pointer",
+  userSelect: "none",
+  pointerEvents: "auto",
+};
+
+const LOAD_WARN_TOGGLE_STYLE: React.CSSProperties = {
+  display: "inline-block",
+  width: 12,
+  textAlign: "center",
+  color: "#ffd9a6",
+};
+
+const LOAD_WARN_DETAIL_STYLE: React.CSSProperties = {
+  marginTop: 4,
+  paddingTop: 4,
+  borderTop: "1px dashed #6b3e15",
+  display: "flex",
+  flexDirection: "column",
+  gap: 2,
+  maxWidth: 440,
+};
+
+const LOAD_WARN_LINE_STYLE: React.CSSProperties = {
+  color: "#ffd9a6",
+  font: "10.5px ui-monospace, SFMono-Regular, Menlo, monospace",
+  wordBreak: "break-word",
+};
+
+const LOAD_WARN_MORE_STYLE: React.CSSProperties = {
+  color: "#bb8a55",
+  font: "italic 10px ui-monospace, SFMono-Regular, Menlo, monospace",
 };
 
 const MATCH_END_STYLE: React.CSSProperties = {
