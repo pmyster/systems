@@ -26,6 +26,12 @@ src-tauri/target/
 # The folder itself is tracked via .gitkeep + README.md.
 public/prefabs/user/*.glb
 
+# Starter-pack-generated unit meshes. Large (~5-10 MB each pre-decimation,
+# ~1-3 MB post-decimation), regenerated from photos via `npm run starter-pack`
+# (or `--rehygiene-only` to refresh existing files). The matching .json
+# schematics ARE tracked — they're the source of truth.
+units/*/meshes/*.glb
+
 # Scoped tsc temp configs (sub-agents create these; Windows ACL on the mount
 # blocks Linux deletes, so we just ignore them).
 tsconfig.*.tmp.json
