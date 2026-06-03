@@ -24,7 +24,7 @@
  * once a load has succeeded.
  */
 
-import { join } from "@tauri-apps/api/path";
+import { dirname, join } from "@tauri-apps/api/path";
 
 import { loadMapFromDir, type LoadedMap } from "./loader/mapLoader";
 import {
@@ -100,8 +100,40 @@ export interface MatchData {
   readonly prefabsRequested: number;
 }
 
-/** Absolute on-disk projectiles directory — mirrors WeaponSubform.tsx const. */
-const PROJECTILES_DIR = "C:\\dev\\Strategy Game\\units\\projectiles";
+/**
+ * Resolve the on-disk projectiles directory from a representative schematic
+ * path. Convention: unit schematics live at `<repo>/units/<faction>/<unit>.json`
+ * and projectiles live as siblings at `<repo>/units/projectiles/*.proj.json`.
+ * Walk up two `dirname` steps from the schematic path to land on `<repo>/units`,
+ * then join `projectiles` to get the directory.
+ *
+ * Why not a hardcoded `C:\dev\Strategy Game\units\projectiles`? That only works
+ * on the owner's box — any fresh clone would fail the projectile-load step on
+ * a different drive layout. Deriving from a path the loader already has is
+ * machine-independent and survives the repo moving anywhere on disk.
+ *
+ * Why not `appDataDir()` or `resolveResource()`? Both would require copying the
+ * authoring units/ tree into a Tauri-managed location at build/runtime, which
+ * doesn't match the current authoring workflow (the owner edits .proj.json
+ * files in place under the repo root, no bundling step). A future change can
+ * swap this for `resolveResource()` once the bundling story exists.
+ *
+ * Returns `null` when we can't derive a sensible path (no schematics passed);
+ * callers MUST short-circuit projectile loading in that case rather than
+ * silently substituting a default — loud-over-silent per CLAUDE.md rule #1.
+ */
+async function resolveProjectilesDir(
+  schematicPaths: readonly string[],
+): Promise<string | null> {
+  if (schematicPaths.length === 0) return null;
+  const sample = schematicPaths[0];
+  // <repo>/units/<faction>/<unit>.json
+  //                       ^ dirname → <repo>/units/<faction>
+  //                                   ^ dirname → <repo>/units
+  const factionDir = await dirname(sample);
+  const unitsDir = await dirname(factionDir);
+  return await join(unitsDir, "projectiles");
+}
 
 export class MatchLoader {
   /**
@@ -353,17 +385,28 @@ export class MatchLoader {
         progress: 0.96,
         message: `Loading ${projIdsToLoad.size} projectile${projIdsToLoad.size === 1 ? "" : "s"}…`,
       });
-      for (const pid of projIdsToLoad) {
-        try {
-          const path = await join(PROJECTILES_DIR, `${pid}.proj.json`);
-          const proj = await loadProjectile(path);
-          projectileRegistry.register(proj);
-        } catch (e) {
-          diagnostics.addFromError(
-            "MatchLoader",
-            `failed to load projectile "${pid}"`,
-            e,
-          );
+      const projectilesDir = await resolveProjectilesDir(schematicPaths);
+      if (projectilesDir === null) {
+        // Loud-over-silent: weapons reference projectile_ids but we have no
+        // dir to load them from. Every weapon will be unable to fire; surface
+        // that in the HUD chip so the owner sees the cause.
+        diagnostics.add({
+          source: "MatchLoader",
+          message: `${projIdsToLoad.size} weapon(s) reference projectile_id but no schematic paths were supplied to derive the projectiles directory from — projectiles cannot be loaded and these weapons will not fire.`,
+        });
+      } else {
+        for (const pid of projIdsToLoad) {
+          try {
+            const path = await join(projectilesDir, `${pid}.proj.json`);
+            const proj = await loadProjectile(path);
+            projectileRegistry.register(proj);
+          } catch (e) {
+            diagnostics.addFromError(
+              "MatchLoader",
+              `failed to load projectile "${pid}" from ${projectilesDir}`,
+              e,
+            );
+          }
         }
       }
     }
