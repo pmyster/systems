@@ -32,6 +32,7 @@ import {
   type LoadedSchematic,
 } from "./loader/schematicLoader";
 import { PrefabBank, meshAssetKey } from "./loader/prefabBank";
+import { applyComposerOverrides } from "./loader/composerOverrides";
 import { LoadDiagnostics } from "./loader/LoadDiagnostics";
 import { initRapier } from "./physics/RuntimePhysics";
 import { UnitTypeRegistry } from "./UnitTypeRegistry";
@@ -195,7 +196,44 @@ export class MatchLoader {
     let loaded = 0;
     for (const { unitId, ref } of meshRefs) {
       try {
-        await prefabBank.load(ref);
+        const root = await prefabBank.load(ref);
+        // Mesh Composer sidecar — non-destructive per-sub-mesh transform
+        // overrides authored in the Mesh Composer panel. Apply BEFORE the
+        // InstancedUnitRenderer captures rest-pose locals, so every entity
+        // of this type spawns in the composed pose. Only file-backed refs
+        // can have a sidecar (template refs are procedural Three.js and
+        // have no on-disk GLB to live next to).
+        if (ref.kind === "file") {
+          try {
+            await applyComposerOverrides(root, ref.path, (d) =>
+              diagnostics.add({
+                source: "MatchLoader",
+                message: d.message,
+                detail: d.detail,
+              }),
+            );
+          } catch (sidecarErr) {
+            // A broken sidecar shouldn't kill the unit — load it without
+            // overrides + push a diagnostic. The owner can open Mesh
+            // Composer and reset the sidecar to fix.
+            const msg =
+              sidecarErr instanceof Error
+                ? sidecarErr.message
+                : String(sidecarErr);
+            diagnostics.add({
+              source: "MatchLoader",
+              message: `composer sidecar for unit "${unitId}" failed: ${msg}`,
+              detail:
+                sidecarErr instanceof Error
+                  ? {
+                      name: sidecarErr.name,
+                      message: sidecarErr.message,
+                      stack: sidecarErr.stack,
+                    }
+                  : { value: String(sidecarErr) },
+            });
+          }
+        }
       } catch (e) {
         // Per-prefab isolation: one failed GLB doesn't kill the load.
         // Push to diagnostics so the HUD chip shows the unit + cause.

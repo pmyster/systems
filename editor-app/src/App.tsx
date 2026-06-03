@@ -8,6 +8,7 @@ import { BattlefieldPreview } from "./components/BattlefieldPreview";
 import { MapEditor } from "./components/MapEditor/MapEditor";
 import { MenuBar } from "./components/MenuBar";
 import { MeshWorkspace } from "./components/MeshWorkspace";
+import { MeshComposer } from "./components/UnitEditor/MeshComposer/MeshComposer";
 import { SettingsModal } from "./components/SettingsModal";
 import { GameRuntime } from "./runtime/GameRuntime";
 import { startAutosave, getAutosavePath, type AutosaveHandle } from "./file-ops";
@@ -101,6 +102,70 @@ function ModeTabs({ onOpenSettings }: { onOpenSettings: () => void }) {
   );
 }
 
+/**
+ * UnitSubTabs — sub-tab strip inside the Unit Editor mode.
+ *
+ * Switches the unit-mode pane between the existing 3-pane "Layout" view
+ * (Mesh Workspace + Attributes + Battlefield Preview) and the new "Mesh
+ * Composer" view for hand-positioning Hunyuan3D sub-mesh fragments.
+ *
+ * Kept as a separate component (vs. inlining the buttons) so the sub-tab
+ * choice survives a re-render of `AppShell` without ping-ponging.
+ */
+function UnitSubTabs({
+  activeTab,
+  onChange,
+}: {
+  activeTab: "layout" | "composer";
+  onChange: (next: "layout" | "composer") => void;
+}) {
+  const items: ReadonlyArray<{ id: "layout" | "composer"; label: string }> = [
+    { id: "layout", label: "Layout" },
+    { id: "composer", label: "Mesh Composer" },
+  ];
+  return (
+    <div
+      className="unit-subtabs"
+      role="tablist"
+      aria-label="Unit editor sub-tabs"
+      style={{
+        display: "flex",
+        gap: 4,
+        padding: "4px 8px",
+        background: "#0d1117",
+        borderBottom: "1px solid #1f242c",
+        flexShrink: 0,
+      }}
+    >
+      {items.map((t) => {
+        const isActive = activeTab === t.id;
+        return (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            onClick={() => onChange(t.id)}
+            style={{
+              background: isActive ? "#1d2b44" : "transparent",
+              color: isActive ? "#f0f3f8" : "#8a93a3",
+              border: "1px solid " + (isActive ? "#3a4b66" : "#1f242c"),
+              borderRadius: 4,
+              padding: "4px 10px",
+              fontSize: 11,
+              cursor: "pointer",
+              fontFamily: "system-ui, sans-serif",
+              letterSpacing: "0.02em",
+            }}
+          >
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function AppShell() {
   const { state, dispatch } = useUnitState();
   const mode = useAppMode((s) => s.mode);
@@ -116,6 +181,11 @@ function AppShell() {
 
   // Settings modal visibility.
   const [showSettings, setShowSettings] = useState(false);
+
+  // Unit-mode sub-tab: the three-pane layout vs. the Mesh Composer panel.
+  // Lives in App-level state (not a store) — it's purely a UI shell choice
+  // and disappears with the unit-mode pane.
+  const [unitSubTab, setUnitSubTab] = useState<"layout" | "composer">("layout");
 
   // Autosave recovery — non-null while the banner is visible.
   const [recoverData, setRecoverData] = useState<AutosaveEnvelope | null>(null);
@@ -233,31 +303,47 @@ function AppShell() {
         )}
       </header>
       {mode === "unit" && (
-        <main className="workspace">
-          <section className="pane pane-left" aria-label="Mesh workspace">
-            <div className="pane-header">Mesh Workspace</div>
-            <div className="pane-body" style={overflowHidden}>
-              <MeshWorkspace
-                voxels={voxels}
-                onVoxelsUpdated={handleVoxelsChange}
-                unit={unit}
-                onUnitChange={handleUnitChange}
-              />
-            </div>
-          </section>
-          <section className="pane pane-center" aria-label="Attribute form">
-            <div className="pane-header">Attributes</div>
-            <div className="pane-body">
-              <AttributeForm unit={unit} onUnitChange={handleUnitChange} />
-            </div>
-          </section>
-          <section className="pane pane-right" aria-label="Battlefield preview">
-            <div className="pane-header">Battlefield Preview</div>
-            <div className="pane-body">
-              <BattlefieldPreview unit={unit} />
-            </div>
-          </section>
-        </main>
+        <>
+          <UnitSubTabs activeTab={unitSubTab} onChange={setUnitSubTab} />
+          {unitSubTab === "layout" && (
+            <main className="workspace">
+              <section className="pane pane-left" aria-label="Mesh workspace">
+                <div className="pane-header">Mesh Workspace</div>
+                <div className="pane-body" style={overflowHidden}>
+                  <MeshWorkspace
+                    voxels={voxels}
+                    onVoxelsUpdated={handleVoxelsChange}
+                    unit={unit}
+                    onUnitChange={handleUnitChange}
+                  />
+                </div>
+              </section>
+              <section className="pane pane-center" aria-label="Attribute form">
+                <div className="pane-header">Attributes</div>
+                <div className="pane-body">
+                  <AttributeForm unit={unit} onUnitChange={handleUnitChange} />
+                </div>
+              </section>
+              <section
+                className="pane pane-right"
+                aria-label="Battlefield preview"
+              >
+                <div className="pane-header">Battlefield Preview</div>
+                <div className="pane-body">
+                  <BattlefieldPreview unit={unit} />
+                </div>
+              </section>
+            </main>
+          )}
+          {unitSubTab === "composer" && (
+            <main
+              className="workspace workspace-composer"
+              style={{ display: "block" }}
+            >
+              <MeshComposer unit={unit} />
+            </main>
+          )}
+        </>
       )}
       {mode === "map" && (
         <main className="workspace workspace-map">

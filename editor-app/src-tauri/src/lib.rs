@@ -155,6 +155,103 @@ fn read_binary_file(path: String) -> Result<Vec<u8>, String> {
     std::fs::read(&path).map_err(|e| format!("Failed to read {path}: {e}"))
 }
 
+/// Read a Mesh Composer sidecar JSON file from `path`. Returns `None` when
+/// the file does not exist (the common, non-error case — most units have
+/// no sidecar). Returns `Some(contents)` when present.
+///
+/// Safe-read pattern:
+///   1. Canonicalize the path (resolves symlinks + relative components).
+///      A missing file fails canonicalize → we return `Ok(None)` so the
+///      caller can distinguish "not present" from "broken IO".
+///   2. Confirm the canonicalized path is a regular file (not a directory,
+///      pipe, etc).
+///   3. Confirm the file name ends with `.composer.json`. This guards
+///      against a sidecar I/O path being mis-invoked on a foreign file.
+///      A mismatch is an Err (loud) because it indicates a caller bug.
+///   4. Read the file as UTF-8.
+///
+/// Loud-over-silent (CLAUDE.md rule #1): every failure mode beyond "file
+/// missing" returns an Err so the JS layer surfaces it in the panel banner
+/// or the HUD's "Load warnings" chip — never silently dropped.
+#[tauri::command]
+fn read_composer_sidecar(path: String) -> Result<Option<String>, String> {
+    let p = std::path::Path::new(&path);
+    // Step 1: canonicalize. A missing file is the success-with-None case.
+    let canonical = match std::fs::canonicalize(p) {
+        Ok(c) => c,
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                return Ok(None);
+            }
+            return Err(format!("canonicalize failed for {path}: {e}"));
+        }
+    };
+    // Step 2: is_file check. A dir/pipe at this path is a caller bug.
+    if !canonical.is_file() {
+        return Err(format!(
+            "composer sidecar path {} is not a regular file",
+            canonical.display()
+        ));
+    }
+    // Step 3: extension check. Compound extensions like `.composer.json`
+    // aren't recognised by Path::extension (which only returns the last
+    // segment), so we match on the trailing string.
+    let file_name = canonical
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    if !file_name.ends_with(".composer.json") {
+        return Err(format!(
+            "read_composer_sidecar: path {} doesn't end with .composer.json — refusing to read foreign file (loud-over-silent guard).",
+            canonical.display()
+        ));
+    }
+    // Step 4: read.
+    let bytes = std::fs::read(&canonical)
+        .map_err(|e| format!("Failed to read {}: {e}", canonical.display()))?;
+    Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
+}
+
+/// Delete a Mesh Composer sidecar. Used by the editor's "Reset" button.
+/// Same safe-delete shape as `read_composer_sidecar`:
+///   1. Canonicalize — a missing file is the success case (already gone).
+///   2. Confirm it's a regular file.
+///   3. Confirm the `.composer.json` suffix — we never delete a foreign file.
+///   4. Remove.
+///
+/// Loud-over-silent: every step beyond "file already gone" returns Err.
+#[tauri::command]
+fn delete_composer_sidecar(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    let canonical = match std::fs::canonicalize(p) {
+        Ok(c) => c,
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                return Ok(()); // already absent — idempotent reset
+            }
+            return Err(format!("canonicalize failed for {path}: {e}"));
+        }
+    };
+    if !canonical.is_file() {
+        return Err(format!(
+            "composer sidecar path {} is not a regular file",
+            canonical.display()
+        ));
+    }
+    let file_name = canonical
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    if !file_name.ends_with(".composer.json") {
+        return Err(format!(
+            "delete_composer_sidecar: path {} doesn't end with .composer.json — refusing to delete foreign file.",
+            canonical.display()
+        ));
+    }
+    std::fs::remove_file(&canonical)
+        .map_err(|e| format!("Failed to delete {}: {e}", canonical.display()))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -165,6 +262,8 @@ pub fn run() {
             read_unit_file,
             write_unit_file,
             read_binary_file,
+            read_composer_sidecar,
+            delete_composer_sidecar,
             list_projectile_files,
             map_project::create_map_project,
             map_project::open_map_project,
