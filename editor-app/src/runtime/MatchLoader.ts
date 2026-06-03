@@ -86,6 +86,17 @@ export interface MatchData {
    * over silent).
    */
   readonly diagnostics: LoadDiagnostics;
+  /**
+   * Count of distinct mesh-asset refs the loader ASKED the bank to
+   * load (post-dedup). Surfaced in the HUD next to `schematics` and
+   * `prefabBank.size()` so the owner can see the three numbers
+   * line up — or NOT, in which case the HUD chip turns orange and
+   * points at the discrepancy. Per CLAUDE.md rule #1: every gate
+   * has a visible default. The triplet
+   *   schematics : prefabsRequested : prefabsCached
+   * IS that visible gate.
+   */
+  readonly prefabsRequested: number;
 }
 
 /** Absolute on-disk projectiles directory — mirrors WeaponSubform.tsx const. */
@@ -276,6 +287,26 @@ export class MatchLoader {
       );
     }
 
+    // Loud HUD-visible accounting: if N schematics were registered but
+    // 0 ended up in the bank, the triplet
+    //   schematics : prefabsRequested : prefabsCached
+    // will read e.g. "1 : 0 : 0" and the HUD chip turns orange. Emit a
+    // structured warning if the post-dedup request count diverges from
+    // the registered-schematic count — surfacing schema-shape silent
+    // skips at the load-orchestrator altitude.
+    if (schematics.length > 0 && meshRefs.length === 0) {
+      diagnostics.add({
+        source: "MatchLoader",
+        message: `${schematics.length} schematic(s) registered but 0 prefab loads were requested — every unit has a missing/unsupported mesh_asset shape. Spawn will produce 0 entities.`,
+      });
+    }
+    if (meshRefs.length > 0 && prefabBank.size() < meshRefs.length) {
+      diagnostics.add({
+        source: "MatchLoader",
+        message: `prefab bank holds ${prefabBank.size()} of ${meshRefs.length} requested mesh(es) — see prior [load:prefabBank] entries for the underlying failures.`,
+      });
+    }
+
     onProgress({ phase: "ready", progress: 1.0, message: "Ready" });
     return {
       map,
@@ -284,6 +315,7 @@ export class MatchLoader {
       typeRegistry,
       projectileRegistry,
       diagnostics,
+      prefabsRequested: meshRefs.length,
     };
   }
 }

@@ -77,6 +77,20 @@ interface HudReadout {
   simStepsThisFrame: number;
   unitTypesRegistered: number;
   prefabsCached: number;
+  /**
+   * Loud-over-silent accounting triplet:
+   *   schematicsLoaded : prefabsRequested : prefabsCached
+   *
+   * When the three numbers all match, the load chain is intact
+   * end-to-end. When they diverge, the HUD row turns orange and the
+   * exact mismatch is visible without opening F12. e.g. "1 : 1 : 0"
+   * means "the bank was asked to load 1 mesh and ended up with 0
+   * cached" → the prefabBank load failed. "1 : 0 : 0" means "the
+   * loader had 1 schematic but didn't ask for any prefab" →
+   * mesh_asset shape unknown / missing.
+   */
+  schematicsLoaded: number;
+  prefabsRequested: number;
   entities: number;
   selected: number;
   navMeshStatus: NavMeshStatus;
@@ -117,6 +131,29 @@ export function GameRuntime(): React.JSX.Element {
    * check when the recorded tick count is reached.
    */
   const [replaySession, setReplaySession] = useState<ReplaySession | null>(null);
+
+  // -------------------------------------------------------------------
+  // PrefabBank lifecycle is owned HERE, not in MatchScene's mount effect.
+  //
+  // Why this isn't in MatchScene's cleanup:
+  //   React 19 StrictMode dev-mode runs every effect MOUNT → CLEANUP →
+  //   MOUNT. If we disposed the bank in MatchScene's cleanup, the second
+  //   mount would find an empty bank → MatchSpawner would log
+  //   "no prefab cached for unit type X" → 0 entities spawn. The bank
+  //   belongs to `match` state (lives in GameRuntime), so its lifecycle
+  //   must match `match` — disposed when `match` is REPLACED or this
+  //   component itself unmounts, not when the child re-mounts.
+  //
+  // CLAUDE.md rule (loud over silent): the prior silent failure was a
+  // child cleanup mutating parent-owned state. Pinning the owner of
+  // the resource to the owner of the data fixes the class of bug.
+  // -------------------------------------------------------------------
+  useEffect(() => {
+    if (!match) return;
+    return () => {
+      match.prefabBank.dispose();
+    };
+  }, [match]);
 
   if (match === null) {
     return (
@@ -181,7 +218,9 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
     fps: 0,
     simStepsThisFrame: 0,
     unitTypesRegistered: 0,
-    prefabsCached: 0,
+    prefabsCached: match.prefabBank.size(),
+    schematicsLoaded: match.schematics.length,
+    prefabsRequested: match.prefabsRequested,
     entities: 0,
     selected: 0,
     navMeshStatus: "building",
@@ -724,6 +763,8 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
           simStepsThisFrame: stepsThisFrame,
           unitTypesRegistered: unitRenderer.typeCount(),
           prefabsCached: match.prefabBank.size(),
+          schematicsLoaded: match.schematics.length,
+          prefabsRequested: match.prefabsRequested,
           entities: spawnedCount,
           team0Alive: tally.team0Alive,
           team1Alive: tally.team1Alive,
@@ -776,7 +817,12 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
       unitRenderer.dispose();
       terrain.dispose();
       physics.dispose();
-      match.prefabBank.dispose();
+      // NOTE: match.prefabBank is owned by the parent GameRuntime
+      // component (it lives on `match` state), NOT this effect.
+      // Disposing here breaks the React 19 StrictMode dev-double-effect
+      // cycle: cleanup wipes the cache → second mount finds it empty →
+      // MatchSpawner logs "no prefab cached" → 0 entities spawn.
+      // Disposal happens in GameRuntime's useEffect keyed on `match`.
       // Recording teardown order: stop active recording (no save), then
       // dispose audio so the AudioContext doesn't outlive its listener.
       replayRecorder.cancel();
@@ -828,6 +874,22 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
         <div>FPS: {hud.fps.toFixed(1)}</div>
         <div>Unit types: {hud.unitTypesRegistered}</div>
         <div>Prefabs cached: {hud.prefabsCached}</div>
+        {/* Loud accounting triplet — schematics : prefabsRequested :
+            prefabsCached. All three should match end-to-end; a divergence
+            turns the row orange and points at exactly which layer dropped
+            data. See HudReadout.schematicsLoaded comment for read-out. */}
+        <div
+          style={
+            hud.schematicsLoaded === hud.prefabsRequested &&
+            hud.prefabsRequested === hud.prefabsCached
+              ? undefined
+              : LOAD_TRIPLET_MISMATCH_STYLE
+          }
+          aria-label="Schematics, prefabs requested, prefabs cached"
+        >
+          Load chain: {hud.schematicsLoaded} : {hud.prefabsRequested} :{" "}
+          {hud.prefabsCached}
+        </div>
         <div>Entities: {hud.entities}</div>
         <div>Selected: {hud.selected}</div>
         <div style={{ color: "#9cccff" }}>
@@ -1157,6 +1219,11 @@ const TOAST_STYLE: React.CSSProperties = {
   userSelect: "none",
   maxWidth: 600,
   whiteSpace: "pre-wrap",
+};
+
+const LOAD_TRIPLET_MISMATCH_STYLE: React.CSSProperties = {
+  color: "#ffb347",
+  fontWeight: "bold",
 };
 
 const LOAD_WARN_STYLE: React.CSSProperties = {

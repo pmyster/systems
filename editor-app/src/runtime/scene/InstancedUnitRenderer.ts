@@ -212,16 +212,20 @@ export class InstancedUnitRenderer {
   }
 
   /**
-   * Dispose every type's GPU resources. Call BEFORE disposing the
-   * PrefabBank so this renderer still has live references to drop.
+   * Dispose every type's GPU resources owned by THIS renderer.
+   *
+   * IMPORTANT: geometry is BORROWED from PrefabBank's cached root — we
+   * do NOT dispose it here. The bank owns the geometry lifecycle; this
+   * renderer disposes only what it created (the cloned material + the
+   * InstancedMesh wrapper). Disposing the borrowed geometry breaks
+   * re-mount in React 19 StrictMode (the bank survives the child
+   * remount; a disposed geometry on cleanup #1 would resurface on
+   * mount #2 with its GPU buffer released).
    */
   dispose(): void {
     for (const t of this.byTypeId.values()) {
-      // Geometry is shared with the PrefabBank's cached root — disposing
-      // here is fine because we share-then-dispose. The bank's dispose()
-      // tolerates an already-disposed BufferGeometry (Three's dispose is
-      // idempotent / event-emitter-only).
-      t.mesh.geometry.dispose();
+      // NOTE: do NOT call t.mesh.geometry.dispose() — geometry is owned
+      // by PrefabBank.dispose(), not by us. See class header.
       const mats = Array.isArray(t.mesh.material)
         ? t.mesh.material
         : [t.mesh.material];
