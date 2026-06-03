@@ -78,6 +78,14 @@ interface HudReadout {
   unitTypesRegistered: number;
   prefabsCached: number;
   /**
+   * Total mesh nodes the renderer is driving across all registered types.
+   * One InstancedMesh per node — a single-mesh procedural template counts
+   * as 1; a 5-barrel turret GLB counts as 1 chassis + 5 barrels = 6.
+   * Surfaced in the HUD so the owner can see at a glance whether the
+   * prefab's sub-mesh breakdown matches the intended visual.
+   */
+  weaponPartMeshes: number;
+  /**
    * Loud-over-silent accounting triplet:
    *   schematicsLoaded : prefabsRequested : prefabsCached
    *
@@ -219,6 +227,7 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
     simStepsThisFrame: 0,
     unitTypesRegistered: 0,
     prefabsCached: match.prefabBank.size(),
+    weaponPartMeshes: 0,
     schematicsLoaded: match.schematics.length,
     prefabsRequested: match.prefabsRequested,
     entities: 0,
@@ -240,6 +249,15 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
   const [damageNumbers, setDamageNumbers] = useState<
     { id: number; value: number; x: number; y: number; z: number; bornMs: number }[]
   >([]);
+  /**
+   * Hotkey-gated floating damage-number overlay. v1 anchors the numbers
+   * to the top-left corner (no camera projection yet), which reads as a
+   * debug column rather than as combat feedback — Phee flagged it as a
+   * visual distraction. Defaulted OFF; press `~` (Backquote) to toggle.
+   * When a v2 projects the numbers to world-space-over-target, this gate
+   * can be removed and the overlay defaulted back ON.
+   */
+  const [damageOverlayVisible, setDamageOverlayVisible] = useState(false);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -605,6 +623,15 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
           });
         return;
       }
+      // ` / ~ — toggle the floating damage-number overlay (defaulted off
+      // because the v1 layout reads as a debug column in the top-left
+      // corner). Useful when verifying that combat resolved a hit;
+      // ignore it for the normal cinematic view.
+      if (e.key === "`" || e.key === "~" || e.code === "Backquote") {
+        e.preventDefault();
+        setDamageOverlayVisible((v) => !v);
+        return;
+      }
       // F11 — toggle replay recording. Disabled in replay mode (would be
       // recording the replay-of-the-replay, which is just the source file).
       if (e.key === "F11") {
@@ -763,6 +790,7 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
           simStepsThisFrame: stepsThisFrame,
           unitTypesRegistered: unitRenderer.typeCount(),
           prefabsCached: match.prefabBank.size(),
+          weaponPartMeshes: unitRenderer.subMeshCount(),
           schematicsLoaded: match.schematics.length,
           prefabsRequested: match.prefabsRequested,
           entities: spawnedCount,
@@ -861,6 +889,7 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
             [F11] {recHud.recording ? "Stop + save" : "Start"} replay recording
           </div>
         )}
+        <div>[`] Damage numbers: {damageOverlayVisible ? "on" : "off"}</div>
       </div>
       {/* Transient toast — auto-clears after a few seconds via effect below. */}
       {toast && <div style={TOAST_STYLE}>{toast}</div>}
@@ -874,6 +903,7 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
         <div>FPS: {hud.fps.toFixed(1)}</div>
         <div>Unit types: {hud.unitTypesRegistered}</div>
         <div>Prefabs cached: {hud.prefabsCached}</div>
+        <div>Weapon parts: {Math.max(0, hud.weaponPartMeshes - hud.unitTypesRegistered)}</div>
         {/* Loud accounting triplet — schematics : prefabsRequested :
             prefabsCached. All three should match end-to-end; a divergence
             turns the row orange and points at exactly which layer dropped
@@ -948,11 +978,13 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
       {hud.navMeshStatus === "building" ? (
         <div style={NAVMESH_OVERLAY_STYLE}>Building navmesh…</div>
       ) : null}
-      {/* Floating damage numbers (HUD overlay — world→screen handled
-          by a simple percentage approximation; v1 visible because the
-          camera is roughly top-down). v2 will project through the
-          camera matrix for accuracy. */}
-      <DamageNumberOverlay numbers={damageNumbers} />
+      {/* Floating damage numbers — HOTKEY-GATED off by default. The v1
+          layout stacks values in the top-left corner (no camera
+          projection yet) which reads as a debug column rather than as
+          per-target combat feedback. Press ` (Backquote) to toggle.
+          When v2 projects damage values to world-space-over-target,
+          remove the gate and default this back on. */}
+      {damageOverlayVisible && <DamageNumberOverlay numbers={damageNumbers} />}
       {hud.matchWinner !== null ? (
         <MatchEndOverlay winner={hud.matchWinner} onExit={onExit} />
       ) : null}

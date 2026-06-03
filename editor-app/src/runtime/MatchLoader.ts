@@ -231,6 +231,59 @@ export class MatchLoader {
     // after this returns.
     await rapierWarmup;
 
+    // -------- Diagnose chassis mesh sub-mesh count ----------------------
+    // Phase 1.5: the renderer now stamps an InstancedMesh per Mesh in
+    // each prefab subtree (chassis hull + weapon-part barrels + accents).
+    // A chassis prefab that decoded to ZERO Meshes is loud-over-silent: it
+    // would render nothing despite the prefab "loading". A chassis prefab
+    // that decoded to EXACTLY ONE Mesh is fine — single-mesh procedural
+    // templates (the legacy tank/mech path) live in that regime. Walk every
+    // cached prefab and push a diagnostic when the count is zero.
+    //
+    // For chassis prefabs that have hardpoints[] declared but the prefab
+    // has only one Mesh, we ALSO push a diagnostic — the chassis was
+    // authored with weapon mount points but no weapon geometry resolved
+    // in the GLB, so the owner sees a "flat base" visual without barrels
+    // and should re-export the GLB with the weapon parts included.
+    //
+    // The walk is over cached prefabs (not schematics) because the
+    // template traversal is the source of truth for what the renderer
+    // will actually see.
+    for (const s of schematics) {
+      const ref = s.unit.mesh_asset;
+      if (!ref) continue;
+      const cached = prefabBank.get(ref);
+      if (!cached) continue; // prefab failed to load — already diagnosed
+      let meshCount = 0;
+      cached.traverse((o) => {
+        // Three.js Mesh check via prototype string to keep this loader
+        // free of a runtime three.js dep dance — the prefab subtree was
+        // built by three.js so the property is always present.
+        if ((o as { isMesh?: boolean }).isMesh === true) meshCount++;
+      });
+      if (meshCount === 0) {
+        diagnostics.add({
+          source: "MatchLoader",
+          message: `unit "${s.unit.id}" prefab decoded with 0 mesh nodes; nothing will render even though the prefab loaded. Check the GLB export.`,
+        });
+      } else if (
+        s.unit.hardpoints &&
+        s.unit.hardpoints.length > 0 &&
+        meshCount === 1
+      ) {
+        // The chassis has hardpoints but the prefab is a single mesh —
+        // weapon-part geometry isn't in the GLB. The unit renders as a
+        // flat base. Loud-over-silent: this is the exact bug Phase 1.5
+        // was opened to fix at the runtime layer; for SCHEMA-side cases
+        // (forgotten GLB re-export) it stays a warning so the owner sees
+        // the cause→effect chain.
+        diagnostics.add({
+          source: "MatchLoader",
+          message: `unit "${s.unit.id}" declares ${s.unit.hardpoints.length} hardpoint(s) but its chassis GLB decoded to a single mesh node — weapon-part geometry is missing from the GLB. Unit will render as a flat base with no visible barrels.`,
+        });
+      }
+    }
+
     // -------- Build the UnitTypeRegistry ---------------------------------
     // After every prefab attempt is done, materialise the catalog. We
     // register EVERY successfully-loaded schematic (even ones whose
