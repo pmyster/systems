@@ -49,7 +49,13 @@ import {
 } from "../scene/InstancedUnitRenderer";
 
 export interface SpawnPlan {
-  /** How many entities per registered unit type. Week 1C default = 5. */
+  /**
+   * How many entities per registered unit type. With many types
+   * picked (e.g. 32), keep this at 1 so the team's total stays in
+   * the dozens — the spawner packs all units into a single square
+   * grid per team. Larger values multiply the team total
+   * (types × perTypeCount) and the grid grows accordingly.
+   */
   readonly perTypeCount: number;
   /** Team / faction tag stamped onto every entity. Week 1C default = 0. */
   readonly teamId: number;
@@ -156,14 +162,25 @@ export function spawnInitialUnits(
   }
 
   // -------------------------------------------------------------------
-  // Phase 2: spawn entities. Each type's instances form a small square
-  // grid centred on a per-type X offset; groups march along X so the
-  // dev can pan the camera and see each cluster separately.
+  // Phase 2: spawn entities. All units across all types are arranged
+  // into ONE square grid per team, centred on (originX, originZ).
+  // This keeps the formation compact when the type count is large
+  // (32 types × 1 = 64 units → 8×8 block) instead of a long off-map
+  // stripe of per-type sub-grids. Side-by-side debugging of types is
+  // no longer the dominant use case now that two teams engage; cluster
+  // combat reads better with everyone tucked together.
   // -------------------------------------------------------------------
   let total = 0;
-  const colsPerRow = Math.max(1, Math.ceil(Math.sqrt(plan.perTypeCount)));
-  // Width of one type's grid + a one-cell gap before the next type.
-  const groupStrideM = spacingM * (colsPerRow + 1);
+  const totalUnits = renderableTypes.length * plan.perTypeCount;
+  const cols = Math.max(1, Math.ceil(Math.sqrt(totalUnits)));
+
+  // Loud-over-silent: large formations chew framerate. Warn at 100+
+  // so the dev sees "yep, expected" instead of guessing why FPS tanked.
+  if (totalUnits > 100) {
+    console.warn(
+      `[MatchSpawner] team ${plan.teamId}: spawning ${totalUnits} units (${renderableTypes.length} types × ${plan.perTypeCount}) in a ${cols}-wide grid — FPS may drop with many fragmented sub-meshes per unit.`,
+    );
+  }
 
   // Build a quick id → schematic lookup for the optional weapon-spawn
   // pass. Done once outside the inner loops.
@@ -180,20 +197,24 @@ export function spawnInitialUnits(
   const qz0 = 0;
   const qw0 = Math.cos(halfYaw);
 
+  // Flatten the (type, instance) pairs into a single index `g` that
+  // walks across the unified team grid. Each type still gets exactly
+  // `perTypeCount` slots — they're just interleaved across the block
+  // instead of getting their own strip.
+  let g = 0;
   for (let typeIdx = 0; typeIdx < renderableTypes.length; typeIdx++) {
     const type = renderableTypes[typeIdx];
-    // Centre the strip of groups on origin: types are laid out along X.
-    const groupOffsetX =
-      (typeIdx - (renderableTypes.length - 1) / 2) * groupStrideM;
     const schematic = schematicById.get(type.schematicId);
 
     for (let i = 0; i < plan.perTypeCount; i++) {
-      const row = Math.floor(i / colsPerRow);
-      const col = i % colsPerRow;
-      // Centre the per-type grid on its group origin.
-      const localX = (col - (colsPerRow - 1) / 2) * spacingM;
-      const localZ = (row - (colsPerRow - 1) / 2) * spacingM;
-      const worldX = plan.originX + groupOffsetX + localX;
+      const row = Math.floor(g / cols);
+      const col = g % cols;
+      g++;
+      // Centre the whole team's grid on (originX, originZ). Row/col
+      // are mapped into local meters and added to the team origin.
+      const localX = (col - (cols - 1) / 2) * spacingM;
+      const localZ = (row - (cols - 1) / 2) * spacingM;
+      const worldX = plan.originX + localX;
       const worldZ = plan.originZ + localZ;
       const worldY = heightAt(worldX, worldZ);
 

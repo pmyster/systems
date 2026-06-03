@@ -125,7 +125,10 @@ interface HudReadout {
   loadWarningLines: readonly string[];
 }
 
-const PER_TYPE_SPAWN_COUNT = 3;
+// One unit per type per team by default. With the 32-unit picker live,
+// 32 × 3 = 96-wide per-team stripe overflowed the 129m map; capping at
+// 1 keeps the compact-grid formation visible (sqrt(32) ≈ 8×8 block).
+const PER_TYPE_SPAWN_COUNT = 1;
 const TEAM_0 = 0;
 const TEAM_1 = 1;
 const TEAM_SPACING_M = 60;
