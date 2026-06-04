@@ -21,10 +21,15 @@
  *     solid color). This is intentional: pre-v5 maps don't have colorpaint,
  *     and pre-day-2 maps don't have splatmaps. Loud-over-silent: callers
  *     check for null and log when they fall back.
+ *   - Wrong file picked (the user selects something other than
+ *     `manifest.json`) → THROWS at the picker layer with a precise hint;
+ *     never silently fall through into a confusing "manifest.json not
+ *     found" error from the Rust side.
  */
 
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { dirname } from "@tauri-apps/api/path";
 
 import {
   MapProjectManifestSchema,
@@ -65,19 +70,52 @@ export interface LoadedMap {
 }
 
 /**
- * Open a native folder picker, then load the picked dir. Returns null if
- * the user cancels (mirrors the editor's "user cancelled" convention).
+ * Open a native FILE picker for `manifest.json`, derive the containing
+ * project directory, then load the map. Returns null if the user cancels.
+ *
+ * Why a file picker (not a folder picker) for a directory-shaped concept?
+ * Folder pickers hide the contents of the folder, so sibling map projects
+ * look indistinguishable at the dialog level — the owner reported this as
+ * "confusing in picking folders". A file picker shows the manifest sitting
+ * next to its `heightmap.r32` and `splatmap.png` siblings, which makes the
+ * "is this the right map?" check obvious at a glance. It also mirrors the
+ * Pick Units flow (which has always been a file picker).
+ *
+ * Loud-over-silent (CLAUDE.md rule #1): if the user picks a non-manifest
+ * `.json` file (e.g. they navigated into the units folder by mistake), we
+ * THROW a precise error explaining what to pick. The caller surfaces it in
+ * the UI error pane — we never silently load the wrong file.
  */
 export async function pickAndLoadMap(): Promise<LoadedMap | null> {
   const picked = await openDialog({
-    directory: true,
-    title: "Open Map Project Folder",
+    multiple: false,
+    directory: false,
+    filters: [{ name: "Map manifest", extensions: ["json"] }],
+    title: "Pick a map's manifest.json",
   });
   if (picked === null || picked === undefined) return null;
-  // openDialog with `directory: true` always returns a string (or null) under
-  // Tauri 2.x. Defensive against the array shape in case the plugin widens.
-  const dir = typeof picked === "string" ? picked : null;
-  if (!dir) return null;
+  // openDialog with `multiple: false` returns a string (or null) under
+  // Tauri 2.x. Defensive against an array shape in case the plugin widens.
+  const filePath = typeof picked === "string" ? picked : null;
+  if (!filePath) return null;
+
+  // Loud-over-silent: validate the basename before we touch the loader.
+  // Manifest discovery in `open_map_project` (Rust) is hardcoded to look
+  // for `manifest.json` inside the dir, so anything else here would just
+  // produce a confusing "manifest.json not found" error one layer down.
+  // Surface the precise mistake here instead.
+  const filename = filePath.split(/[/\\]/).pop() ?? "";
+  if (filename.toLowerCase() !== "manifest.json") {
+    throw new Error(
+      `Selected "${filename}" — expected manifest.json. ` +
+        `Pick the manifest.json file inside a map project folder.`,
+    );
+  }
+
+  // Derive the project directory. Tauri's async `dirname` handles both
+  // Windows (`\\`) and POSIX (`/`) separators correctly — preferred over
+  // hand-rolled substring math.
+  const dir = await dirname(filePath);
   return await loadMapFromDir(dir);
 }
 
