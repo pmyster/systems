@@ -33,7 +33,7 @@
  *     future fine-positioning (no implementation Stage 1; placeholder).
  */
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { LoadedMap } from "../loader/mapLoader";
 import {
@@ -44,6 +44,7 @@ import {
   BUILDING_CHASSIS_CLASSES,
   type BuildingChassisClass,
 } from "../../types/unit";
+import { renderMapTopDownPreview } from "../scene/MapPreviewRenderer";
 
 export interface PlaceBuildingsStepProps {
   readonly map: LoadedMap;
@@ -170,33 +171,71 @@ export function PlaceBuildingsStep(
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Draw the heightmap once on mount (and on map change).
-  useMemo(() => {
+  // Preview is a top-down 3D render of the actual map — biome colors,
+  // sun-lit elevation, water — generated once per map via
+  // MapPreviewRenderer. The grayscale fallback path inside that module
+  // handles WebGL-unavailable environments (tests, lost context).
+  //
+  // We render at 1024×1024 (the renderer's default) and draw it scaled
+  // into the PREVIEW_PX canvas — sharper than rendering directly at
+  // PREVIEW_PX, gives the user a crisp image even at the small panel
+  // size, and the placement coordinate math operates off PREVIEW_PX so
+  // pixel↔meter conversion is unchanged.
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState<boolean>(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    renderMapTopDownPreview(map, 1024, {
+      add: (msg) => {
+        // Surface the fallback warning in the diagnostic chip — the user
+        // sees "preview fell back to grayscale: <why>" instead of a
+        // silently-degraded image.
+        if (!cancelled) setPreviewError(msg);
+      },
+    })
+      .then((url) => {
+        if (!cancelled) {
+          setPreviewUrl(url);
+          setPreviewLoading(false);
+        }
+      })
+      .catch((e: unknown) => {
+        // renderMapTopDownPreview already handles its own failures (it
+        // catches and falls back). A throw here means *both* paths
+        // failed — extremely unusual. Surface loudly.
+        if (!cancelled) {
+          const msg = e instanceof Error ? e.message : String(e);
+          setPreviewError(`preview failed: ${msg}`);
+          setPreviewLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [map]);
+
+  // When the data URL arrives, paint it into the canvas at PREVIEW_PX
+  // size. We draw via Image so the canvas's 2D context handles the
+  // scale, matching the prior grayscale path.
+  useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return null;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
+    if (!canvas || !previewUrl) return;
     canvas.width = PREVIEW_PX;
     canvas.height = PREVIEW_PX;
-    // Build a tiny offscreen ImageData at heightmap resolution then
-    // scale into the preview canvas via drawImage. Two-step keeps the
-    // pixel math separate from the scaling.
-    const widthPx = map.manifest.terrain.widthPx;
-    const heightPx = map.manifest.terrain.heightPx;
-    const gray = heightmapToGrayscale(map.heightmap, widthPx, heightPx);
-    const off = document.createElement("canvas");
-    off.width = widthPx;
-    off.height = heightPx;
-    const offCtx = off.getContext("2d");
-    if (!offCtx) return null;
-    const imageData = new ImageData(gray, widthPx, heightPx);
-    offCtx.putImageData(imageData, 0, 0);
-    ctx.imageSmoothingEnabled = false;
-    ctx.clearRect(0, 0, PREVIEW_PX, PREVIEW_PX);
-    ctx.drawImage(off, 0, 0, PREVIEW_PX, PREVIEW_PX);
-    return null;
-    // Re-run only on map change.
-  }, [map]);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const img = new Image();
+    img.onload = () => {
+      ctx.imageSmoothingEnabled = true;
+      ctx.clearRect(0, 0, PREVIEW_PX, PREVIEW_PX);
+      ctx.drawImage(img, 0, 0, PREVIEW_PX, PREVIEW_PX);
+    };
+    img.src = previewUrl;
+  }, [previewUrl]);
 
   // Convert a canvas pixel (offsetX, offsetY) to a world (x, z) tuple.
   const canvasToWorld = useCallback(
@@ -374,6 +413,11 @@ export function PlaceBuildingsStep(
             style={CANVAS_STYLE}
             aria-label="Top-down map preview — click to place buildings"
           />
+          {previewLoading && (
+            <div style={LOADING_OVERLAY_STYLE} role="status">
+              Rendering map preview…
+            </div>
+          )}
           {/* Render token overlay */}
           <svg
             width={PREVIEW_PX}
@@ -427,6 +471,11 @@ export function PlaceBuildingsStep(
           <div style={CHIP_STYLE}>
             Map: {mapWm.toFixed(0)} × {mapDm.toFixed(0)} m
           </div>
+          {previewError && (
+            <div style={WARN_STYLE} role="status">
+              Preview fell back to grayscale: {previewError}
+            </div>
+          )}
           {selected ? (
             <div style={EDITOR_PANEL_STYLE}>
               <div style={LABEL_STYLE}>
@@ -558,6 +607,21 @@ const OVERLAY_STYLE: React.CSSProperties = {
   position: "absolute",
   top: 0,
   left: 0,
+  pointerEvents: "none",
+};
+
+const LOADING_OVERLAY_STYLE: React.CSSProperties = {
+  position: "absolute",
+  top: 0,
+  left: 0,
+  width: PREVIEW_PX,
+  height: PREVIEW_PX,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "rgba(13,15,20,0.7)",
+  color: "#e8eef5",
+  font: "12px ui-monospace, monospace",
   pointerEvents: "none",
 };
 
