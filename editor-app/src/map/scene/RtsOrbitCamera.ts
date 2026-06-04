@@ -126,7 +126,16 @@ export class RtsOrbitCamera {
     } else if (this.isPanning) {
       // Pan in world XZ based on camera orientation. We project the
       // camera's forward onto the ground plane so panning feels like
-      // sliding the world under your cursor.
+      // sliding the world under your cursor (grab-the-world style: drag
+      // mouse right → map slides right; drag down → map slides down).
+      //
+      // Owner-reported fix (2026-06-04): previous version used `-=` on
+      // both axes, which felt inverted — dragging the mouse down moved
+      // the map up. Flipped both signs to `+=` so the focus point
+      // follows the cursor direction in screen space. If this overshoots
+      // (e.g. drag right now moves map left), swap one or both signs
+      // back to `-=` here. Easy local tweak; no other code depends on
+      // the sign convention.
       const panScale = this.distance * 0.0015;
       const forward = new THREE.Vector3();
       this.camera.getWorldDirection(forward);
@@ -135,8 +144,8 @@ export class RtsOrbitCamera {
       const right = new THREE.Vector3()
         .crossVectors(forward, new THREE.Vector3(0, 1, 0))
         .normalize();
-      this.focus.x -= (right.x * dx + forward.x * dy) * panScale;
-      this.focus.z -= (right.z * dx + forward.z * dy) * panScale;
+      this.focus.x += (right.x * dx + forward.x * dy) * panScale;
+      this.focus.z += (right.z * dx + forward.z * dy) * panScale;
     }
   };
 

@@ -41,6 +41,19 @@ import { TerrainMesh } from "./TerrainMesh";
 import { captureThumbnail } from "./thumbnailCapture";
 import { WaterPlane } from "./WaterPlane";
 
+/**
+ * Master kill-switch for Map Editor fog. The owner reported (2026-06-04)
+ * that distance fog was blocking visibility while editing — fog is great
+ * for in-game atmosphere but actively hurts the level-editor workflow,
+ * where you need to see the whole map clearly at any zoom.
+ *
+ * Set this to `true` to restore the per-biome fog (atmosphere data model
+ * still carries fogColor / fogNear / fogFar — only the actual scene.fog
+ * assignment is gated). Atmosphere subscriber and applyAtmosphere() will
+ * resume writing scene.fog from the active BiomeAtmosphere unchanged.
+ */
+const ENABLE_MAP_EDITOR_FOG = false;
+
 export class MapSceneManager {
   readonly scene: THREE.Scene;
   readonly renderer: THREE.WebGLRenderer;
@@ -102,9 +115,21 @@ export class MapSceneManager {
     // (skyHorizon tone — matches the SkyDome horizon band so the fog at
     // distance reads coherently against an uncovered patch of sky).
     this.scene.background = new THREE.Color(0xc8e6ff);
-    // Fog gets fully rewritten by the atmosphere subscriber below; this
-    // initial allocation just keeps the scene legal until the first push.
-    this.scene.fog = new THREE.Fog(0xc8e6ff, 100, 500);
+    // Fog is gated by ENABLE_MAP_EDITOR_FOG (see top of file). Owner
+    // disabled it 2026-06-04 — it blocked visibility while editing. The
+    // biome atmosphere data model (fogColor/fogNear/fogFar) is preserved
+    // so runtime/game scenes can still use it; only the editor's
+    // scene.fog uniform is suppressed.
+    if (ENABLE_MAP_EDITOR_FOG) {
+      // Fog gets fully rewritten by the atmosphere subscriber below; this
+      // initial allocation just keeps the scene legal until the first push.
+      this.scene.fog = new THREE.Fog(0xc8e6ff, 100, 500);
+    } else {
+      this.scene.fog = null;
+      console.info(
+        "[map-editor] fog disabled — set ENABLE_MAP_EDITOR_FOG = true in MapSceneManager.ts to restore",
+      );
+    }
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(window.devicePixelRatio);
@@ -530,11 +555,16 @@ export class MapSceneManager {
     this.hemi.intensity = atm.hemiIntensity;
     // Replace the fog wholesale — Three accepts a new Fog directly on the
     // scene and adopts its uniforms on the next frame.
-    this.scene.fog = new THREE.Fog(
-      new THREE.Color(atm.fogColor[0], atm.fogColor[1], atm.fogColor[2]),
-      atm.fogNear,
-      atm.fogFar,
-    );
+    // Gated on ENABLE_MAP_EDITOR_FOG: when off, the BiomeAtmosphere's
+    // fog fields are read but never applied to the live scene. The data
+    // is preserved on disk + in memory so runtime/game can still use it.
+    if (ENABLE_MAP_EDITOR_FOG) {
+      this.scene.fog = new THREE.Fog(
+        new THREE.Color(atm.fogColor[0], atm.fogColor[1], atm.fogColor[2]),
+        atm.fogNear,
+        atm.fogFar,
+      );
+    }
     // Scene background reads as a fallback color where the SkyDome doesn't
     // cover (e.g. behind the far plane at extreme angles). Match the
     // horizon band so the seam is invisible.
