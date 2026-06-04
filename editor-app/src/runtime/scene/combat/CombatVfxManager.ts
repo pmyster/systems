@@ -130,6 +130,15 @@ export class CombatVfxManager {
           this.spawnDecal(e.x, e.y, e.z);
           this.spawnDamageNumber(e.damage, e.hitZone, e.x, e.y, e.z);
           break;
+        case "projectile_impact_terrain":
+        case "beam_blocked_by_terrain":
+          // Phase 1 Week 5 — terrain occlusion. Same scorch-decal pool
+          // as unit hits, so the owner SEES a black mark on the hill
+          // face where the round dug in. No damage number — nothing
+          // was damaged. Decal-only is intentional: it's the visual
+          // proof that the hill blocked the shot.
+          this.spawnDecal(e.x, e.y, e.z);
+          break;
         case "death":
         case "projectile_spawned":
         case "projectile_despawned":

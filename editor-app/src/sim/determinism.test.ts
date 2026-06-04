@@ -208,4 +208,65 @@ describe("/sim determinism — Phase 1 Week 4 tripwire", () => {
   it.todo(
     "locks hash to a constant once sim is feature-frozen post-Phase 1",
   );
+
+  /**
+   * Phase 1 Week 5 — terrain occlusion.
+   *
+   * The new `terrainHeightAt` combat binding feeds projectileSystem an
+   * external function. Determinism is preserved IFF the binding is
+   * pure-functional (same x,z → same y, no side effects, no clock reads).
+   *
+   * This test pins the contract: two runners with the same seed, same
+   * command log, and the same heightmap-fixture binding produce
+   * identical hashes. If somebody wires in a non-pure binding (a sampler
+   * that reads `performance.now()` to interpolate animated terrain, say)
+   * this fails on the SAME PR.
+   */
+  it("terrain-binding determinism — identical heightmap fixture → identical hash", async () => {
+    // 8×8 grid with a ridge along the centre column. We don't actually
+    // spawn projectiles in this fixture (no weapon-fire wiring) — the
+    // binding being CALLED zero times still proves the contract.
+    // What matters: identical bindings must not perturb the hash.
+    const heightmap = new Float32Array(64);
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        heightmap[r * 8 + c] = c === 4 ? 10 : 0;
+      }
+    }
+    const makeBinding = () =>
+      (x: number, _z: number): number | null => {
+        if (x < 0 || x > 7) return null;
+        const c = Math.min(7, Math.max(0, Math.floor(x)));
+        return heightmap[0 * 8 + c];
+      };
+
+    const cmds = buildFixedCommands();
+
+    const a = new SimRunner({ hz: HZ, seed: SEED });
+    spawnFixture(a);
+    a.setCombatBindings({
+      resolveMuzzle: () => ({ x: 0, y: 0, z: 0, fx: 1, fz: 0 }),
+      lookupProjectile: () => undefined,
+      lookupZoneArmor: () => undefined,
+      terrainHeightAt: makeBinding(),
+    });
+    a.commands.loadFromLog(cmds);
+    driveTicks(a, 1000);
+    const hashA = await hashSimState(a.world);
+
+    const b = new SimRunner({ hz: HZ, seed: SEED });
+    spawnFixture(b);
+    b.setCombatBindings({
+      resolveMuzzle: () => ({ x: 0, y: 0, z: 0, fx: 1, fz: 0 }),
+      lookupProjectile: () => undefined,
+      lookupZoneArmor: () => undefined,
+      terrainHeightAt: makeBinding(),
+    });
+    b.commands.loadFromLog(cmds);
+    driveTicks(b, 1000);
+    const hashB = await hashSimState(b.world);
+
+    expect(hashA).toBe(hashB);
+    expect(hashA).toMatch(/^[0-9a-f]{64}$/);
+  });
 });

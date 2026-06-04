@@ -66,10 +66,33 @@ export interface SimRunnerOpts {
  * runner with combat bindings; the Week 3 GameRuntime always provides
  * them.
  */
+/**
+ * Terrain height query at world (x, z). Used by projectileSystem to
+ * terminate projectiles that hit the ground (ballistic) or to step a
+ * beam ray and stop at the first sample below terrain.
+ *
+ * Returns Y in world meters when (x, z) is INSIDE the map. Returns
+ * `null` when (x, z) is OUTSIDE the map bounds — sim policy is to treat
+ * `null` as "no terrain here, continue" and warn once per match (the
+ * projectile flew off the edge, which is a surfacing edge-case bug).
+ *
+ * The binding is pure-functional: same (x, z) → same Y, no side effects.
+ * Determinism is preserved trivially because the heightmap is static
+ * authored data, not per-tick state.
+ */
+export type TerrainHeightLookup = (x: number, z: number) => number | null;
+
 export interface CombatBindings {
   readonly resolveMuzzle: MuzzleResolver;
   readonly lookupProjectile: ProjectileLookup;
   readonly lookupZoneArmor: ZoneArmorLookup;
+  /**
+   * Terrain height at world (x, z). Phase 1 Week 5 — terrain occlusion.
+   * Optional for backward compatibility with existing test fixtures that
+   * don't care about terrain; when absent, projectileSystem skips the
+   * terrain check entirely (legacy 2D-flat behaviour).
+   */
+  readonly terrainHeightAt?: TerrainHeightLookup;
 }
 
 export class SimRunner {
@@ -163,12 +186,16 @@ export class SimRunner {
         tickId,
       );
       // 6. Advance projectiles, gather impact events.
+      //    Terrain occlusion (Phase 1 Week 5): if the runtime supplied a
+      //    terrainHeightAt binding, projectiles + beams check against the
+      //    heightmap; otherwise system runs legacy 2D-flat behaviour.
       projectileSystem(
         this.world,
         dtSec,
         this.events,
         this.impacts,
         tickId,
+        this.combat.terrainHeightAt,
       );
       // 7. Apply damage, tag Dead.
       impactSystem(

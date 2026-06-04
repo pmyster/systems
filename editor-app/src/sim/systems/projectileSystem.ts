@@ -63,6 +63,35 @@ const HIT_RADIUS2 = HIT_RADIUS_M * HIT_RADIUS_M;
 /** Gravity on ballistic projectiles. Y is up. */
 const GRAVITY_MPS2 = 9.81;
 
+/**
+ * Beam raycast sample count. Walk the muzzle→target ray in N evenly
+ * spaced samples and check `terrainHeightAt` at each. 32 picked over the
+ * brief's 16 after testing: thin spires / narrow ridges were getting
+ * "tunneled" with 16 samples on 100m+ beams (sample spacing > ridge
+ * width). 32 keeps the cost trivial (32 lookups per beam-shot) while
+ * eliminating the visible tunneling artifact. Tunable — Phase 2 may want
+ * a per-beam-range derived sample count.
+ */
+const BEAM_TERRAIN_SAMPLES = 32;
+
+/**
+ * Out-of-bounds warn dedup. The brief asks us to surface — once per
+ * match — that a projectile asked about a terrain cell off the map.
+ * That's an edge-case bug signal (the unit fired past the map boundary).
+ * Tracked at module scope because there's no per-match handle to attach
+ * it to; reset between tests by `_resetTerrainWarnings`.
+ */
+let warnedTerrainOOB = false;
+export function _resetTerrainWarnings(): void {
+  warnedTerrainOOB = false;
+  warnedKinds.clear();
+}
+
+/** Terrain-height callback shape — duplicated from /sim/simRunner to keep
+ * the system import-graph self-contained (avoid circular import). The
+ * runner declares the canonical type. */
+type TerrainHeightLookup = (x: number, z: number) => number | null;
+
 export interface ImpactEvent {
   readonly projectileEid: number;
   readonly targetEid: number;
@@ -103,6 +132,7 @@ export function projectileSystem(
   events: SimEventLog,
   impacts: ImpactEvent[],
   currentTick: number,
+  terrainHeightAt?: TerrainHeightLookup,
 ): void {
   const dtMs = dtSec * 1000;
   const projectiles = query(world, PROJ_QUERY);
@@ -143,26 +173,86 @@ export function projectileSystem(
         const oy = ProjectileOrigin.y[p];
         const tx = Position.x[targetEid];
         const tz = Position.z[targetEid];
+        const ty = Position.y[targetEid];
         // Beam impact at the target's current position.
         const dx = tx - ox;
         const dz = tz - oz;
         const dist = Math.hypot(dx, dz);
         const range = ProjectileMaxRange.value[p];
         if (dist <= range) {
-          const dirX = dist > 0.001 ? dx / dist : 1;
-          const dirZ = dist > 0.001 ? dz / dist : 0;
-          impacts.push({
-            projectileEid: p,
-            targetEid,
-            schemaId: ProjectileSchemaId.value[p],
-            ownerWeaponEid: ProjectileOwner.value[p],
-            x: tx,
-            y: Position.y[targetEid],
-            z: tz,
-            distanceM: dist,
-            dirX,
-            dirZ,
-          });
+          // ----------------------------------------------------------
+          // Terrain occlusion (Phase 1 Week 5).
+          //
+          // Walk the muzzle→target ray in BEAM_TERRAIN_SAMPLES even
+          // steps. At each sample we INTERPOLATE the expected beam Y
+          // linearly between (ox, oy) and (tx, ty), then compare to
+          // the terrain height at (sx, sz). If the beam dips below
+          // the terrain BEFORE reaching the target, line-of-sight is
+          // broken — terminate the beam at that sample, emit a
+          // `beam_blocked_by_terrain` event, DO NOT damage the target.
+          //
+          // We start at i=1 (not 0) so the muzzle point itself doesn't
+          // count as "hitting terrain" (the muzzle is by definition on
+          // or above the firing unit, which is on the terrain). End at
+          // i=N-1 (not N) so a target that itself sits slightly below
+          // terrain due to grounding doesn't get blocked at its own
+          // location — let the target-position damage path handle it.
+          // ----------------------------------------------------------
+          let blockedAt: { x: number; y: number; z: number } | null = null;
+          if (terrainHeightAt) {
+            for (let s = 1; s < BEAM_TERRAIN_SAMPLES; s++) {
+              const t = s / BEAM_TERRAIN_SAMPLES;
+              const sx = ox + (tx - ox) * t;
+              const sy = oy + (ty - oy) * t;
+              const sz = oz + (tz - oz) * t;
+              const groundY = terrainHeightAt(sx, sz);
+              if (groundY === null) {
+                // Out-of-bounds sample — surface once. Don't treat as
+                // blocked (loud-over-silent: a beam sampling off-map
+                // is an edge case worth surfacing, not silently
+                // dropping the shot).
+                if (!warnedTerrainOOB) {
+                  console.warn(
+                    `[projectileSystem] terrainHeightAt OOB at (${sx.toFixed(1)}, ${sz.toFixed(1)}) — beam sample off-map. Projectile continues unaffected. (warned once per match)`,
+                  );
+                  warnedTerrainOOB = true;
+                }
+                continue;
+              }
+              if (sy < groundY) {
+                blockedAt = { x: sx, y: groundY, z: sz };
+                break;
+              }
+            }
+          }
+
+          if (blockedAt) {
+            events.push({
+              kind: "beam_blocked_by_terrain",
+              tick: currentTick,
+              projectileEid: p,
+              schemaId: ProjectileSchemaId.value[p],
+              x: blockedAt.x,
+              y: blockedAt.y,
+              z: blockedAt.z,
+            });
+            // Beam terminates here — do NOT push an impact event.
+          } else {
+            const dirX = dist > 0.001 ? dx / dist : 1;
+            const dirZ = dist > 0.001 ? dz / dist : 0;
+            impacts.push({
+              projectileEid: p,
+              targetEid,
+              schemaId: ProjectileSchemaId.value[p],
+              ownerWeaponEid: ProjectileOwner.value[p],
+              x: tx,
+              y: Position.y[targetEid],
+              z: tz,
+              distanceM: dist,
+              dirX,
+              dirZ,
+            });
+          }
           void oy;
         }
       }
@@ -210,6 +300,51 @@ export function projectileSystem(
     Position.x[p] = newX;
     Position.y[p] = newY;
     Position.z[p] = newZ;
+
+    // ----------------------------------------------------------------
+    // Terrain occlusion (Phase 1 Week 5).
+    //
+    // After Euler integration, check if the projectile's new Y is
+    // BELOW the terrain at (newX, newZ). If so, the round entered the
+    // ground this tick — snap its Y to the surface, emit a
+    // `projectile_impact_terrain` event, despawn. DO NOT continue to
+    // the unit-collision scan: a tank standing on the other side of a
+    // hill should be safe, not get hit by a shell that "passed
+    // through" the dirt.
+    //
+    // Out-of-bounds (sampler returned null): the projectile flew off
+    // the map. Loud-over-silent: warn once, treat as "no terrain,
+    // continue" so the round keeps going (will hit max-range below).
+    // ----------------------------------------------------------------
+    if (terrainHeightAt) {
+      const groundY = terrainHeightAt(newX, newZ);
+      if (groundY === null) {
+        if (!warnedTerrainOOB) {
+          console.warn(
+            `[projectileSystem] terrainHeightAt OOB at (${newX.toFixed(1)}, ${newZ.toFixed(1)}) — ballistic projectile off-map. Continues unaffected. (warned once per match)`,
+          );
+          warnedTerrainOOB = true;
+        }
+      } else if (newY < groundY) {
+        Position.y[p] = groundY;
+        events.push({
+          kind: "projectile_impact_terrain",
+          tick: currentTick,
+          projectileEid: p,
+          schemaId: ProjectileSchemaId.value[p],
+          x: newX,
+          y: groundY,
+          z: newZ,
+        });
+        events.push({
+          kind: "projectile_despawned",
+          tick: currentTick,
+          projectileEid: p,
+        });
+        removeEntity(world, p);
+        continue;
+      }
+    }
 
     // Collision: cheap broad-phase scan against alive enemy units.
     let hitEid = 0;

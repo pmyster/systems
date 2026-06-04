@@ -58,6 +58,10 @@ import { SelectionController } from "./input/SelectionController";
 import { CommandController } from "./input/CommandController";
 import { ProjectileRenderer } from "./scene/combat/ProjectileRenderer";
 import { CombatVfxManager } from "./scene/combat/CombatVfxManager";
+import {
+  makeClampedHeightSampler,
+  makeProjectileHeightSampler,
+} from "./loader/heightmapSampler";
 import { HpBarRenderer } from "./scene/combat/HpBarRenderer";
 import { UNIT_RENDER_SCALE } from "./loader/prefabBank";
 import type { ProjectileSchematic } from "../types/projectile";
@@ -110,6 +114,14 @@ interface HudReadout {
   team0Dead: number;
   team1Dead: number;
   activeProjectiles: number;
+  /**
+   * Phase 1 Week 5 — running total of projectile + beam impacts on
+   * TERRAIN (not units) since match start. Ticks up every time a hill
+   * blocks a shot or a stray round lands in the dirt. Surfaces in the
+   * HUD as "Terrain impacts: N" — proof-the-system-works counter so
+   * the owner can SEE the heightmap doing real work.
+   */
+  terrainImpacts: number;
   matchWinner: number | null;
   /**
    * Total number of warnings the MatchLoader + MatchSpawner pushed
@@ -243,6 +255,7 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
     team0Dead: 0,
     team1Dead: 0,
     activeProjectiles: 0,
+    terrainImpacts: 0,
     matchWinner: null,
     loadWarningCount: match.diagnostics.count(),
     loadWarningLines: initialWarningLines,
@@ -405,27 +418,13 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
     }
 
     // --- Initial spawn ---------------------------------------------------
-    const tileM = match.map.manifest.terrain.tileSizeM ?? 1;
-    const heightWpx = match.map.manifest.terrain.widthPx;
-    const heightHpx = match.map.manifest.terrain.heightPx;
-    const heightmap = match.map.heightmap;
-    const heightAt = (worldX: number, worldZ: number): number => {
-      const fx = Math.max(0, Math.min(heightWpx - 1, worldX / tileM));
-      const fz = Math.max(0, Math.min(heightHpx - 1, worldZ / tileM));
-      const c0 = Math.floor(fx);
-      const r0 = Math.floor(fz);
-      const c1 = Math.min(heightWpx - 1, c0 + 1);
-      const r1 = Math.min(heightHpx - 1, r0 + 1);
-      const tx = fx - c0;
-      const tz = fz - r0;
-      const h00 = heightmap[r0 * heightWpx + c0];
-      const h10 = heightmap[r0 * heightWpx + c1];
-      const h01 = heightmap[r1 * heightWpx + c0];
-      const h11 = heightmap[r1 * heightWpx + c1];
-      const a = h00 * (1 - tx) + h10 * tx;
-      const b = h01 * (1 - tx) + h11 * tx;
-      return a * (1 - tz) + b * tz;
-    };
+    // Heightmap samplers — extracted to a shared util so spawn-path
+    // (clamped to map edge) and projectile-path (null-on-OOB for the
+    // loud-over-silent OOB warn) share the same bilinear math. Drift
+    // between the two would produce visible Z-fighting at the unit/ground
+    // contact line and silent damage-through-hill bugs respectively.
+    const heightAt = makeClampedHeightSampler(match.map);
+    const projectileHeightAt = makeProjectileHeightSampler(match.map);
 
     // Week 3 — TWO teams spawn 60m apart along Z so they face each
     // other along the X axis. Team 0 (blue) on -X side facing +X;
@@ -483,6 +482,10 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
       match.diagnostics,
     );
     const spawnedCount = team0Count + team1Count + buildingCount;
+    // Running total of terrain impacts since match start. Bumped each
+    // time the events drain surfaces a projectile_impact_terrain or
+    // beam_blocked_by_terrain event. Surfaced to HUD via setHud below.
+    let terrainImpactCount = 0;
     console.info(
       `[GameRuntime] spawned ${spawnedCount} entities (team 0: ${team0Count}, team 1: ${team1Count}, buildings: ${buildingCount}) across ${match.typeRegistry.size()} unit type(s).`,
     );
@@ -579,6 +582,13 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
       resolveMuzzle,
       lookupProjectile,
       lookupZoneArmor,
+      // Phase 1 Week 5 — terrain occlusion. Projectiles + beams now
+      // sample the heightmap and abort before reaching their target if
+      // a hill is in the way. Re-uses the same bilinear sampler as
+      // unit-spawn grounding (single source of truth) so the
+      // projectile's "I hit dirt" line aligns with where a unit would
+      // be standing on that dirt.
+      terrainHeightAt: projectileHeightAt,
     });
 
     // --- Combat VFX --------------------------------------------------
@@ -789,6 +799,17 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
           case "death":
             audioBus.play(AudioCue.UnitDeath);
             break;
+          case "projectile_impact_terrain":
+          case "beam_blocked_by_terrain":
+            // Phase 1 Week 5 — terrain occlusion. Bump the HUD's
+            // proof-the-system-works counter; the scorch decal itself
+            // is spawned by CombatVfxManager.ingest above.
+            terrainImpactCount++;
+            audioBus.play(
+              AudioCue.ImpactKinetic,
+              new THREE.Vector3(ev.x, ev.y, ev.z),
+            );
+            break;
           // projectile_spawned / projectile_despawned: render-only, no audio.
           default:
             break;
@@ -860,6 +881,7 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
           team0Dead: tally.team0Dead,
           team1Dead: tally.team1Dead,
           activeProjectiles: tally.activeProjectiles,
+          terrainImpacts: terrainImpactCount,
           matchWinner: winner,
         }));
         // Recording HUD — duration since start + current clip buffer.
@@ -992,6 +1014,7 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
           Team 1 (red):  {hud.team1Alive} alive · {hud.team1Dead} dead
         </div>
         <div>Projectiles: {hud.activeProjectiles}</div>
+        <div>Terrain impacts: {hud.terrainImpacts}</div>
         <div>
           Navmesh: {hud.navMeshStatus}
           {hud.navMeshError ? ` (${hud.navMeshError})` : ""}

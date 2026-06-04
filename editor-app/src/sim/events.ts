@@ -75,6 +75,41 @@ export type SimEvent =
       readonly tick: number;
       readonly entityEid: number;
       readonly teamId: number;
+    }
+  /**
+   * A ballistic projectile entered terrain — the hill / mountain
+   * intercepted it before it reached its locked target. Render-side
+   * spawns a ground scorch decal at (x, y, z). NO damage is applied —
+   * the impactSystem never sees this event.
+   *
+   * Loud-over-silent: every blocked shot fires this event so the HUD's
+   * "Terrain impacts: N" counter ticks up and the owner can SEE that
+   * the hill is doing real work.
+   */
+  | {
+      readonly kind: "projectile_impact_terrain";
+      readonly tick: number;
+      readonly projectileEid: number;
+      readonly schemaId: number;
+      readonly x: number;
+      readonly y: number;
+      readonly z: number;
+    }
+  /**
+   * A beam projectile's instant raycast hit the terrain before reaching
+   * its locked target — line-of-sight blocked by a hill. Render-side
+   * spawns the same scorch decal type as projectile_impact_terrain.
+   * NO damage applies. Separate event kind (not a flag on impact) so
+   * the HUD counter can split them later if useful.
+   */
+  | {
+      readonly kind: "beam_blocked_by_terrain";
+      readonly tick: number;
+      readonly projectileEid: number;
+      readonly schemaId: number;
+      readonly x: number;
+      readonly y: number;
+      readonly z: number;
     };
 
 /**
