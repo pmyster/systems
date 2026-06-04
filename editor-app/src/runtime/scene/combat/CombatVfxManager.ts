@@ -26,6 +26,20 @@ import * as THREE from "three";
 
 import type { SimEvent } from "../../../sim/events";
 import type { ArmorZone } from "../../../types/vulnerability";
+import { UNIT_RENDER_SCALE } from "../../loader/prefabBank";
+
+// VFX primitive sizes are authored in NATIVE sim meters (chassis-scale),
+// then multiplied by UNIT_RENDER_SCALE so they look right next to a unit
+// rendered at the same scale. Without this, a 0.6m muzzle flash sits next
+// to a 0.6m-rendered tank (which represents a 6m sim tank) and dwarfs it.
+//
+// The decal Y-up alignment (rotateX -PI/2) and the +1 / +0.01 vertical
+// offsets in spawn* also pass through scale where they're chassis-relative.
+const FLASH_BASE_RADIUS_M = 0.6;
+const FLASH_PEAK_SCALE = 1.5; // multiplied by FLASH_BASE_RADIUS at age=0
+const DECAL_BASE_SIZE_M = 1.5;
+const FLASH_Y_OFFSET_M = 1.0; // muzzle ~1m above unit origin (chassis-rel)
+const DECAL_Y_OFFSET_M = 0.01; // hover just above ground
 
 interface MuzzleFlashSlot {
   position: THREE.Vector3;
@@ -67,7 +81,10 @@ export class CombatVfxManager {
     this.group.name = "CombatVFX";
 
     // Muzzle flash: small unlit orange octahedron, additive blend.
-    const flashGeo = new THREE.OctahedronGeometry(0.6, 0);
+    const flashGeo = new THREE.OctahedronGeometry(
+      FLASH_BASE_RADIUS_M * UNIT_RENDER_SCALE,
+      0,
+    );
     const flashMat = new THREE.MeshBasicMaterial({
       color: 0xffd070,
       transparent: true,
@@ -82,7 +99,8 @@ export class CombatVfxManager {
     this.group.add(this.flashes);
 
     // Impact decals: dark scorch quads on the ground.
-    const decalGeo = new THREE.PlaneGeometry(1.5, 1.5);
+    const decalSize = DECAL_BASE_SIZE_M * UNIT_RENDER_SCALE;
+    const decalGeo = new THREE.PlaneGeometry(decalSize, decalSize);
     decalGeo.rotateX(-Math.PI / 2);
     const decalMat = new THREE.MeshBasicMaterial({
       color: 0x000000,
@@ -144,7 +162,10 @@ export class CombatVfxManager {
     for (let i = 0; i < this.flashSlots.length; i++) {
       const f = this.flashSlots[i];
       const age = this.frame - f.bornFrame;
-      const s = 1.5 * (1 - age / FLASH_LIFETIME_FRAMES);
+      // Pulse from FLASH_PEAK_SCALE → 0 over lifetime. The base geometry
+      // is already scaled by UNIT_RENDER_SCALE, so this is a unitless
+      // multiplier on top.
+      const s = FLASH_PEAK_SCALE * (1 - age / FLASH_LIFETIME_FRAMES);
       scale.set(s, s, s);
       matrix.compose(f.position, quat, scale);
       this.flashes.setMatrixAt(i, matrix);
@@ -182,16 +203,21 @@ export class CombatVfxManager {
 
   private spawnFlash(x: number, y: number, z: number): void {
     if (this.flashSlots.length >= MAX_FLASHES) this.flashSlots.shift();
+    // FLASH_Y_OFFSET_M is chassis-relative (above the muzzle), so it
+    // scales with render. The (x, y, z) comes from resolveMuzzle which
+    // is already in render-space world coords.
     this.flashSlots.push({
-      position: new THREE.Vector3(x, y + 1, z),
+      position: new THREE.Vector3(x, y + FLASH_Y_OFFSET_M * UNIT_RENDER_SCALE, z),
       bornFrame: this.frame,
     });
   }
 
   private spawnDecal(x: number, y: number, z: number): void {
     if (this.decalSlots.length >= MAX_DECALS) this.decalSlots.shift();
+    // DECAL_Y_OFFSET_M is a ground-clearance epsilon — keep tiny but
+    // proportional so it still hovers at the right "scale of small."
     this.decalSlots.push({
-      position: new THREE.Vector3(x, y + 0.01, z),
+      position: new THREE.Vector3(x, y + DECAL_Y_OFFSET_M * UNIT_RENDER_SCALE, z),
       bornFrame: this.frame,
     });
   }
@@ -205,12 +231,14 @@ export class CombatVfxManager {
   ): void {
     // performance.now is fine here — render-side, not sim.
     const bornMs = performance.now();
+    // The +2 was a chassis-relative "above the unit" anchor in native
+    // meters. At render scale, hover this much above the impact point.
     this.damageNumbers.push({
       id: this.nextDamageId++,
       value,
       hitZone,
       x,
-      y: y + 2,
+      y: y + 2 * UNIT_RENDER_SCALE,
       z,
       bornMs,
     });

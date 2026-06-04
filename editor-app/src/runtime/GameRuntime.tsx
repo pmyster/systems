@@ -59,6 +59,7 @@ import { CommandController } from "./input/CommandController";
 import { ProjectileRenderer } from "./scene/combat/ProjectileRenderer";
 import { CombatVfxManager } from "./scene/combat/CombatVfxManager";
 import { HpBarRenderer } from "./scene/combat/HpBarRenderer";
+import { UNIT_RENDER_SCALE } from "./loader/prefabBank";
 import type { ProjectileSchematic } from "../types/projectile";
 import type { ArmorZone, ZoneArmor } from "../types/vulnerability";
 import { ReplayRecorder } from "./replay/ReplayRecorder";
@@ -548,7 +549,21 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
         ly = hp.local_position[1];
         lz = hp.local_position[2];
       }
-      tmpVec.set(lx, ly, lz).applyQuaternion(tmpQuat);
+      // Hardpoint offsets are authored in NATIVE sim meters (chassis-scale),
+      // but units RENDER at UNIT_RENDER_SCALE. We must scale the offset so
+      // the muzzle WORLD position aligns with the visible barrel mesh. If we
+      // don't, projectiles spawn 1-2m forward of empty space "in front of"
+      // the tiny tank instead of from its barrel.
+      //
+      // Sim trade-off: the projectile now departs from a point ~1-2m closer
+      // to the unit center than the sim "thinks" the hardpoint is. With
+      // weapon ranges of 50m+ and target distances of 60m+, this delta is
+      // <3% of flight distance — negligible. Hit detection, range gates,
+      // and damage use unscaled sim positions; only this RENDER spawn
+      // location and rotation pass through the scale.
+      tmpVec.set(lx, ly, lz)
+        .multiplyScalar(UNIT_RENDER_SCALE)
+        .applyQuaternion(tmpQuat);
       const wx = ox + tmpVec.x;
       const wy = oy + tmpVec.y;
       const wz = oz + tmpVec.z;
