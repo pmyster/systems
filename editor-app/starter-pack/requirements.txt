@@ -33,6 +33,7 @@ trimesh==4.5.3
 pygltflib==1.16.4
 pymeshlab==2025.7.post1
 xatlas==0.0.11
+fast-simplification==0.1.13
 
 # --- Image I/O + segmentation (rembg uses ONNX runtime for U2Net background removal) ---
 opencv-python==4.10.0.84
