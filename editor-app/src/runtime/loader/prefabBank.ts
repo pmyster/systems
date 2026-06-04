@@ -279,7 +279,33 @@ export class PrefabBank {
       // (across re-mounts of the runtime view) will read the SAME root and
       // pick up the same transform. The scale is idempotent: applying
       // setScalar(0.1) twice to the same root still yields scale=0.1, not
-      // 0.01 (it's an assignment, not a multiply).
+      // 0.01 (it's an assignment, not a multiply). The position multiply
+      // is also single-application by virtue of the cache check above
+      // (re-entrant load() returns the cached root before reaching here).
+      //
+      // --- WHY ALSO SCALE root.position ---
+      // Both prefab sources author a non-zero `root.position` as a PRE-SCALE
+      // grounding/centering offset:
+      //   - mesh-loader sets `group.position.set(-cx, -minY, -cz)` so the
+      //     mesh bbox bottom sits at parent y=0 (floored to the ground).
+      //   - tank/template buildGeometry() sets `pivot.position.set(-cx, -cy,
+      //     -cz)` so the bbox CENTRE sits at parent origin.
+      // Both offsets are in AUTHORED meters (NORMALIZE_TARGET_M-scale). When
+      // we then scale children by 0.1, the children shrink but `root.position`
+      // does NOT — it's the root's translation in its PARENT's frame, which
+      // setScalar does not touch. The result: the unit renders OFFSET from
+      // ground by the un-scaled grounding amount (e.g. a Hunyuan tank with
+      // `-minY` = 4 m hovers ~3.6 m above the heightmap sample point after
+      // the 0.1× scale, because the +4 m offset no longer cancels the now
+      // 0.4 m mesh-local minY).
+      // Fix: multiply `root.position` by the same scale so the floor offset
+      // shrinks in lockstep with the geometry. After this, bbox bottom (for
+      // GLBs) or bbox centre (for templates) lands at parent origin again,
+      // and MatchSpawner's `worldY = heightAt(x,z)` plants the unit on the
+      // ground exactly as before the 4168aca scale change.
+      // Procedural buildings author position=(0,0,0); 0×0.1 = 0, so they
+      // pass through unchanged.
+      root.position.multiplyScalar(UNIT_RENDER_SCALE);
       root.scale.setScalar(UNIT_RENDER_SCALE);
       root.updateMatrixWorld(true);
       this.cache.set(key, root);
