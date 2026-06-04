@@ -58,6 +58,7 @@ import { SelectionController } from "./input/SelectionController";
 import { CommandController } from "./input/CommandController";
 import { ProjectileRenderer } from "./scene/combat/ProjectileRenderer";
 import { CombatVfxManager } from "./scene/combat/CombatVfxManager";
+import { HpBarRenderer } from "./scene/combat/HpBarRenderer";
 import type { ProjectileSchematic } from "../types/projectile";
 import type { ArmorZone, ZoneArmor } from "../types/vulnerability";
 import { ReplayRecorder } from "./replay/ReplayRecorder";
@@ -261,6 +262,13 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
    * can be removed and the overlay defaulted back ON.
    */
   const [damageOverlayVisible, setDamageOverlayVisible] = useState(false);
+  /**
+   * Persistent HP bars above every living unit. Default ON — the owner
+   * couldn't tell visually whether tanks were damaging each other; bars
+   * give the standard RTS feedback loop. Toggle with `H` (mirrors the
+   * `~` toggle pattern for damage numbers).
+   */
+  const [hpBarsVisible, setHpBarsVisible] = useState(true);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -563,6 +571,11 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
     scene.add(projRenderer.group);
     const vfx = new CombatVfxManager();
     scene.add(vfx.group);
+    // HP bars float above every living unit. visible-on-mount mirrors the
+    // initial React state (`hpBarsVisible` defaults to true). The H hotkey
+    // below flips both the renderer and the HUD label.
+    const hpBars = new HpBarRenderer();
+    scene.add(hpBars.group);
 
     // --- Navmesh bake + path follower (async) ---------------------------
     let navHandle: NavMeshHandle | null = null;
@@ -648,6 +661,18 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
       if (e.key === "`" || e.key === "~" || e.code === "Backquote") {
         e.preventDefault();
         setDamageOverlayVisible((v) => !v);
+        return;
+      }
+      // H — toggle persistent HP bars above every living unit. Default ON
+      // (per the brief: always-visible feedback is friendlier for combat
+      // verification). The HUD label below mirrors the renderer state.
+      if (e.key === "h" || e.key === "H") {
+        e.preventDefault();
+        setHpBarsVisible((v) => {
+          const next = !v;
+          hpBars.setVisible(next);
+          return next;
+        });
         return;
       }
       // F11 — toggle replay recording. Disabled in replay mode (would be
@@ -784,6 +809,9 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
       // ECS → InstancedMesh sync + InstanceIndex rebuild for selection.
       runUnitRenderSystem(sim.world, unitRenderer, instanceIndex);
       projRenderer.update(sim.world);
+      // Per-frame HP bar sync — reads Position + Health, writes sprite
+      // pose/scale/colour. Cheap (≤ ~100 units in Phase 1 budget).
+      hpBars.updateFromWorld(sim.world);
       renderer.render(scene, camera);
 
       fpsAccum += dtReal;
@@ -860,6 +888,7 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
       rtsCamera.dispose();
       projRenderer.dispose();
       vfx.dispose();
+      hpBars.dispose();
       unitRenderer.dispose();
       terrain.dispose();
       physics.dispose();
@@ -908,6 +937,7 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
           </div>
         )}
         <div>[`] Damage numbers: {damageOverlayVisible ? "on" : "off"}</div>
+        <div>[H] HP bars: {hpBarsVisible ? "on" : "off"}</div>
       </div>
       {/* Transient toast — auto-clears after a few seconds via effect below. */}
       {toast && <div style={TOAST_STYLE}>{toast}</div>}
