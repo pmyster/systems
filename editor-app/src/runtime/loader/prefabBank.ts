@@ -49,6 +49,61 @@ import type { LoadDiagnostics } from "./LoadDiagnostics";
 import { buildProceduralBuildingMesh } from "../scene/proceduralMeshes";
 
 /**
+ * Global render-time scale applied to every loaded unit/building prefab.
+ *
+ * --- WHY THIS EXISTS ---
+ * The simulation works in meters and schematics declare meter-scale
+ * dimensions (mk01 chassis ≈ 6 m, Hunyuan-generated tanks normalize to
+ * ~8 m via mesh-loader's NORMALIZE_TARGET_M), but on a 129 m medium map
+ * those feel oversized — a 6 m tank takes ~5% of screen width at typical
+ * camera distance, which reads "monster truck" instead of "tank in
+ * formation". Per owner request 2026-06-04: shrink rendered units to
+ * 1/10 so a medium map feels like a battlefield instead of a parking lot.
+ *
+ * --- WHERE THE SCALE IS APPLIED ---
+ * In PrefabBank.load(), right after the adaptive resolver returns the
+ * Object3D root and BEFORE caching. A single `scene.scale.setScalar(...)`
+ * + `updateMatrixWorld(true)` bakes the scale into world transforms so
+ * InstancedUnitRenderer's per-sub-mesh `matrixWorld.decompose(...)` picks
+ * up the new scale automatically (no renderer change needed). All three
+ * resolver paths flow through this central point:
+ *   - "file" GLBs (loaded via mesh-loader, normalized to ~8 m)
+ *   - "template" procedural unit chassis (tank/mech/flyer from TEMPLATES)
+ *   - "procedural_building" turrets/walls/AA/bunkers (proceduralMeshes.ts)
+ * → All three become 1/10 of their authored size in render space.
+ *
+ * --- WHAT THIS DOES NOT TOUCH ---
+ * Sim positions, hardpoint world-position math, projectile spawn points,
+ * weapon ranges — all stay in NATIVE METERS. Verified 2026-06-04:
+ *   - `MatchSpawner.spawnInitialUnits` reads `schematic.hardpoints[h]`
+ *     directly (the AUTHORED schematic object), not anything off the
+ *     rendered prefab subtree.
+ *   - `GameRuntime.resolveMuzzle` reads `schem.hardpoints[hardpointIdx]
+ *     .local_position` directly and rotates by the entity's quaternion.
+ *     No part of muzzle math goes through the scaled render transform.
+ *   - `InstancedUnitRenderer.register` captures each sub-mesh's
+ *     rest-pose transform AFTER our updateMatrixWorld → it picks up the
+ *     scale correctly and composes it per-frame, but only for VISUALS.
+ * So projectile spawn positions stay at the schematic-declared meter
+ * offset (~2 m forward), even though the visible muzzle is at ~0.2 m
+ * forward. This is acceptable for v1; if it ever reads as "projectiles
+ * spawn out in front of the tiny tank", we either:
+ *   a) un-scale the visual muzzle (multiply local_position back by 10
+ *      inside resolveMuzzle), or
+ *   b) accept it as the "RTS abstraction" — visible muzzle ≠ sim spawn
+ *      point, like every classic RTS where projectiles fly out of the
+ *      tank's "general area" not its actual barrel.
+ *
+ * --- TUNING ---
+ * If the owner says "still too big" → drop to 0.05.
+ * If the owner says "now too tiny to see" → bump to 0.15 or 0.2.
+ * Selection raycasts hit per-instance sphere; at 0.1× the click hit
+ * radius is ~0.4 m instead of ~4 m, which may demand a fatter selection
+ * radius downstream (flagged as a follow-up).
+ */
+export const UNIT_RENDER_SCALE = 0.1;
+
+/**
  * Adaptive resolver: given a mesh asset ref, return a stable cache key
  * AND an async loader that produces the THREE.Object3D root.
  *
@@ -211,7 +266,29 @@ export class PrefabBank {
 
     const p = (async () => {
       const root = await this.runResolver(ref);
+      // Apply the global render-time scale BEFORE caching. The scale is
+      // baked into the prefab root's transform, then updateMatrixWorld(true)
+      // propagates it down to every child's matrixWorld — which is what
+      // InstancedUnitRenderer reads at register() time to capture each
+      // sub-mesh's rest-pose local-to-prefab-root. So a single setScalar()
+      // here makes every sub-mesh (chassis hull + N weapon barrels +
+      // procedural building parts) render at UNIT_RENDER_SCALE.
+      //
+      // We scale on the cached root once (not per-consumer) because the
+      // bank promises a stable Object3D per key — every InstancedUnitRenderer
+      // (across re-mounts of the runtime view) will read the SAME root and
+      // pick up the same transform. The scale is idempotent: applying
+      // setScalar(0.1) twice to the same root still yields scale=0.1, not
+      // 0.01 (it's an assignment, not a multiply).
+      root.scale.setScalar(UNIT_RENDER_SCALE);
+      root.updateMatrixWorld(true);
       this.cache.set(key, root);
+      // Loud-over-silent: one log line per cache insertion so the owner
+      // can confirm in the console that the scale fired for every prefab.
+      // The cumulative count is `this.cache.size` after the set above.
+      console.info(
+        `[prefab] applied UNIT_RENDER_SCALE = ${UNIT_RENDER_SCALE} to "${key}" — ${this.cache.size} prefab(s) scaled total`,
+      );
       return root;
     })();
     this.inflight.set(key, p);
