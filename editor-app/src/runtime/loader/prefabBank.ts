@@ -46,6 +46,7 @@ import { TEMPLATES } from "../../lib/templates";
 import { loadMeshFromPath } from "../../components/MeshWorkspace/mesh-loader";
 import type { MeshAssetRef } from "../../types/unit";
 import type { LoadDiagnostics } from "./LoadDiagnostics";
+import { buildProceduralBuildingMesh } from "../scene/proceduralMeshes";
 
 /**
  * Adaptive resolver: given a mesh asset ref, return a stable cache key
@@ -67,6 +68,7 @@ interface MeshAssetResolver<K extends MeshAssetRef["kind"]> {
 const MESH_ASSET_RESOLVERS: {
   readonly template: MeshAssetResolver<"template">;
   readonly file: MeshAssetResolver<"file">;
+  readonly procedural_building: MeshAssetResolver<"procedural_building">;
 } = {
   template: {
     key: (ref) => `template:${ref.template_id}`,
@@ -105,6 +107,16 @@ const MESH_ASSET_RESOLVERS: {
       }
     },
   },
+  // Phase 2 Stage 1 — procedural building meshes. No I/O, no parse — the
+  // builder constructs a Three.js Group of primitive geometries in memory.
+  // PrefabBank still caches the first instance so all turrets of the
+  // same chassis share one Object3D root (and one set of GPU buffers).
+  procedural_building: {
+    key: (ref) => `procedural_building:${ref.building_chassis}`,
+    load: async (ref) => {
+      return buildProceduralBuildingMesh(ref.building_chassis);
+    },
+  },
 };
 
 /**
@@ -126,6 +138,8 @@ export function meshAssetKey(ref: MeshAssetRef): string {
       return MESH_ASSET_RESOLVERS.template.key(ref);
     case "file":
       return MESH_ASSET_RESOLVERS.file.key(ref);
+    case "procedural_building":
+      return MESH_ASSET_RESOLVERS.procedural_building.key(ref);
     default: {
       // Unknown kind: build a stable key from the JSON shape itself so
       // dedup still works for repeat occurrences. The actual load() will
@@ -221,6 +235,8 @@ export class PrefabBank {
         return MESH_ASSET_RESOLVERS.template.load(ref);
       case "file":
         return MESH_ASSET_RESOLVERS.file.load(ref);
+      case "procedural_building":
+        return MESH_ASSET_RESOLVERS.procedural_building.load(ref);
       default: {
         const unknownRef = ref as { readonly kind?: string };
         const kind = unknownRef.kind ?? "<missing>";

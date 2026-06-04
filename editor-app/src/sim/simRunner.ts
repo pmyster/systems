@@ -47,6 +47,7 @@ import {
   type ZoneArmorLookup,
 } from "./systems/impactSystem";
 import { deathSystem } from "./systems/deathSystem";
+import { bunkerHealSystem } from "./systems/bunkerHealSystem";
 
 export interface SimRunnerOpts {
   /** Fixed sim rate. Project-wide = 30. */
@@ -178,8 +179,18 @@ export class SimRunner {
         this.combat.lookupProjectile,
         this.combat.lookupZoneArmor,
       );
+      // 7.5. Phase 2 Stage 1 — bunkers heal friendly units in range.
+      //      Runs AFTER damage applies but BEFORE deathSystem tags Dead,
+      //      so a unit can be healed past 0 in the same tick it would
+      //      otherwise die. (Net: bunker healing is a real survival tool,
+      //      not a cosmetic post-mortem.)
+      bunkerHealSystem(this.world);
       // 8. Death events + delayed despawn.
       deathSystem(this.world, this.events, tickId);
+    } else {
+      // Combat disabled but buildings still heal — bunker pulse runs
+      // even in no-combat test paths so the system is exercised.
+      bunkerHealSystem(this.world);
     }
 
     // 9. Movement. Walks each entity toward its current MovementTarget

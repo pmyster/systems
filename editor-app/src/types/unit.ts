@@ -51,7 +51,58 @@ export type ChassisClass =
   | "subterranean"
   | "orbital"
   | "static_structure"
-  | "static_wall";
+  | "static_wall"
+  // ---------------------------------------------------------------------
+  // Phase 2 Stage 1 — building chassis classes.
+  //
+  // Buildings ARE units (architectural decision per Stage 1 brief): they
+  // reuse the same UnitSchematic shape, the same /sim spawn pipeline, the
+  // same target-acquisition + weapon-firing systems. The chassis_class is
+  // the discriminator that triggers building-specific behavior:
+  //
+  //   - building_turret  → beefed-up auto-firing tower with a hardpoint
+  //   - building_wall    → no weapons, very thick armor, not target-able
+  //                        by allies (WallNoFire tag)
+  //   - building_aa      → anti-air, ground targets filtered out
+  //                        (AAFiringArc component, see /sim/world.ts)
+  //   - building_bunker  → no weapons, heals friendly units in radius
+  //                        (BunkerHealRange, see bunkerHealSystem)
+  //
+  // Buildings are spawned WITHOUT MovementSpeed so movementSystem early-
+  // exits on them naturally (no system change needed for "buildings don't
+  // move"). They are placed at authored (x, z) per Match Setup's
+  // PlaceBuildingsStep — outside the team-cluster grid.
+  // ---------------------------------------------------------------------
+  | "building_turret"
+  | "building_wall"
+  | "building_aa"
+  | "building_bunker";
+
+/**
+ * Predicate: is this chassis_class one of the four Stage 1 building classes?
+ * Used by MatchSpawner, target-acquisition, and rendering layers to fork
+ * building-specific behavior without re-listing the enum (adaptive-over-
+ * specific, per CLAUDE.md rule #2 — adding a 5th building class is a
+ * one-line edit here).
+ */
+export function isBuildingChassis(chassis_class: ChassisClass): boolean {
+  return (
+    chassis_class === "building_turret" ||
+    chassis_class === "building_wall" ||
+    chassis_class === "building_aa" ||
+    chassis_class === "building_bunker"
+  );
+}
+
+/** The four building chassis classes, in palette display order. */
+export const BUILDING_CHASSIS_CLASSES = [
+  "building_turret",
+  "building_wall",
+  "building_aa",
+  "building_bunker",
+] as const satisfies readonly ChassisClass[];
+
+export type BuildingChassisClass = (typeof BUILDING_CHASSIS_CLASSES)[number];
 
 export type StructureType =
   | "tower" | "wall" | "gate" | "bunker" | "factory" | "depot" | "relay";
@@ -308,7 +359,23 @@ export interface UnitEvolution {
 
 export type MeshAssetRef =
   | { readonly kind: "template"; readonly template_id: string }
-  | { readonly kind: "file"; readonly path: string };
+  | { readonly kind: "file"; readonly path: string }
+  /**
+   * Phase 2 Stage 1 — procedural building meshes.
+   *
+   * Resolved at runtime to one of the four Group builders in
+   * /runtime/scene/proceduralMeshes.ts. No on-disk asset, no Unit Editor
+   * gallery entry, no GLB pipeline — the geometry is constructed in
+   * memory. The `building_chassis` value is the chassis_class string from
+   * the building's schematic ("building_turret" etc.); kept as a separate
+   * field so the resolver doesn't have to grep the schematic at load time.
+   *
+   * Stage 4 swap: when Hunyuan-generated GLBs land for buildings, the
+   * building schematics flip their `mesh_asset` from this variant to
+   * `{ kind: "file", path: "..." }` — no other code changes (the
+   * MatchSpawner reads chassis_class for behavior, not mesh_asset).
+   */
+  | { readonly kind: "procedural_building"; readonly building_chassis: BuildingChassisClass };
 
 // ---------------------------------------------------------------------------
 // Top-level Unit Schematic.

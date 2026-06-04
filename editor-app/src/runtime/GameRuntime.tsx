@@ -51,7 +51,7 @@ import { RuntimeTerrain } from "./scene/RuntimeTerrain";
 import { InstancedUnitRenderer } from "./scene/InstancedUnitRenderer";
 import { InstanceIndex, runUnitRenderSystem } from "./scene/UnitRenderSystem";
 import { RuntimePhysics } from "./physics/RuntimePhysics";
-import { spawnInitialUnits } from "./spawning/MatchSpawner";
+import { spawnInitialUnits, spawnPlacedBuildings } from "./spawning/MatchSpawner";
 import { bakeNavMesh, type NavMeshHandle } from "./pathfinding/NavMeshBaker";
 import { PathFollowController } from "./pathfinding/PathFollowController";
 import { SelectionController } from "./input/SelectionController";
@@ -458,9 +458,24 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
       -Math.PI / 2, // yaw -90° → face -X (toward team 0)
       match.diagnostics,
     );
-    const spawnedCount = team0Count + team1Count;
+    // Phase 2 Stage 1 — spawn placed buildings AFTER team units so each
+    // building's eid is allocated last. Buildings are static; their
+    // placement coordinates come from MatchData.placedBuildings (authored
+    // in PlaceBuildingsStep). Empty list = legacy behavior (no buildings).
+    const buildingCount = spawnPlacedBuildings(
+      sim.world,
+      match.typeRegistry,
+      match.prefabBank,
+      unitRenderer,
+      match.placedBuildings,
+      heightAt,
+      match.schematics,
+      match.projectileRegistry,
+      match.diagnostics,
+    );
+    const spawnedCount = team0Count + team1Count + buildingCount;
     console.info(
-      `[GameRuntime] spawned ${spawnedCount} entities (team 0: ${team0Count}, team 1: ${team1Count}) across ${match.typeRegistry.size()} unit type(s).`,
+      `[GameRuntime] spawned ${spawnedCount} entities (team 0: ${team0Count}, team 1: ${team1Count}, buildings: ${buildingCount}) across ${match.typeRegistry.size()} unit type(s).`,
     );
     // Spawn pass may have added more warnings (per-type "no prefab"
     // lines + the all-skipped summary). Refresh the HUD chip so the

@@ -26,6 +26,8 @@ import {
 import { pickAndLoadSchematics } from "./loader/schematicLoader";
 import { MatchLoader, type LoadProgress, type MatchData } from "./MatchLoader";
 import { pickAndLoadReplay, type ReplaySession } from "./replay/ReplayPlayer";
+import { PlaceBuildingsStep } from "./MatchSetup/PlaceBuildingsStep";
+import type { BuildingPlacement } from "./BuildingPlacement";
 
 export interface MatchSetupScreenProps {
   /**
@@ -55,6 +57,14 @@ export function MatchSetupScreen(
   // Schematic paths are tracked; their parsed forms are re-read inside the
   // loader so the progress bar reflects the actual load work.
   const [schematicPaths, setSchematicPaths] = useState<readonly string[]>([]);
+
+  // Phase 2 Stage 1 — placed buildings. Populated by the PlaceBuildingsStep
+  // child component. Empty array means the user skipped the step (the
+  // step is OPTIONAL — Load Match works with zero placements, preserving
+  // legacy match-load behavior).
+  const [placedBuildings, setPlacedBuildings] = useState<
+    readonly BuildingPlacement[]
+  >([]);
 
   const [progress, setProgress] = useState<LoadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -105,9 +115,14 @@ export function MatchSetupScreen(
       // re-picked schematics without re-picking the map.
       await loadMapFromDir(mapDir);
       const loader = new MatchLoader();
-      const data = await loader.load(mapDir, schematicPaths, (p) => {
-        setProgress(p);
-      });
+      const data = await loader.load(
+        mapDir,
+        schematicPaths,
+        (p) => {
+          setProgress(p);
+        },
+        placedBuildings,
+      );
       // Forward the (possibly-null) replay session — non-null means
       // the user wants this match to play back the recorded log.
       onLoaded(data, replaySession);
@@ -116,7 +131,7 @@ export function MatchSetupScreen(
       setError(`Match load failed: ${msg}`);
       setBusy(false);
     }
-  }, [mapDir, schematicPaths, onLoaded, replaySession]);
+  }, [mapDir, schematicPaths, onLoaded, replaySession, placedBuildings]);
 
   const onLoadReplay = useCallback(async () => {
     setError(null);
@@ -177,6 +192,21 @@ export function MatchSetupScreen(
         </div>
       </section>
 
+      {mapPreview && (
+        <section style={SECTION_STYLE} aria-label="Place Buildings">
+          <div style={{ width: "100%" }}>
+            <div style={{ marginBottom: 6, color: "#9aa3b0" }}>
+              Place Buildings (optional — Phase 2 Stage 1)
+            </div>
+            <PlaceBuildingsStep
+              map={mapPreview}
+              placements={placedBuildings}
+              onPlacementsChange={setPlacedBuildings}
+            />
+          </div>
+        </section>
+      )}
+
       <section style={SECTION_STYLE}>
         <button
           type="button"
@@ -190,6 +220,11 @@ export function MatchSetupScreen(
         >
           {busy ? "Loading…" : "Load Match"}
         </button>
+        <div style={CHIP_STYLE}>
+          {placedBuildings.length === 0
+            ? "no buildings placed"
+            : `${placedBuildings.length} building${placedBuildings.length === 1 ? "" : "s"} placed`}
+        </div>
       </section>
 
       {progress !== null && (

@@ -311,6 +311,86 @@ export const ProjectileMaxRange = defineComponent({ value: Types.f32 });
 export const ProjectileLifetimeMs = defineComponent({ value: Types.f32 });
 
 // ---------------------------------------------------------------------
+// Phase 2 Stage 1 — building components.
+//
+// Three new sim components gate the four building chassis classes'
+// distinct behaviors. All three are deterministic typed-array stamps,
+// registered in COMPONENT_REGISTRY below so the determinism hash sees
+// them.
+//
+// AAFiringArc          → AA towers; targetAcquisitionSystem consults
+//                        this to reject ground targets. Phase 2 Stage 1
+//                        has no flying targets yet, so AA finds nothing
+//                        and stays Idle (loud-warn-once log at startup).
+//                        TODO(Stage 1+): when a "Flying" tag lands on
+//                        aircraft units, replace pitchMinRad gating with
+//                        a hasComponent(Flying) check.
+//
+// BunkerHealRange      → Bunkers; bunkerHealSystem reads radius +
+//                        healPerTickMj each tick, adds to friendly Health
+//                        within range (clamped at max). Loud-warns once
+//                        per match if a bunker accidentally has no
+//                        radius (radiusM === 0 would silently heal
+//                        nobody — surface it).
+//
+// WallNoFire           → Walls; presence-only tag. The unit will not
+//                        be added to per-team target candidate lists by
+//                        allies (so an allied turret next to a wall
+//                        doesn't pick the wall as a target). Enemies
+//                        CAN still target walls (they soak damage).
+//                        Walls also get no weapon instances spawned.
+// ---------------------------------------------------------------------
+
+/**
+ * AA firing arc — pitch limits in radians.
+ *
+ * `pitchMinRad` is the minimum elevation (above the horizon) at which
+ * the AA gun's target must sit. Targets below pitchMinRad are filtered
+ * out by targetAcquisitionSystem. Default 0.35rad (~20°) — a reasonable
+ * "must be airborne" gate.
+ *
+ * Stage 1 has no flying units; AA towers will acquire nothing. That's
+ * correct. When aircraft land in a later phase, drop the per-target
+ * elevation calc here and switch to a hasComponent(Flying) check.
+ */
+export const AAFiringArc = defineComponent({
+  pitchMinRad: Types.f32,
+  pitchMaxRad: Types.f32,
+});
+
+/**
+ * Bunker heal radius + per-tick heal amount.
+ *
+ * `radiusM` — heal anything friendly within this Euclidean distance (2D,
+ * XZ-plane). 0 = nobody gets healed (loud-warn at startup).
+ *
+ * `healPerTickMj` — added to Health.current per sim tick on each friendly
+ * unit inside the radius. Clamped at Health.max so overhealing is
+ * impossible. Named "Mj" to keep the heat/damage unit story coherent —
+ * 1 MJ of structural-integrity restoration per tick is the v1 baseline.
+ *
+ * For Stage 1: 1 healPerTickMj × 30 ticks/sec = 30 MJ/sec of healing.
+ * A 100-HP unit fully heals in ~3.3 seconds inside the radius. Tunable
+ * per-building via the schematic.
+ */
+export const BunkerHealRange = defineComponent({
+  radiusM: Types.f32,
+  healPerTickMj: Types.f32,
+});
+
+/**
+ * Wall tag — empty schema, presence is the signal. Walls:
+ *   - Are NOT added to ALLIED target candidate lists (allies don't shoot
+ *     own walls). Enemies still target them — walls soak damage by design.
+ *   - Get NO weapon-instance entities spawned (MatchSpawner skips
+ *     hardpoints for wall units; if a wall accidentally has hardpoints,
+ *     MatchSpawner pushes a diagnostic).
+ *
+ * Empty schema, zero-cost as a bitECS tag.
+ */
+export const WallNoFire = defineComponent({});
+
+// ---------------------------------------------------------------------
 // Enums (closed unions stored as ui8). Authored as `as const` so callers
 // get type narrowing.
 // ---------------------------------------------------------------------
@@ -454,6 +534,17 @@ export const COMPONENT_REGISTRY: readonly ComponentRegistryEntry[] = [
   ]},
   { name: "ProjectileMaxRange", component: ProjectileMaxRange, fields: [{ name: "value", arr: ProjectileMaxRange.value }] },
   { name: "ProjectileLifetimeMs", component: ProjectileLifetimeMs, fields: [{ name: "value", arr: ProjectileLifetimeMs.value }] },
+  // Phase 2 Stage 1 — buildings. AAFiringArc + BunkerHealRange carry sim
+  // state read by their consuming systems; both go into the hash.
+  // WallNoFire is a presence-only tag → COMPONENT_TAG_REGISTRY below.
+  { name: "AAFiringArc", component: AAFiringArc, fields: [
+    { name: "pitchMinRad", arr: AAFiringArc.pitchMinRad },
+    { name: "pitchMaxRad", arr: AAFiringArc.pitchMaxRad },
+  ]},
+  { name: "BunkerHealRange", component: BunkerHealRange, fields: [
+    { name: "radiusM", arr: BunkerHealRange.radiusM },
+    { name: "healPerTickMj", arr: BunkerHealRange.healPerTickMj },
+  ]},
 ];
 
 /**
@@ -473,5 +564,10 @@ export const COMPONENT_REGISTRY: readonly ComponentRegistryEntry[] = [
  *     double-count the same state.
  */
 export const COMPONENT_TAG_REGISTRY: readonly { name: string; component: object }[] = [
-  // (Empty for v1. Reserve for future tags whose presence-only state matters.)
+  // Phase 2 Stage 1 — WallNoFire is presence-only AND determinism-relevant
+  // (its presence/absence on an entity changes target-acquisition outcomes
+  // for ally-side scoring). Adding it here means the replay hash sees a
+  // diff if a wall is destroyed and the tag goes away, or if a wall is
+  // missing the tag because of an authoring bug.
+  { name: "WallNoFire", component: WallNoFire },
 ];

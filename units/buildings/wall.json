@@ -1,0 +1,42 @@
+{
+  "kind": "unit",
+  "id": "building_wall_v1",
+  "physics_version": "1.0",
+  "name": "Defensive Wall",
+  "faction": "neutral",
+  "description": "Phase 2 Stage 1 — wall segment. No weapons, very thick armor on every zone, absorbs damage. Allies do not target it (WallNoFire sim tag); enemies can shoot through it but must destroy it to reach what's behind.",
+  "designer": "phase2-stage1",
+  "chassis": {
+    "chassis_class": "building_wall",
+    "mass_kg": 20000,
+    "length_m": 4.0,
+    "hardpoint_units_version": "world_m",
+    "engine_kW": 0,
+    "drivetrain_efficiency": 0,
+    "energy_source": "grid_tethered",
+    "armor_thickness_mm": 400,
+    "armor_material": "alloy_composite",
+    "hardpoint_count": 0,
+    "compatibility_tags": [],
+    "thermal_capacity_MJ": 50
+  },
+  "parts": [],
+  "mesh_asset": {
+    "kind": "procedural_building",
+    "building_chassis": "building_wall"
+  },
+  "hardpoints": [],
+  "vulnerability": {
+    "armor_zones": {
+      "front": { "thickness_mm": 400, "material": "composite" },
+      "side":  { "thickness_mm": 400, "material": "composite" },
+      "rear":  { "thickness_mm": 400, "material": "composite" },
+      "top":   { "thickness_mm": 400, "material": "composite" }
+    },
+    "electronics": [],
+    "crew": { "count": 0, "exposure": "sealed" },
+    "thermal_dissipation_kws": 5,
+    "mobility_redundancy": 1.0,
+    "structural_integrity_mj": 60
+  }
+}

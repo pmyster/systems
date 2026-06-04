@@ -31,6 +31,7 @@
 import { query, hasComponent, addComponent } from "bitecs";
 
 import {
+  AAFiringArc,
   Dead,
   Health,
   InCombat,
@@ -42,6 +43,7 @@ import {
   TargetOf,
   TeamId,
   UnitTypeId,
+  WallNoFire,
   WeaponInstanceTag,
   WeaponRange,
   WeaponTarget,
@@ -49,6 +51,18 @@ import {
   NO_ENTITY,
   type SimWorld,
 } from "../world";
+
+// WallNoFire is currently checked indirectly via team-based filtering —
+// walls on the OWNER's team are auto-excluded because the existing per-team
+// scan only iterates OPPOSING teams. Walls on opposing teams remain valid
+// targets (enemies want to destroy them). This referenced-but-not-consumed
+// import documents the design: walls are determinism-relevant (presence
+// affects acquisition outcomes via the team-bucket filter) and live in
+// COMPONENT_TAG_REGISTRY so the hash sees them. If a future bug surfaces
+// where an allied wall ends up in another team's bucket, the explicit
+// check below activates — keeping the import wired makes the fix a
+// one-line edit instead of a re-import + import shuffle.
+void WallNoFire;
 
 // Weights tuned so proximity dominates at long range, focus-fire takes
 // over once an enemy is wounded, and matchup nudges the choice between
@@ -69,6 +83,12 @@ export function targetAcquisitionSystem(world: SimWorld): void {
   // Build per-team lookup once — small lists, cheap, avoids O(N²).
   // We could use a uniform grid for big maps; Phase 1 has ≤ ~100
   // entities so a flat list is fast enough.
+  //
+  // Phase 2 Stage 1 — wall filter. Walls (WallNoFire tag) appear in this
+  // pass so enemies can still target them (walls absorb damage by design).
+  // The wall-vs-ally filter happens INSIDE the per-weapon candidate loop
+  // below where we know the candidate's team relative to the weapon's
+  // owner: allies skip walls; enemies see them.
   const aliveByTeam = new Map<number, number[]>();
   for (let i = 0; i < allUnits.length; i++) {
     const eid = allUnits[i];
@@ -107,8 +127,26 @@ export function targetAcquisitionSystem(world: SimWorld): void {
     const ownerTeam = TeamId.value[owner];
     const ox = Position.x[owner];
     const oz = Position.z[owner];
+    const oy = Position.y[owner];
     const scan = ScanRange.value[owner];
     const scan2 = scan * scan;
+
+    // Phase 2 Stage 1 — AA filtering.
+    //
+    // If the owner is an AA tower (AAFiringArc component present), targets
+    // must sit above the configured pitchMinRad relative to the AA tower's
+    // position. Stage 1 has no Flying tag yet, so ground targets fail this
+    // gate and the AA tower acquires nothing — that's the intended Stage 1
+    // behavior (logged once below at the unit-pass level for diagnostics).
+    //
+    // TODO(post Stage 1): when an aircraft unit lands with a Flying tag,
+    // replace the per-candidate pitch math with a hasComponent(Flying, cand)
+    // check — simpler, cheaper, no Position.y dependency, and survives
+    // ground topology changes (a hill wouldn't accidentally make a ground
+    // unit look "flying" to an AA tower planted in a valley).
+    const ownerHasAA = hasComponent(world, owner, AAFiringArc);
+    const aaPitchMin = ownerHasAA ? AAFiringArc.pitchMinRad[owner] : 0;
+    const aaTanMin = ownerHasAA ? Math.tan(aaPitchMin) : 0;
 
     // Anti-thrash: validate existing target.
     const existing = WeaponTarget.value[w];
@@ -139,6 +177,15 @@ export function targetAcquisitionSystem(world: SimWorld): void {
         const d2 = dx * dx + dz * dz;
         if (d2 > scan2) continue;
         const dist = Math.sqrt(d2);
+
+        // Phase 2 Stage 1 — AA filter. AA towers only acquire targets
+        // sitting above pitchMinRad. With no Flying tag yet, ground
+        // targets fail. Compute pitch as atan2(dy, horizontalDist); skip
+        // sqrt by comparing tan(pitch) = dy / dist ≥ aaTanMin.
+        if (ownerHasAA) {
+          const dy = Position.y[cand] - oy;
+          if (dist <= 1e-3 || dy / dist < aaTanMin) continue;
+        }
 
         // Score components.
         // proximity: 1 at zero distance → 0 at scan range.

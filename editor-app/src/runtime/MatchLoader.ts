@@ -27,6 +27,7 @@
 import { dirname, join } from "@tauri-apps/api/path";
 
 import { loadMapFromDir, type LoadedMap } from "./loader/mapLoader";
+import type { BuildingPlacement } from "./BuildingPlacement";
 import {
   loadSchematicsByPaths,
   type LoadedSchematic,
@@ -98,6 +99,14 @@ export interface MatchData {
    * IS that visible gate.
    */
   readonly prefabsRequested: number;
+  /**
+   * Phase 2 Stage 1 — building placements authored in the Match Setup
+   * Place Buildings step. Bypass the team-cluster grid: MatchSpawner
+   * iterates this list separately and stamps each entity at the
+   * authored (x, z) + yaw + faction. Empty when the user skipped the
+   * placement step.
+   */
+  readonly placedBuildings: readonly BuildingPlacement[];
 }
 
 /**
@@ -146,6 +155,12 @@ export class MatchLoader {
     mapDir: string,
     schematicPaths: readonly string[],
     onProgress: (p: LoadProgress) => void,
+    /**
+     * Phase 2 Stage 1 — placed buildings, optional. Empty array (or
+     * undefined) means the user skipped the Place Buildings step and
+     * the match runs with only team-cluster units, the legacy behavior.
+     */
+    placedBuildings?: readonly BuildingPlacement[],
   ): Promise<MatchData> {
     // Single diagnostics collector threaded through every phase. Every
     // layer that drops/skips data pushes here; the HUD reads it back.
@@ -450,6 +465,7 @@ export class MatchLoader {
       projectileRegistry,
       diagnostics,
       prefabsRequested: meshRefs.length,
+      placedBuildings: placedBuildings ?? [],
     };
   }
 }

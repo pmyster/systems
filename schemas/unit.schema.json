@@ -46,7 +46,11 @@
             "subterranean",
             "orbital",
             "static_structure",
-            "static_wall"
+            "static_wall",
+            "building_turret",
+            "building_wall",
+            "building_aa",
+            "building_bunker"
           ]
         },
         "mass_kg": { "type": "number", "minimum": 1 },
@@ -193,12 +197,17 @@
     },
     "mesh_asset": {
       "type": "object",
-      "description": "Reference to the visual mesh this unit uses, so the editor can reload it on open. Either a built-in template or an imported file path.",
+      "description": "Reference to the visual mesh this unit uses, so the editor can reload it on open. Either a built-in template, an imported file path, or a procedural building mesh resolved at runtime (Phase 2 Stage 1).",
       "required": ["kind"],
       "properties": {
-        "kind": { "type": "string", "enum": ["template", "file"] },
+        "kind": { "type": "string", "enum": ["template", "file", "procedural_building"] },
         "template_id": { "type": "string" },
-        "path": { "type": "string" }
+        "path": { "type": "string" },
+        "building_chassis": {
+          "type": "string",
+          "enum": ["building_turret", "building_wall", "building_aa", "building_bunker"],
+          "description": "Building chassis class for procedural_building mesh refs. Resolved by /runtime/scene/proceduralMeshes.ts."
+        }
       }
     },
     "rig": {
