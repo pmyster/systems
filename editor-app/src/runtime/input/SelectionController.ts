@@ -282,14 +282,20 @@ export class SelectionController {
 
     const rectEl = this.domElement.getBoundingClientRect();
     const projected = new THREE.Vector3();
+    // Both-teams selectable (2026-06-07): the owner wants to be able
+    // to click ANY unit — friendly or enemy — to use it as the camera
+    // pivot / inspect it. The previous `team !== 0` filter hid enemy
+    // turrets from marquee selection. Click-selection already permits
+    // both teams (raycast hits whatever's there); the marquee path now
+    // matches. We KEEP TeamId in the component filter so projectiles +
+    // weapon-instance entities (Position-only) don't get scooped. When
+    // Week 3 adds the own > allied > enemy priority comparator, that
+    // logic goes here AFTER hits are collected, not as a filter that
+    // drops half the candidates.
     const ents = query(this.world, [Position, TeamId]);
     const hits: number[] = [];
     for (let i = 0; i < ents.length; i++) {
       const eid = ents[i];
-      // Phase 1: only own-team units (team 0). When Week 3 adds
-      // enemies + allies, this is where the own>allied>enemy priority
-      // gate goes.
-      if (TeamId.value[eid] !== 0) continue;
       projected.set(Position.x[eid], Position.y[eid], Position.z[eid]);
       projected.project(this.camera);
       // NDC → canvas-local px.

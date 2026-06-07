@@ -143,7 +143,12 @@ describe("RtsCamera × selection", () => {
     expect(pivot.z).toBeCloseTo(30, 0);
   });
 
-  it("deselecting (Selected removed) glides the pivot back to map center", () => {
+  it("deselecting keeps the pivot where it was — does not glide back to map center", () => {
+    // 2026-06-07: rebound from the original "glide back to map center"
+    // to "stay-where-deselected" — the owner found the auto-glide-home
+    // disorienting. New contract: on deselect, the pan focus is
+    // reseated to wherever the camera was looking, so the next frame's
+    // lerp target is the same point. The camera holds still.
     const world = createSimWorld();
     const cam = makeCamera();
     const tmp = new THREE.Vector3();
@@ -158,15 +163,15 @@ describe("RtsCamera × selection", () => {
     }
     expect(cam.getCurrentPivot().x).toBeCloseTo(90, 0);
 
-    // Deselect.
+    // Deselect — pivot must STAY near (90, _, 10), not return to (50, _, 50).
     removeComponent(world, eid, Selected);
     for (let i = 0; i < 60; i++) {
       driveCameraFromSelection(world, cam, tmp);
       cam.update(1 / 60);
     }
     const pivot = cam.getCurrentPivot();
-    expect(pivot.x).toBeCloseTo(50, 0);
-    expect(pivot.z).toBeCloseTo(50, 0);
+    expect(pivot.x).toBeCloseTo(90, 0);
+    expect(pivot.z).toBeCloseTo(10, 0);
   });
 
   it("multi-select (2+) leaves the pivot at the pan focus", () => {

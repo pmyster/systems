@@ -334,6 +334,12 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
     const onContextMenu = (e: Event): void => e.preventDefault();
     renderer.domElement.addEventListener("contextmenu", onContextMenu);
 
+    // Terrain Y-clamp sampler for the camera. The projectile-style
+    // variant (null-on-OOB) is exactly the contract the camera wants —
+    // its outer bounds extend ±50m past the map AABB so out-of-bounds
+    // is the expected behaviour at the corners, not an error.
+    const cameraHeightSampler = makeProjectileHeightSampler(match.map);
+
     const rtsCamera = new RtsCamera({
       camera,
       domElement: renderer.domElement,
@@ -349,6 +355,7 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
         terrain.depthM / 2,
       ),
       edgePanEnabled: true,
+      heightAt: cameraHeightSampler,
     });
 
     // --- Unit Instances --------------------------------------------------
@@ -1030,17 +1037,23 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
           {replayHud.driftStatus === "drift" && " (DRIFT)"}
         </div>
       )}
-      {/* Hotkey hints — bottom-left corner. */}
+      {/* Hotkey hints — bottom-left corner. Updated 2026-06-07 to
+          reflect the rebound mouse map: LMB select, RMB drag rotate /
+          click move, MMB drag pan, wheel zoom. */}
       <div style={HOTKEY_HINTS_STYLE} aria-hidden>
+        <div>[LMB] Select / drag marquee</div>
+        <div>[RMB] click = move · drag = rotate camera</div>
+        <div>[MMB] drag = pan · wheel = zoom (5–600m)</div>
+        <div>[WASD / Arrows] Pan camera</div>
+        <div>[F] Frame selected unit</div>
+        <div>[H] HP bars: {hpBarsVisible ? "on" : "off"}</div>
+        <div>[`] Damage numbers: {damageOverlayVisible ? "on" : "off"}</div>
         <div>[F10] Save last 60s clip ({recHud.clipBufSec}s buffered)</div>
         {replayHud.active ? null : (
           <div>
             [F11] {recHud.recording ? "Stop + save" : "Start"} replay recording
           </div>
         )}
-        <div>[`] Damage numbers: {damageOverlayVisible ? "on" : "off"}</div>
-        <div>[H] HP bars: {hpBarsVisible ? "on" : "off"}</div>
-        <div>[F] Frame selected unit</div>
       </div>
       {/* Transient toast — auto-clears after a few seconds via effect below. */}
       {toast && <div style={TOAST_STYLE}>{toast}</div>}

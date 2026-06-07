@@ -6,6 +6,18 @@
  * between "the player pressed a thing" and "the sim sees an input
  * tagged with the tick at which to apply it."
  *
+ * RMB semantics (rebound 2026-06-07):
+ *   The camera now rebinds RMB-DRAG to "rotate around the pivot". We
+ *   still want classic RTS "right-click on empty ground = move". To
+ *   make the two coexist on the same button we disambiguate at
+ *   release time:
+ *     - RMB-DOWN + small move + short hold → click → move command
+ *     - RMB-DOWN + large move OR long hold → drag → camera rotated; no command
+ *   Thresholds live next to the controller as RMB_CLICK_PX_THRESHOLD
+ *   and RMB_CLICK_MS_THRESHOLD. The down event records position+time;
+ *   the up event checks against the thresholds and either fires or
+ *   suppresses the move.
+ *
  * Workflow when the user right-clicks the ground with units selected:
  *   1. Raycast against the terrain to find a world-space point.
  *   2. Ask the PathFollowController to plan a path from each
@@ -46,6 +58,29 @@ import type { PathFollowController } from "../pathfinding/PathFollowController";
 
 const RIGHT_BUTTON = 2;
 
+/**
+ * RMB click-vs-drag thresholds (added 2026-06-07 alongside the camera
+ * rebind).
+ *
+ * The owner's rebind makes RMB-DRAG rotate the camera. But the classic
+ * RTS convention is also "RMB on empty ground = move command". We
+ * disambiguate by tracking the down-event and only firing the move
+ * command on UP when the cursor barely moved and the press was brief.
+ * Match the GUI/editor convention for click-vs-drag.
+ *
+ *   - 5 px of cursor movement OR
+ *   - 250 ms of press duration
+ * either crosses the threshold → treat as drag (rotation, no command).
+ *
+ * Otherwise → click → issue move command at the up-position raycast.
+ * Both gates are cheap; failing either alone is enough to count as a
+ * drag. The "long press with no movement" case (e.g. user holds RMB
+ * thinking) reads as drag-intent which is the safer of the two for the
+ * sim (no spurious move).
+ */
+const RMB_CLICK_PX_THRESHOLD = 5;
+const RMB_CLICK_MS_THRESHOLD = 250;
+
 export interface CommandControllerOpts {
   readonly camera: THREE.PerspectiveCamera;
   readonly domElement: HTMLElement;
@@ -68,6 +103,11 @@ export class CommandController {
   private readonly pathFollower: PathFollowController;
   private readonly cursorTarget?: HTMLElement;
   private readonly raycaster = new THREE.Raycaster();
+  // RMB click-vs-drag state — captured at down-time, consulted at up-time.
+  private rmbDownX = 0;
+  private rmbDownY = 0;
+  private rmbDownAtMs = 0;
+  private rmbDown = false;
 
   constructor(opts: CommandControllerOpts) {
     this.camera = opts.camera;
@@ -83,12 +123,18 @@ export class CommandController {
 
   dispose(): void {
     this.domElement.removeEventListener("mousedown", this.onMouseDown);
+    window.removeEventListener("mouseup", this.onMouseUp);
     this.domElement.removeEventListener("mousemove", this.onMouseMove);
     window.removeEventListener("keydown", this.onKeyDown);
   }
 
   private bind(): void {
     this.domElement.addEventListener("mousedown", this.onMouseDown);
+    // mouseup binds on window: an RMB release outside the canvas still
+    // counts as the release of THIS down. Without this, the user
+    // dragging off-canvas to rotate would leave us in a "phantom RMB
+    // down" state and the next click anywhere would fire a move.
+    window.addEventListener("mouseup", this.onMouseUp);
     this.domElement.addEventListener("mousemove", this.onMouseMove);
     window.addEventListener("keydown", this.onKeyDown);
   }
@@ -114,6 +160,28 @@ export class CommandController {
 
   private readonly onMouseDown = (e: MouseEvent): void => {
     if (e.button !== RIGHT_BUTTON) return;
+    // Record press state; decide click-vs-drag at MouseUp time. RtsCamera
+    // also listens for RMB-down → it starts rotating in parallel. If the
+    // gesture ends up being a click (no drag), RtsCamera's rotation was
+    // a 0-px no-op (no mousemove between down and up). If it's a drag,
+    // we ignore at up-time so no spurious move command fires.
+    this.rmbDown = true;
+    this.rmbDownX = e.clientX;
+    this.rmbDownY = e.clientY;
+    this.rmbDownAtMs = performance.now();
+  };
+
+  private readonly onMouseUp = (e: MouseEvent): void => {
+    if (e.button !== RIGHT_BUTTON) return;
+    if (!this.rmbDown) return;
+    this.rmbDown = false;
+    const dx = e.clientX - this.rmbDownX;
+    const dy = e.clientY - this.rmbDownY;
+    const dist = Math.hypot(dx, dy);
+    const dur = performance.now() - this.rmbDownAtMs;
+    // Drag → camera rotation owns the gesture; no move command.
+    if (dist >= RMB_CLICK_PX_THRESHOLD || dur >= RMB_CLICK_MS_THRESHOLD) return;
+
     const selected = this.selection.getSelectedEids();
     if (selected.length === 0) return;
 

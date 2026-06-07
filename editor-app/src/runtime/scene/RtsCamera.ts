@@ -1,22 +1,37 @@
 /**
- * RtsCamera — Phase 1 Week 2
+ * RtsCamera — Phase 1 Week 2 (rebound 2026-06-07 per owner brief)
  *
  * Render-side top-down RTS camera controller. Replaces FreeFlyCamera in
  * the game runtime.
  *
  * Camera model: orbit around a focus point on (mostly) the ground plane.
- *   - WASD / arrow keys: pan the focus along the ground (camera-relative).
- *   - Mouse wheel: zoom (distance from focus, clamped MIN..MAX).
- *   - Middle-drag: rotate yaw + pitch around focus.
- *   - Edge-pan: cursor within EDGE_PAN_PX of a window edge → pan in that
- *     direction (toggle by setting `edgePanEnabled = false`).
- *   - Focus point clamps to map bounds so the player can't fly off.
+ *
+ * Mouse bindings (matches classic RTS / 3D-editor convention):
+ *   - LMB:                handled by SelectionController (select + marquee).
+ *   - RMB DRAG:           rotate yaw + pitch around the current pivot.
+ *   - RMB CLICK (no drag): consumed by CommandController as a move command
+ *                         (the controllers cooperate via click-vs-drag
+ *                         threshold; RtsCamera only handles the drag).
+ *   - MMB DRAG:           pan parallel to the ground, "grab-the-world".
+ *                         Pivot and camera position translate by the same
+ *                         XZ delta so the orbit geometry is preserved.
+ *   - Mouse wheel:        zoom (distance from focus, clamped MIN..MAX).
+ *   - WASD / arrows:      pan the focus along the ground (camera-relative).
+ *   - Edge-pan:           cursor within EDGE_PAN_PX of a window edge →
+ *                         pan in that direction. Toggle off via
+ *                         `edgePanEnabled = false`.
  *
  * Why not THREE.OrbitControls?
  *   OrbitControls is too "let the artist look at the model" — it
  *   damps everything, doesn't compose with edge-pan, and lacks the
- *   map-bounds clamp. Reimplementing on top of pitch/yaw/distance is
- *   ~120 lines and gives us exact RTS feel.
+ *   map-bounds clamp + terrain Y-clamp.
+ *
+ * Terrain Y-clamp:
+ *   The camera position cannot drop below the heightmap-Y at its
+ *   (X, Z), plus CAMERA_TERRAIN_CLEARANCE_M. Prevents the camera from
+ *   tunneling into a hill when zoomed in over high terrain. Sampler is
+ *   injected via the constructor; if no sampler is supplied (e.g. in
+ *   pure unit tests), the clamp is a no-op.
  *
  * Architectural rule: lives outside `/sim`. Reads pointer events,
  * mutates a THREE.PerspectiveCamera, holds DOM listeners. Disposes
@@ -28,10 +43,13 @@
  *   point (panning moves both). When a single unit is selected, the
  *   runtime calls `setFocusTarget(unitWorldPos)` each frame; the orbit
  *   pivot then EASES toward that position with a lerp (FOCUS_LERP_RATE).
- *   The pan focus stays where the user left it — so deselecting glides
- *   the orbit pivot back to where they were panning. This matches the
- *   classic RTS feel (SC2, AoE2, Total War): rotation pivots around the
- *   thing you care about, not the dead center of the map.
+ *
+ *   Stay-where-deselected (changed 2026-06-07):
+ *     When the runtime clears the focus target (no selection), the pan
+ *     focus is reseated to the CURRENT pivot. The camera stays exactly
+ *     where it was on deselect instead of gliding back to map center.
+ *     The owner found the auto-glide-home behaviour annoying — modern
+ *     RTS / 3D-editor convention is "deselect = don't move the camera".
  *
  *   `frameSelected(pos)` snaps both pan focus AND orbit pivot to a unit
  *   instantly and zooms in — the "F" hotkey (double-tap-W in SC2). No
@@ -45,18 +63,52 @@ const MIN_PITCH_DEG = 20;
 const DEFAULT_PITCH_DEG = 45;
 const DEG_TO_RAD = Math.PI / 180;
 
-const MIN_ZOOM_DIST = 8;
-const MAX_ZOOM_DIST = 200;
+/**
+ * Min zoom dropped from 8 → 5 (2026-06-07): owner reported the closest
+ * frame felt "still too far away to see a turret as a POV character".
+ * 5m puts the camera roughly at the over-the-shoulder distance of a
+ * single chassis (typical chassis bounding sphere ~3m).
+ */
+const MIN_ZOOM_DIST = 5;
+/**
+ * Max zoom raised 200 → 600 (2026-06-07) so the owner can pull all the
+ * way back and see the full map in one frame on a 256m+ map.
+ */
+const MAX_ZOOM_DIST = 600;
 const DEFAULT_ZOOM_DIST = 50;
 const WHEEL_ZOOM_PCT = 0.0015; // per delta-px
 
-const BASE_PAN_SPEED = 20; // m/sec
+const BASE_PAN_SPEED = 20; // m/sec (keyboard)
 const FAST_PAN_MULT = 2.5; // Shift held
 
-const ROTATE_SENSITIVITY = 0.006; // rad/px (middle drag)
+const ROTATE_SENSITIVITY = 0.006; // rad/px (RMB drag)
+
+/**
+ * Mouse-drag pan: world-meters per pixel of drag. Calibrated so that a
+ * full screen sweep moves the camera by ~the visible ground width at
+ * the current zoom distance. Tuned by feel against MapSceneManager.
+ */
+const MOUSE_PAN_SPEED_PER_DIST = 0.0025; // multiplied by `distance`
 
 const EDGE_PAN_PX = 20;
 const EDGE_PAN_SPEED_M = 30; // m/sec when at edge
+
+/**
+ * Vertical clearance kept between the camera position and the terrain
+ * under it. 2m → camera never tunnels into a hill, even when zoomed in
+ * close. Loud-over-silent: if the sampler returns a non-finite value
+ * (out-of-bounds with a buggy sampler), the clamp is skipped silently —
+ * we'd rather render the camera in a slightly weird spot than NaN-corrupt
+ * its position.
+ */
+const CAMERA_TERRAIN_CLEARANCE_M = 2;
+
+/**
+ * Pan bounds: PIVOT clamps to the map AABB exactly; CAMERA position is
+ * allowed to extend this far outside the map (so when zoomed out + tilted
+ * back, the player can frame the map edge without the pivot pinning it).
+ */
+const CAMERA_BOUNDS_EXPAND_M = 50;
 
 /**
  * Per-frame easing rate for the orbit pivot when it's chasing a focus
@@ -99,6 +151,21 @@ export interface RtsCameraBounds {
   readonly maxZ: number;
 }
 
+/**
+ * Optional injected terrain Y sampler. The camera uses this to clamp its
+ * own position above the heightmap and to keep the pivot glued to the
+ * ground. Returning a non-finite value (e.g. out-of-bounds) tells the
+ * camera "no terrain known here" — it skips the clamp this frame rather
+ * than NaN-corrupting position.
+ *
+ * Loud-over-silent: an OOB sampler return is plausible at the camera's
+ * outer bounds (the camera can extend ±50m past the map). We deliberately
+ * don't WARN on this — it would spam every frame. The camera-bounds clamp
+ * still keeps things reasonable, and the visible failure mode (camera
+ * hovering at its previous Y) is benign.
+ */
+export type TerrainHeightSampler = (x: number, z: number) => number | null;
+
 export interface RtsCameraOpts {
   readonly camera: THREE.PerspectiveCamera;
   readonly domElement: HTMLElement;
@@ -107,6 +174,11 @@ export interface RtsCameraOpts {
   readonly initialFocus: THREE.Vector3;
   /** Default true — set false to disable mouse edge-pan. */
   readonly edgePanEnabled?: boolean;
+  /**
+   * Optional heightmap sampler for terrain Y-clamp on the camera + pivot.
+   * Omit in unit tests — the clamp becomes a no-op.
+   */
+  readonly heightAt?: TerrainHeightSampler;
 }
 
 export class RtsCamera {
@@ -133,11 +205,15 @@ export class RtsCamera {
    * THIS, and zoom moves toward/away from THIS.
    */
   private readonly currentPivot: THREE.Vector3;
+  private readonly heightAt: TerrainHeightSampler | null;
   private yaw = 0;
   private pitch = DEFAULT_PITCH_DEG * DEG_TO_RAD;
   private distance = DEFAULT_ZOOM_DIST;
   private readonly keys = new Set<string>();
+  /** RMB drag → rotate yaw/pitch around the current pivot. */
   private rotating = false;
+  /** MMB drag → pan pivot+camera together by an XZ delta. */
+  private panning = false;
   private mouseX = -1; // last cursor position (window coords) for edge-pan
   private mouseY = -1;
   private cursorInside = false;
@@ -151,6 +227,7 @@ export class RtsCamera {
     // no lerp on first frame, the camera frames the map center cleanly.
     this.currentPivot = opts.initialFocus.clone();
     this.edgePanEnabled = opts.edgePanEnabled ?? true;
+    this.heightAt = opts.heightAt ?? null;
     this.applyCameraTransform();
     this.bind();
   }
@@ -182,6 +259,19 @@ export class RtsCamera {
    */
   setFocusTarget(worldPos: THREE.Vector3 | null): void {
     if (worldPos === null) {
+      // Stay-where-deselected: when the runtime releases the focus
+      // target, reseat the pan focus to where the camera is currently
+      // looking. Without this the camera would lerp back to the original
+      // pan focus (typically map center on a fresh match), which the
+      // owner found jarring after Task #28. Modern RTS / 3D-editor
+      // convention is "deselect = camera stays put". Only do this on
+      // the LEADING edge of the null transition — if we're already
+      // null, the user is panning/rotating freely and we mustn't
+      // hijack their pan focus every frame.
+      if (this.focusTarget !== null) {
+        this.focus.copy(this.currentPivot);
+        this.clampFocus();
+      }
       this.focusTarget = null;
       return;
     }
@@ -320,7 +410,26 @@ export class RtsCamera {
       this.currentPivot.z += dz * FOCUS_LERP_RATE;
     }
 
+    // Clamp the pivot to terrain Y so the orbit center sits on the
+    // ground. If the sampler returns non-finite (off-map), keep the
+    // previous Y rather than NaN-stamping. Done AFTER the lerp so the
+    // visible pivot is always grounded.
+    if (this.heightAt) {
+      const py = this.heightAt(this.currentPivot.x, this.currentPivot.z);
+      if (py !== null && Number.isFinite(py)) {
+        this.currentPivot.y = py;
+      }
+    }
+
     this.applyCameraTransform();
+
+    // After applying yaw/pitch/distance, enforce the camera's own
+    // terrain floor + horizontal bounds. The orbit transform may have
+    // dropped the camera below ground when zoomed in at a low pitch
+    // over high terrain; lift it back up. Horizontal bounds keep the
+    // camera from drifting to absurd offsets even if the pivot is at
+    // the map edge.
+    this.clampCameraPosition();
   }
 
   dispose(): void {
@@ -374,6 +483,67 @@ export class RtsCamera {
     else if (this.focus.z > b.maxZ) this.focus.z = b.maxZ;
   }
 
+  /**
+   * Lift the camera above the terrain (sampler may return non-finite for
+   * off-map, in which case we skip — see TerrainHeightSampler doc) and
+   * keep the horizontal position inside `bounds` expanded by
+   * CAMERA_BOUNDS_EXPAND_M. The expand-margin is what lets the player
+   * "pull back to see the edge" without the camera pinning at the map
+   * AABB.
+   */
+  private clampCameraPosition(): void {
+    const b = this.bounds;
+    const minX = b.minX - CAMERA_BOUNDS_EXPAND_M;
+    const maxX = b.maxX + CAMERA_BOUNDS_EXPAND_M;
+    const minZ = b.minZ - CAMERA_BOUNDS_EXPAND_M;
+    const maxZ = b.maxZ + CAMERA_BOUNDS_EXPAND_M;
+    if (this.camera.position.x < minX) this.camera.position.x = minX;
+    else if (this.camera.position.x > maxX) this.camera.position.x = maxX;
+    if (this.camera.position.z < minZ) this.camera.position.z = minZ;
+    else if (this.camera.position.z > maxZ) this.camera.position.z = maxZ;
+    if (this.heightAt) {
+      const groundY = this.heightAt(this.camera.position.x, this.camera.position.z);
+      if (groundY !== null && Number.isFinite(groundY)) {
+        const floor = groundY + CAMERA_TERRAIN_CLEARANCE_M;
+        if (this.camera.position.y < floor) this.camera.position.y = floor;
+      }
+    }
+  }
+
+  /**
+   * MMB-drag pan helper. Translates pivot AND camera by the same XZ
+   * delta in world space so the orbit geometry (yaw/pitch/distance) is
+   * unchanged. Math mirrors MapSceneManager's "grab the world" pan
+   * (commit c5980a5).
+   */
+  private panByScreenDelta(dxPx: number, dyPx: number): void {
+    const speed = MOUSE_PAN_SPEED_PER_DIST * this.distance;
+    const dx = -dxPx * speed;
+    const dz = -dyPx * speed;
+    const fx = -Math.sin(this.yaw);
+    const fz = -Math.cos(this.yaw);
+    const rx = Math.cos(this.yaw);
+    const rz = -Math.sin(this.yaw);
+    const wx = rx * dx + fx * dz;
+    const wz = rz * dx + fz * dz;
+    this.focus.x += wx;
+    this.focus.z += wz;
+    this.currentPivot.x += wx;
+    this.currentPivot.z += wz;
+    this.clampFocus();
+    // Also pin the currentPivot to bounds — otherwise the lerp target
+    // (focus) stays clamped but the visible pivot drifts off-map every
+    // time the user pan-drags past the edge.
+    const b = this.bounds;
+    if (this.currentPivot.x < b.minX) this.currentPivot.x = b.minX;
+    else if (this.currentPivot.x > b.maxX) this.currentPivot.x = b.maxX;
+    if (this.currentPivot.z < b.minZ) this.currentPivot.z = b.minZ;
+    else if (this.currentPivot.z > b.maxZ) this.currentPivot.z = b.maxZ;
+    // If the user is dragging the world around, that overrides any
+    // selection-driven focus target — same rule as WASD pan.
+    if (this.focusTarget !== null) this.focusTarget = null;
+  }
+
   // --- Listeners -------------------------------------------------------
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
@@ -383,15 +553,24 @@ export class RtsCamera {
     this.keys.delete(e.code);
   };
   private readonly onMouseDown = (e: MouseEvent): void => {
-    // Middle button = rotate. Left/right are reserved for selection +
-    // movement commands (the controllers handle them).
+    // Button mapping (rebound 2026-06-07):
+    //   button 0 (LMB) → SelectionController (select + marquee).
+    //   button 1 (MMB) → pan.
+    //   button 2 (RMB) → rotate (CommandController consumes a SHORT click
+    //                   as a move command; the drag belongs to us).
     if (e.button === 1) {
-      this.rotating = true;
+      this.panning = true;
       e.preventDefault();
+    } else if (e.button === 2) {
+      this.rotating = true;
+      // No preventDefault here: CommandController also listens for RMB
+      // down and prevents the move-command's own default. The contextmenu
+      // handler on the canvas suppresses the browser menu separately.
     }
   };
   private readonly onMouseUp = (e: MouseEvent): void => {
-    if (e.button === 1) this.rotating = false;
+    if (e.button === 1) this.panning = false;
+    else if (e.button === 2) this.rotating = false;
   };
   private readonly onMouseMove = (e: MouseEvent): void => {
     this.mouseX = e.clientX;
@@ -403,6 +582,8 @@ export class RtsCamera {
       const minRad = MIN_PITCH_DEG * DEG_TO_RAD;
       if (this.pitch > maxRad) this.pitch = maxRad;
       else if (this.pitch < minRad) this.pitch = minRad;
+    } else if (this.panning) {
+      this.panByScreenDelta(e.movementX, e.movementY);
     }
   };
   private readonly onWheel = (e: WheelEvent): void => {
