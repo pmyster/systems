@@ -26,6 +26,7 @@ import {
   computePreviewCameraFrame,
   elevationColorForY,
   renderMapTopDownPreview,
+  samplePixelVariance,
 } from "./MapPreviewRenderer";
 import type { LoadedMap } from "../loader/mapLoader";
 import {
@@ -136,9 +137,11 @@ describe("elevationColorForY", () => {
 describe("computePreviewCameraFrame", () => {
   it("frames the map 1:1 with world dimensions", () => {
     const f = computePreviewCameraFrame(256, 256, 10);
-    // Ortho box width = right - left = 256m, height = bottom - top = 256m.
+    // Ortho box width = right - left = 256m, height = top - bottom = 256m
+    // (Three.js convention: top > bottom).
     expect(f.right - f.left).toBeCloseTo(256);
-    expect(f.bottom - f.top).toBeCloseTo(256);
+    expect(f.top - f.bottom).toBeCloseTo(256);
+    expect(f.top).toBeGreaterThan(f.bottom);
     expect(f.centerX).toBeCloseTo(128);
     expect(f.centerZ).toBeCloseTo(128);
   });
@@ -186,6 +189,54 @@ describe("buildPreviewTerrainMesh", () => {
 
     mesh.geometry.dispose();
     (mesh.material as THREE.Material).dispose();
+  });
+});
+
+describe("samplePixelVariance", () => {
+  it("returns near-zero stddev for a uniformly-gray image", () => {
+    // A 16×16 image where every pixel is (128, 128, 128, 255). This is
+    // exactly the failure mode the runtime variance warning catches.
+    const pixels = new Uint8Array(16 * 16 * 4);
+    for (let i = 0; i < pixels.length; i += 4) {
+      pixels[i + 0] = 128;
+      pixels[i + 1] = 128;
+      pixels[i + 2] = 128;
+      pixels[i + 3] = 255;
+    }
+    const v = samplePixelVariance(pixels, 16);
+    expect(v.maxStdDev).toBeLessThan(0.5);
+    expect(v.meanR).toBeCloseTo(128, 0);
+    expect(v.meanG).toBeCloseTo(128, 0);
+    expect(v.meanB).toBeCloseTo(128, 0);
+  });
+
+  it("returns large stddev for an image with strong variation", () => {
+    // Gradient image — strong variation that survives sparse-grid
+    // sampling. (A pixel checkerboard at strides matching the sample
+    // step would alias to a constant — gradient avoids that.)
+    const size = 64;
+    const pixels = new Uint8Array(size * size * 4);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const off = (y * size + x) * 4;
+        pixels[off + 0] = Math.floor((x / (size - 1)) * 255);
+        pixels[off + 1] = Math.floor((y / (size - 1)) * 255);
+        pixels[off + 2] = Math.floor(((x + y) / (2 * (size - 1))) * 255);
+        pixels[off + 3] = 255;
+      }
+    }
+    const v = samplePixelVariance(pixels, size);
+    // Stddev of a uniform 0..255 gradient ≈ 73 (255 / sqrt(12)).
+    expect(v.maxStdDev).toBeGreaterThan(50);
+  });
+
+  it("is the runtime threshold used to detect uniform output", () => {
+    // Documents the contract MapPreviewRenderer relies on: a stddev
+    // below 2.0 across all channels means the render is suspect.
+    const flat = new Uint8Array(16 * 16 * 4).fill(200);
+    for (let i = 3; i < flat.length; i += 4) flat[i] = 255;
+    const v = samplePixelVariance(flat, 16);
+    expect(v.maxStdDev).toBeLessThan(2.0);
   });
 });
 

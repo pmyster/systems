@@ -44,7 +44,10 @@ import {
   BUILDING_CHASSIS_CLASSES,
   type BuildingChassisClass,
 } from "../../types/unit";
-import { renderMapTopDownPreview } from "../scene/MapPreviewRenderer";
+import {
+  renderMapTopDownPreview,
+  samplePixelVariance,
+} from "../scene/MapPreviewRenderer";
 
 export interface PlaceBuildingsStepProps {
   readonly map: LoadedMap;
@@ -221,6 +224,14 @@ export function PlaceBuildingsStep(
   // When the data URL arrives, paint it into the canvas at PREVIEW_PX
   // size. We draw via Image so the canvas's 2D context handles the
   // scale, matching the prior grayscale path.
+  //
+  // After painting, we read the rendered pixels back and run a variance
+  // check (per CLAUDE.md "Unknown Data Must Be Visible"): if the preview
+  // is suspiciously uniform — every sampled pixel within ~2 LSB of the
+  // mean — surface a chip warning. This catches the silent
+  // "renders but produces gray" failure mode that the 3D path can
+  // sometimes hit without throwing (e.g. lost WebGL context, flipped
+  // frustum, empty biome data).
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !previewUrl) return;
@@ -233,6 +244,26 @@ export function PlaceBuildingsStep(
       ctx.imageSmoothingEnabled = true;
       ctx.clearRect(0, 0, PREVIEW_PX, PREVIEW_PX);
       ctx.drawImage(img, 0, 0, PREVIEW_PX, PREVIEW_PX);
+      // Sanity check the painted result. Wrapped in a try because in
+      // headless test environments getImageData can throw on a tainted
+      // canvas (it never will here — the data URL came from us — but
+      // the defensive try keeps us out of the way).
+      try {
+        const imgData = ctx.getImageData(0, 0, PREVIEW_PX, PREVIEW_PX);
+        const variance = samplePixelVariance(imgData.data, PREVIEW_PX);
+        if (variance.maxStdDev < 2.0) {
+          setPreviewError(
+            `preview image is suspiciously uniform ` +
+              `(stddev ${variance.maxStdDev.toFixed(1)} < 2, ` +
+              `mean RGB ${variance.meanR.toFixed(0)}/${variance.meanG.toFixed(0)}/${variance.meanB.toFixed(0)}). ` +
+              `Likely a lighting or biome-data bug in MapPreviewRenderer — F12 console for details.`,
+          );
+        }
+      } catch {
+        // jsdom / canvas-package-missing environments: skip silently —
+        // the renderer's own variance check still surfaces in
+        // console.warn. Production browsers always succeed here.
+      }
     };
     img.src = previewUrl;
   }, [previewUrl]);

@@ -174,6 +174,19 @@ export function buildPreviewTerrainMesh(
  * Compute the camera ortho frustum + height for a given map dimension.
  * Pulled out so tests can verify framing math without spinning up a
  * renderer.
+ *
+ * Convention: Three.js OrthographicCamera expects `top > bottom` (NDC y+1
+ * = top of image). With camera positioned at `(centerX, cameraY, centerZ)`
+ * looking down -Y and `up = (0, 0, -1)` (so image +Y axis maps to world
+ * -Z, i.e. world +Z is image-down — same as a standard map "north is up"
+ * view if north = -Z), the local-space coordinates of world point
+ * `(centerX + dx, 0, centerZ + dz)` after the view transform are
+ * `(dx, -dz, distance)`. So `top` (which is `local_y_max` in Three.js's
+ * `makeOrthographic`) corresponds to world `-Z` (north). We use the
+ * standard convention `top=+depthM/2, bottom=-depthM/2` — combined with
+ * `up = (0, 0, -1)` this places world-+Z (south) at the BOTTOM of the
+ * image and world-(-Z) (north) at the TOP, with no projection-matrix
+ * Y-flip required.
  */
 export function computePreviewCameraFrame(
   widthM: number,
@@ -188,18 +201,15 @@ export function computePreviewCameraFrame(
   centerX: number;
   centerZ: number;
 } {
-  // Frame exactly the map's world dimensions. With the camera looking
-  // straight down -Y and `up = (0, 0, -1)` (north-up convention so the
-  // image's +X is world +X and +Y is world +Z — i.e. pxX↔worldX,
-  // pxY↔worldZ), the ortho box maps 1:1 to world meters.
   const centerX = widthM / 2;
   const centerZ = depthM / 2;
   return {
     // Half-extents centered on the map middle.
     left: -widthM / 2,
     right: widthM / 2,
-    top: -depthM / 2,
-    bottom: depthM / 2,
+    // Standard Three.js convention: top > bottom.
+    top: depthM / 2,
+    bottom: -depthM / 2,
     // Position the camera safely above the highest peak. Cheap padding
     // so the near plane doesn't clip; the ortho projection is
     // height-invariant anyway.
@@ -282,6 +292,10 @@ async function renderViaWebGL(
   });
   renderer.setPixelRatio(1);
   renderer.setSize(resolutionPx, resolutionPx, false);
+  // Match the editor's color space so render-target reads come back in
+  // the same gamma the live editor uses. Without this the readback was
+  // raw-linear and the resulting PNG looked washed out / dim.
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
 
   const scene = new THREE.Scene();
   // Background = sky horizon — keeps off-map margins from reading as
@@ -293,9 +307,11 @@ async function renderViaWebGL(
   );
   scene.fog = null;
 
-  // Lights — sun + hemi, configured from the biome atmosphere. Same
-  // construction shape as MapSceneManager so the preview reads
-  // tonally consistent with the editor.
+  // Lights — sun + hemi + a guaranteed ambient floor. Configured from the
+  // biome atmosphere so colors read consistent with the editor, but we
+  // add a defensive ambient term: a pre-v4 map with `sunIntensity = 0` or
+  // a corrupt atmosphere would otherwise produce a black preview. With
+  // the ambient floor the worst case is "evenly-lit but readable".
   const sun = new THREE.DirectionalLight(0xffffff, atmosphere.sunIntensity);
   sun.color.setRGB(
     atmosphere.sunColor[0],
@@ -324,6 +340,18 @@ async function renderViaWebGL(
     atmosphere.hemiGround[2],
   );
   scene.add(hemi);
+
+  // Ambient floor — guarantees the per-vertex color is visible even if
+  // the directional + hemi lights happen to graze the surface at a bad
+  // angle. Without this, a perfectly flat heightmap (normals all +Y)
+  // lit by a sun that's mostly above would render visibly, but a
+  // heightmap with crazy normals (steep cliff faces near the camera
+  // edge) could ship up unlit triangles. The 0.6 intensity is below the
+  // sun (≈2.4) so terrain still has directional shading, but above zero
+  // so vertex colors always read. Loud-over-silent: we'd rather see the
+  // biome color slightly flat than see nothing.
+  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+  scene.add(ambient);
 
   // Terrain mesh.
   const { mesh: terrain } = buildPreviewTerrainMesh(
@@ -369,12 +397,12 @@ async function renderViaWebGL(
     frame.cameraY + 200,
   );
   camera.position.set(frame.centerX, frame.cameraY, frame.centerZ);
-  // Look at the map center (straight down).
-  camera.lookAt(frame.centerX, 0, frame.centerZ);
-  // Override `up` so the image's +Y axis points to world +Z (north-down
-  // in image space matches the editor's worldZ-increasing convention,
-  // which PlaceBuildingsStep already assumes when mapping canvas Y to
-  // worldZ).
+  // Override `up` BEFORE lookAt so the view basis is computed correctly
+  // on the first call. With `up = (0, 0, -1)`, image-+Y maps to world
+  // -Z; combined with `top > bottom` (standard convention), world +Z
+  // ends up at the BOTTOM of the image — which matches the editor's
+  // convention where PlaceBuildingsStep's canvas-Y → world-Z math
+  // already assumes "screen down = world +Z".
   camera.up.set(0, 0, -1);
   camera.lookAt(frame.centerX, 0, frame.centerZ);
 
@@ -400,6 +428,24 @@ async function renderViaWebGL(
     resolutionPx,
     pixels,
   );
+
+  // Loud-over-silent variance check: sample a sparse grid of pixels and
+  // measure the per-channel standard deviation. If the rendered image is
+  // suspiciously uniform (every pixel within ~2 LSB of the mean), the
+  // render almost certainly failed silently — bad lighting, empty
+  // geometry, wrong frustum, etc. Surface it via console.warn so a dev
+  // with F12 open sees the cause; the caller's pixel-variance check in
+  // PlaceBuildingsStep will surface this in the UI chip too.
+  const variance = samplePixelVariance(pixels, resolutionPx);
+  if (variance.maxStdDev < 2.0) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[MapPreviewRenderer] rendered image is suspiciously uniform ` +
+        `(per-channel stddev = ${variance.r.toFixed(2)}/${variance.g.toFixed(2)}/${variance.b.toFixed(2)}, ` +
+        `mean RGB = ${variance.meanR.toFixed(0)}/${variance.meanG.toFixed(0)}/${variance.meanB.toFixed(0)}). ` +
+        `Likely a lighting, frustum, or biome-data bug.`,
+    );
+  }
 
   // Paint into a 2D canvas. WebGL pixel rows are bottom-up; flip into
   // top-down so the resulting PNG reads like the rendered scene.
@@ -433,6 +479,73 @@ async function renderViaWebGL(
   disposeScene(scene);
 
   return dataUrl;
+}
+
+/**
+ * Result of sampling pixel variance — exported so tests can assert that
+ * the rendered preview actually contains content variation.
+ */
+export interface PixelVariance {
+  readonly r: number;
+  readonly g: number;
+  readonly b: number;
+  readonly meanR: number;
+  readonly meanG: number;
+  readonly meanB: number;
+  readonly maxStdDev: number;
+}
+
+/**
+ * Sample a sparse grid of pixels from an RGBA byte buffer and compute
+ * the per-channel mean + standard deviation. Used both as a runtime
+ * sanity check (warn on "uniform output" failure mode) and as a test
+ * assertion (a real render should have stddev > some threshold).
+ *
+ * Stride is chosen to sample ~256 pixels regardless of resolution, so
+ * cost is constant time.
+ */
+export function samplePixelVariance(
+  pixels: Uint8Array | Uint8ClampedArray,
+  resolutionPx: number,
+): PixelVariance {
+  const samplesPerSide = 16;
+  const step = Math.max(1, Math.floor(resolutionPx / samplesPerSide));
+  let n = 0;
+  let sumR = 0;
+  let sumG = 0;
+  let sumB = 0;
+  // First pass for mean.
+  for (let y = 0; y < resolutionPx; y += step) {
+    for (let x = 0; x < resolutionPx; x += step) {
+      const off = (y * resolutionPx + x) * 4;
+      sumR += pixels[off + 0];
+      sumG += pixels[off + 1];
+      sumB += pixels[off + 2];
+      n++;
+    }
+  }
+  const meanR = sumR / Math.max(1, n);
+  const meanG = sumG / Math.max(1, n);
+  const meanB = sumB / Math.max(1, n);
+  // Second pass for variance.
+  let sumDR = 0;
+  let sumDG = 0;
+  let sumDB = 0;
+  for (let y = 0; y < resolutionPx; y += step) {
+    for (let x = 0; x < resolutionPx; x += step) {
+      const off = (y * resolutionPx + x) * 4;
+      const dr = pixels[off + 0] - meanR;
+      const dg = pixels[off + 1] - meanG;
+      const db = pixels[off + 2] - meanB;
+      sumDR += dr * dr;
+      sumDG += dg * dg;
+      sumDB += db * db;
+    }
+  }
+  const r = Math.sqrt(sumDR / Math.max(1, n));
+  const g = Math.sqrt(sumDG / Math.max(1, n));
+  const b = Math.sqrt(sumDB / Math.max(1, n));
+  return { r, g, b, meanR, meanG, meanB, maxStdDev: Math.max(r, g, b) };
 }
 
 /**
