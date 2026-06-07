@@ -25,10 +25,18 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { dirname } from "@tauri-apps/api/path";
 
 import { UnitSchematicSchema } from "../../lib/zod-schemas";
 import type { UnitSchematic } from "../../types/unit";
 import type { LoadDiagnostics } from "./LoadDiagnostics";
+import { readLastDir, writeLastDir } from "./mapLoader";
+
+/**
+ * localStorage key for the last directory the Pick Units dialog opened to.
+ * See `mapLoader.ts` for the matching map-picker key.
+ */
+const LAST_UNITS_DIR_KEY = "match_setup_last_units_dir";
 
 export interface LoadedSchematic {
   /** Absolute path of the JSON file. */
@@ -52,11 +60,18 @@ export interface LoadedSchematic {
 export async function pickAndLoadSchematics(
   diagnostics?: LoadDiagnostics,
 ): Promise<LoadedSchematic[]> {
+  // Last-used directory is remembered per-picker so bouncing between
+  // Pick Map, Pick Units, and Load Replay doesn't lose context. Stored
+  // under `match_setup_last_units_dir`. Falls through to OS default on
+  // first use OR if the stored directory no longer exists (Tauri's
+  // dialog handles that gracefully).
+  const defaultPath = readLastDir(LAST_UNITS_DIR_KEY);
   const picked = await openDialog({
     multiple: true,
     directory: false,
     title: "Pick unit Schematic JSON files",
     filters: [{ name: "Unit Schematic JSON", extensions: ["json"] }],
+    defaultPath,
   });
   if (picked === null || picked === undefined) return [];
   // Normalize: Tauri 2.x returns string[] for multiple:true, but the typing
@@ -66,6 +81,16 @@ export async function pickAndLoadSchematics(
     : typeof picked === "string"
       ? [picked]
       : [];
+  // Persist parent directory of the first picked file. Multi-select dialogs
+  // restrict selection to a single folder, so any path is representative.
+  if (paths.length > 0) {
+    try {
+      const parent = await dirname(paths[0]);
+      writeLastDir(LAST_UNITS_DIR_KEY, parent);
+    } catch {
+      // dirname failure (at root) — leave previous value alone.
+    }
+  }
   return await loadSchematicsByPaths(paths, diagnostics);
 }
 

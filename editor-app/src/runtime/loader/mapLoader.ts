@@ -70,6 +70,41 @@ export interface LoadedMap {
 }
 
 /**
+ * localStorage key for the last directory the Pick Map dialog opened to.
+ * Per-picker key (see `match_setup_last_units_dir`, `match_setup_last_replay_dir`)
+ * so bouncing between pickers doesn't lose any one picker's context.
+ */
+const LAST_MAP_DIR_KEY = "match_setup_last_map_dir";
+
+/**
+ * Read a stored last-used directory for the given key. Returns `undefined`
+ * when nothing is stored (first run), when running in a non-browser context
+ * (tests), or when access throws (privacy modes). Loud-over-silent doesn't
+ * apply here — the worst case is the dialog opens at the OS default, which
+ * is the same as the pre-feature behavior.
+ */
+function readLastDir(key: string): string | undefined {
+  try {
+    if (typeof localStorage === "undefined") return undefined;
+    const v = localStorage.getItem(key);
+    return v && v.length > 0 ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Write a last-used directory; silently ignored in non-browser contexts. */
+function writeLastDir(key: string, dir: string): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(key, dir);
+  } catch {
+    // Quota or privacy-mode failures don't matter — defaultPath falls
+    // back to OS default next time, which is acceptable.
+  }
+}
+
+/**
  * Open a native FILE picker for `manifest.json`, derive the containing
  * project directory, then load the map. Returns null if the user cancels.
  *
@@ -81,17 +116,25 @@ export interface LoadedMap {
  * "is this the right map?" check obvious at a glance. It also mirrors the
  * Pick Units flow (which has always been a file picker).
  *
+ * Last-used directory is remembered in localStorage under
+ * `match_setup_last_map_dir` so the owner can bounce between Pick Map,
+ * Pick Units, and Load Replay without re-navigating deep paths each time.
+ * If the stored directory no longer exists on disk, Tauri's dialog
+ * gracefully falls back to the OS default — no extra handling needed.
+ *
  * Loud-over-silent (CLAUDE.md rule #1): if the user picks a non-manifest
  * `.json` file (e.g. they navigated into the units folder by mistake), we
  * THROW a precise error explaining what to pick. The caller surfaces it in
  * the UI error pane — we never silently load the wrong file.
  */
 export async function pickAndLoadMap(): Promise<LoadedMap | null> {
+  const defaultPath = readLastDir(LAST_MAP_DIR_KEY);
   const picked = await openDialog({
     multiple: false,
     directory: false,
     filters: [{ name: "Map manifest", extensions: ["json"] }],
     title: "Pick a map's manifest.json",
+    defaultPath,
   });
   if (picked === null || picked === undefined) return null;
   // openDialog with `multiple: false` returns a string (or null) under
@@ -116,8 +159,25 @@ export async function pickAndLoadMap(): Promise<LoadedMap | null> {
   // Windows (`\\`) and POSIX (`/`) separators correctly — preferred over
   // hand-rolled substring math.
   const dir = await dirname(filePath);
+  // Persist for next time. We store the PARENT of the manifest's directory
+  // (i.e. the folder that CONTAINS the map project), so re-opening the
+  // dialog lands the user back at the siblings list where they can pick
+  // a different map. If `dirname` fails on `dir` (already at filesystem
+  // root) the catch swallows it — falling back to OS default is fine.
+  try {
+    const parentOfMapDir = await dirname(dir);
+    writeLastDir(LAST_MAP_DIR_KEY, parentOfMapDir);
+  } catch {
+    // At-root edge case — leave the previous value (or absence) alone.
+  }
   return await loadMapFromDir(dir);
 }
+
+// Re-export so sibling pickers (schematicLoader, ReplayPlayer) can use the
+// same localStorage helpers without duplicating the try/catch boilerplate.
+// Keeping them here (rather than a new util file) avoids a churned-imports
+// diff on a small UX fix.
+export { readLastDir, writeLastDir };
 
 /**
  * Load + parse a Map Project from an explicit directory path. Throws on

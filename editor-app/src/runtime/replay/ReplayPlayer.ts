@@ -26,9 +26,17 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { dirname } from "@tauri-apps/api/path";
 
 import { decodeReplay, hashSimState, type ReplayFile } from "../../sim/replay";
 import type { SimWorld } from "../../sim/world";
+import { readLastDir, writeLastDir } from "../loader/mapLoader";
+
+/**
+ * localStorage key for the last directory the Load Replay dialog opened to.
+ * See `mapLoader.ts` for the matching map-picker key.
+ */
+const LAST_REPLAY_DIR_KEY = "match_setup_last_replay_dir";
 
 /** What the GameRuntime needs to set up a replay-mode match. */
 export interface ReplaySession {
@@ -42,11 +50,17 @@ export interface ReplaySession {
  * Returns null if the user cancels. Throws on bad file content.
  */
 export async function pickAndLoadReplay(): Promise<ReplaySession | null> {
+  // Last-used directory is remembered per-picker so bouncing between
+  // Pick Map, Pick Units, and Load Replay doesn't lose context. Stored
+  // under `match_setup_last_replay_dir`. Falls through to OS default on
+  // first use OR if the stored directory no longer exists.
+  const defaultPath = readLastDir(LAST_REPLAY_DIR_KEY);
   const picked = await openDialog({
     title: "Open Replay",
     multiple: false,
     directory: false,
     filters: [{ name: "Replay JSON", extensions: ["replay.json", "json"] }],
+    defaultPath,
   });
   if (picked === null || picked === undefined) return null;
   const path: string =
@@ -56,6 +70,13 @@ export async function pickAndLoadReplay(): Promise<ReplaySession | null> {
         ? (picked[0] as string)
         : "";
   if (!path) return null;
+  // Persist parent directory of the picked replay for next time.
+  try {
+    const parent = await dirname(path);
+    writeLastDir(LAST_REPLAY_DIR_KEY, parent);
+  } catch {
+    // At-root edge case — leave previous value alone.
+  }
   return loadReplayFromPath(path);
 }
 
