@@ -143,15 +143,23 @@ export async function pickAndLoadMap(): Promise<LoadedMap | null> {
   if (!filePath) return null;
 
   // Loud-over-silent: validate the basename before we touch the loader.
-  // Manifest discovery in `open_map_project` (Rust) is hardcoded to look
-  // for `manifest.json` inside the dir, so anything else here would just
-  // produce a confusing "manifest.json not found" error one layer down.
-  // Surface the precise mistake here instead.
+  // Manifest discovery in `open_map_project` (Rust) tries the new-style
+  // `<map_name>.manifest.json` first then falls back to the bare
+  // `manifest.json`, so anything else here would just produce a
+  // confusing "manifest.json not found" error one layer down. Surface
+  // the precise mistake here instead.
+  //
+  // Accept ANY file whose name ends with `.manifest.json` (the new
+  // name-prefixed convention, e.g. `Green_Fields.manifest.json`) OR is
+  // exactly `manifest.json` (the legacy bare-name convention). This is
+  // the file-validation update that matches the save-side rename.
   const filename = filePath.split(/[/\\]/).pop() ?? "";
-  if (filename.toLowerCase() !== "manifest.json") {
+  const lower = filename.toLowerCase();
+  const ok = lower === "manifest.json" || lower.endsWith(".manifest.json");
+  if (!ok) {
     throw new Error(
-      `Selected "${filename}" — expected manifest.json. ` +
-        `Pick the manifest.json file inside a map project folder.`,
+      `Selected "${filename}" — expected manifest.json (or <map_name>.manifest.json). ` +
+        `Pick the manifest file inside a map project folder.`,
     );
   }
 

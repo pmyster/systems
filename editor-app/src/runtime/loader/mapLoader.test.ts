@@ -16,9 +16,17 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(),
 }));
+vi.mock("@tauri-apps/api/path", () => ({
+  // Cheap pure-JS dirname that handles both separators — enough for tests.
+  dirname: vi.fn(async (p: string) => {
+    const idx = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+    return idx >= 0 ? p.slice(0, idx) : ".";
+  }),
+}));
 
 import { invoke } from "@tauri-apps/api/core";
-import { loadMapFromDir } from "./mapLoader";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { loadMapFromDir, pickAndLoadMap } from "./mapLoader";
 
 const mockedInvoke = invoke as unknown as ReturnType<typeof vi.fn>;
 
@@ -162,5 +170,81 @@ describe("loadMapFromDir", () => {
     expect(loaded.colorpaint).toBeInstanceOf(Uint8Array);
     expect(loaded.colorpaint?.length).toBe(4);
     expect(loaded.colorpaint?.[3]).toBe(40);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// pickAndLoadMap — filename validation for the new name-prefixed scheme.
+// ---------------------------------------------------------------------------
+//
+// The save side now writes `<map_name>.manifest.json` (so the file picker
+// shows distinct names instead of a sea of `manifest.json` entries). The
+// load side must accept BOTH the new prefixed convention AND the legacy
+// bare name — otherwise old maps stop loading after the upgrade.
+describe("pickAndLoadMap filename validation", () => {
+  const mockedOpen = openDialog as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    mockedOpen.mockReset();
+  });
+
+  /** Set up a successful Rust-side bundle for the post-validation load. */
+  function stubBundle(): void {
+    const manifest = makeManifest(2, 2);
+    mockedInvoke.mockResolvedValueOnce({
+      manifest_json: JSON.stringify(manifest),
+      heightmap_bytes: encodeHeights([0, 0, 0, 0]),
+      splatmap_bytes: [],
+      colorpaint_bytes: [],
+      thumbnail_bytes: [],
+    });
+  }
+
+  it("accepts a new-style <name>.manifest.json filename", async () => {
+    mockedOpen.mockResolvedValueOnce(
+      "C:\\Maps\\Green_Fields\\Green_Fields.manifest.json",
+    );
+    stubBundle();
+    const loaded = await pickAndLoadMap();
+    expect(loaded).not.toBeNull();
+    expect(loaded?.dir).toBe("C:\\Maps\\Green_Fields");
+  });
+
+  it("accepts a legacy bare manifest.json filename (back-compat)", async () => {
+    mockedOpen.mockResolvedValueOnce("/maps/OldMap/manifest.json");
+    stubBundle();
+    const loaded = await pickAndLoadMap();
+    expect(loaded).not.toBeNull();
+    expect(loaded?.dir).toBe("/maps/OldMap");
+  });
+
+  it("accepts case-insensitive new-style filenames", async () => {
+    mockedOpen.mockResolvedValueOnce("/maps/Hot_Sands/Hot_Sands.Manifest.JSON");
+    stubBundle();
+    const loaded = await pickAndLoadMap();
+    expect(loaded).not.toBeNull();
+  });
+
+  it("rejects a non-manifest .json with a helpful error", async () => {
+    mockedOpen.mockResolvedValueOnce("/maps/Green_Fields/units/unit.json");
+    await expect(pickAndLoadMap()).rejects.toThrow(/expected manifest\.json/);
+  });
+
+  it("rejects a .json that only ends with 'manifest.json' by accident", async () => {
+    // A file literally named `randomthingmanifest.json` should NOT pass —
+    // we require a dot before `manifest.json` (the `.<asset>` convention).
+    mockedOpen.mockResolvedValueOnce(
+      "/maps/Green_Fields/notamanifest.json",
+    );
+    // `notamanifest.json` does not end with `.manifest.json` and is not
+    // exactly `manifest.json`, so the validator rejects it.
+    await expect(pickAndLoadMap()).rejects.toThrow(/expected manifest\.json/);
+  });
+
+  it("returns null when the user cancels the dialog", async () => {
+    mockedOpen.mockResolvedValueOnce(null);
+    const loaded = await pickAndLoadMap();
+    expect(loaded).toBeNull();
   });
 });

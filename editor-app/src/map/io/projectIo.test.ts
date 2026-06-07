@@ -7,13 +7,13 @@
  * load path because that needs a Tauri runtime.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import { MapProjectManifestSchema } from "../schema/manifest";
 import { useMapStore } from "../state/mapStore";
 import type { InstanceObject } from "../state/mapStore";
 
-import { _buildBundleFromStore } from "./projectIo";
+import { _buildBundleFromStore, mapFilenames } from "./projectIo";
 
 const OBJ: InstanceObject = {
   id: "55555555-5555-5555-5555-555555555555",
@@ -67,5 +67,42 @@ describe("projectIo bundle round-trip", () => {
     const parsed = JSON.parse(bundle.manifest_json);
     const manifest = MapProjectManifestSchema.parse(parsed);
     expect(manifest.objects).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mapFilenames — name-prefixed asset filenames so the file picker can
+// distinguish maps at a glance instead of showing identical `manifest.json`
+// entries across every map folder.
+// ---------------------------------------------------------------------------
+describe("mapFilenames", () => {
+  it("prefixes a manifest filename with the map name", () => {
+    expect(mapFilenames("Green_Fields", "manifest.json")).toBe(
+      "Green_Fields.manifest.json",
+    );
+  });
+
+  it("prefixes every supported asset suffix", () => {
+    const name = "Hot_Sands";
+    expect(mapFilenames(name, "heightmap.r32")).toBe("Hot_Sands.heightmap.r32");
+    expect(mapFilenames(name, "splatmap.r8")).toBe("Hot_Sands.splatmap.r8");
+    expect(mapFilenames(name, "colorpaint.r8")).toBe("Hot_Sands.colorpaint.r8");
+    expect(mapFilenames(name, "thumbnail.png")).toBe("Hot_Sands.thumbnail.png");
+  });
+
+  it("falls back to 'map' for an empty / whitespace-only name (loud)", () => {
+    // Loud-over-silent: empty name would produce a hidden `.manifest.json`
+    // on POSIX and an unhelpful picker label everywhere. Fallback keeps
+    // the file visible and logs a warning.
+    const warn = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
+    try {
+      expect(mapFilenames("", "manifest.json")).toBe("map.manifest.json");
+      expect(mapFilenames("   ", "heightmap.r32")).toBe("map.heightmap.r32");
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

@@ -46,6 +46,58 @@ import { useMapStore } from "../state/mapStore";
 
 import { decodeHeightmap, encodeHeightmap } from "./heightmapCodec";
 
+/**
+ * Asset filename suffix → on-disk filename for a given map name.
+ *
+ * Every map project's sidecar is prefixed with the map's name (the
+ * project folder's basename) so the native file picker shows
+ * distinctly-named files instead of a sea of identical `manifest.json`
+ * / `heightmap.r32` entries across folders. E.g. for a map named
+ * `Green_Fields`:
+ *
+ *   mapFilenames("Green_Fields", "manifest.json") === "Green_Fields.manifest.json"
+ *   mapFilenames("Green_Fields", "heightmap.r32") === "Green_Fields.heightmap.r32"
+ *
+ * Asset suffixes match the bare names the Rust side knows about:
+ *   - `manifest.json`
+ *   - `heightmap.r32`
+ *   - `splatmap.r8`
+ *   - `colorpaint.r8`
+ *   - `thumbnail.png`
+ *
+ * Back-compat: the load side (`open_map_project` in `map_project.rs`)
+ * tries the prefixed name first and falls back to the bare name, so old
+ * projects authored before this change still load unchanged. The save
+ * side always writes the new prefixed name and leaves any old bare-named
+ * siblings in place (least-destructive — the owner can delete them
+ * manually once they've verified the new names load correctly).
+ *
+ * Exposed for tests + future "migrate" tooling; the actual write path
+ * derives the same string Rust-side from the project dir's basename so
+ * the wire payload stays compact.
+ */
+export type MapAssetSuffix =
+  | "manifest.json"
+  | "heightmap.r32"
+  | "splatmap.r8"
+  | "colorpaint.r8"
+  | "thumbnail.png";
+
+export function mapFilenames(mapName: string, asset: MapAssetSuffix): string {
+  // Loud-over-silent: an empty or whitespace-only name would produce a
+  // leading-dot filename like `.manifest.json` which is both a hidden
+  // file on POSIX and the wrong picker label. Fall back to `map` so the
+  // file is at least visible, and warn so the regression surfaces.
+  const cleanName = mapName.trim();
+  if (cleanName.length === 0) {
+    console.warn(
+      `[projectIo] mapFilenames called with empty mapName; falling back to "map".`,
+    );
+    return `map.${asset}`;
+  }
+  return `${cleanName}.${asset}`;
+}
+
 /** Tauri command payload. */
 interface MapBundle {
   manifest_json: string;

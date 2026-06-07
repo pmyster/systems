@@ -1,12 +1,23 @@
 //! Map project I/O — atomic save/load + autosave + .bak rotation.
 //!
 //! On-disk layout (see docs/adr/0002-map-project-directory-format.md):
-//!   <projectdir>/
-//!     manifest.json         — UTF-8 JSON, validated JS-side via Zod
-//!     heightmap.r32         — raw little-endian Float32 sidecar
-//!     splatmap.r8           — raw RGBA Uint8 sidecar (4 material weights / pixel)
-//!     .bak/<unix_ts>/       — last 10 snapshot copies (manifest + heightmap + splatmap)
-//!     .autosave/            — most-recent autosave snapshot (overwrites in place)
+//!   <projectdir>/                          ← `projectdir` basename = map name
+//!     <map_name>.manifest.json             — UTF-8 JSON, validated JS-side via Zod
+//!     <map_name>.heightmap.r32             — raw little-endian Float32 sidecar
+//!     <map_name>.splatmap.r8               — raw RGBA Uint8 sidecar (4 material weights / pixel)
+//!     <map_name>.colorpaint.r8             — raw RGBA Uint8 color-paint overlay (v5+)
+//!     <map_name>.thumbnail.png             — optional PNG thumbnail (skipped when absent)
+//!     .bak/<unix_ts>/                      — last 10 snapshot copies (same name-prefixed scheme)
+//!     .autosave/                           — most-recent autosave snapshot (overwrites in place)
+//!
+//! Filename prefixing (added 2026-06-07): every asset is prefixed with
+//! the project folder's basename so the native file picker shows
+//! distinctly-named files instead of a sea of identical `manifest.json`
+//! / `heightmap.r32` entries across different folders. Back-compat: the
+//! load path tries `<map_name>.<asset>` first, falls back to the bare
+//! asset name for projects authored before this change. Save path always
+//! writes the new-style name and leaves any old bare-named siblings in
+//! place (least-destructive — owner deletes manually once confident).
 //!
 //! Atomicity strategy: write `.tmp` next to target, fsync, rename. On
 //! Windows the rename can fail if another process briefly holds the
@@ -52,6 +63,57 @@ pub struct MapBundle {
     pub thumbnail_bytes: Vec<u8>,
 }
 
+/// Derive the map name from a project directory path. Defaults to
+/// `"map"` if the path has no basename (root, empty, or oddly-shaped
+/// path) so save paths never silently produce `.manifest.json` with a
+/// leading dot. The fallback is loud-friendly: callers can see the
+/// derived name in the eventual on-disk filenames.
+fn map_name_from_dir(dir: &Path) -> String {
+    dir.file_name()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("map")
+        .to_string()
+}
+
+/// Resolve the on-disk path for an asset within a project directory.
+///
+/// Prefers the new prefixed convention `<map_name>.<asset>`; falls back
+/// to the bare `<asset>` name for backward compat with maps authored
+/// before the prefixing change. Loud-over-silent: when BOTH exist (the
+/// half-renamed case, e.g. user manually copied some files), logs a
+/// WARN to stderr and prefers the new style — never silently picks one
+/// without surfacing the ambiguity.
+///
+/// Returns the resolved path AND a bool indicating whether the file
+/// actually exists. Callers that need "exists OR I'll handle missing"
+/// inspect the bool; callers that REQUIRE the file (manifest, heightmap)
+/// just call `.exists()` on the result themselves.
+fn resolve_asset_path(dir: &Path, map_name: &str, asset: &str) -> PathBuf {
+    let prefixed = dir.join(format!("{map_name}.{asset}"));
+    let bare = dir.join(asset);
+    let prefixed_exists = prefixed.exists();
+    let bare_exists = bare.exists();
+    if prefixed_exists && bare_exists {
+        eprintln!(
+            "[map_project] Both new-style ({}) and old-style ({}) sidecars exist; preferring new-style. \
+             You can safely delete the old-style file once you've verified the load.",
+            prefixed.display(),
+            bare.display()
+        );
+        prefixed
+    } else if prefixed_exists {
+        prefixed
+    } else if bare_exists {
+        bare
+    } else {
+        // Neither exists — return the prefixed path so a downstream
+        // `read` produces an error message that points at the new
+        // convention (the one we want authoring to converge to).
+        prefixed
+    }
+}
+
 /// Create a fresh project directory with manifest + sidecars.
 ///
 /// Refuses to overwrite an existing manifest — the New flow must never
@@ -62,8 +124,13 @@ pub fn create_map_project(dir: String, bundle: MapBundle) -> Result<(), String> 
     let dir_path = PathBuf::from(&dir);
     fs::create_dir_all(&dir_path)
         .map_err(|e| format!("create_dir_all failed: {e}"))?;
-    let manifest_path = dir_path.join("manifest.json");
-    if manifest_path.exists() {
+    let map_name = map_name_from_dir(&dir_path);
+    // Refuse to overwrite EITHER the new-style or the bare-style manifest.
+    // A pre-existing manifest under either name means a project is already
+    // here — the New flow must never clobber it.
+    let new_manifest = dir_path.join(format!("{map_name}.manifest.json"));
+    let bare_manifest = dir_path.join("manifest.json");
+    if new_manifest.exists() || bare_manifest.exists() {
         return Err(format!("Project already exists at {dir}"));
     }
     write_bundle_atomic(&dir_path, &bundle)?;
@@ -79,26 +146,29 @@ pub fn create_map_project(dir: String, bundle: MapBundle) -> Result<(), String> 
 #[tauri::command]
 pub fn open_map_project(dir: String) -> Result<MapBundle, String> {
     let dir_path = PathBuf::from(&dir);
-    let manifest_path = dir_path.join("manifest.json");
-    let heightmap_path = dir_path.join("heightmap.r32");
-    let splatmap_path = dir_path.join("splatmap.r8");
+    let map_name = map_name_from_dir(&dir_path);
+    // Try new-style `<map_name>.<asset>` first, fall back to bare name.
+    // resolve_asset_path emits a loud WARN to stderr when both exist.
+    let manifest_path = resolve_asset_path(&dir_path, &map_name, "manifest.json");
+    let heightmap_path = resolve_asset_path(&dir_path, &map_name, "heightmap.r32");
+    let splatmap_path = resolve_asset_path(&dir_path, &map_name, "splatmap.r8");
     let manifest_json = fs::read_to_string(&manifest_path)
-        .map_err(|e| format!("read manifest failed: {e}"))?;
+        .map_err(|e| format!("read manifest failed ({}): {e}", manifest_path.display()))?;
     let heightmap_bytes = fs::read(&heightmap_path)
-        .map_err(|e| format!("read heightmap failed: {e}"))?;
+        .map_err(|e| format!("read heightmap failed ({}): {e}", heightmap_path.display()))?;
     let splatmap_bytes = if splatmap_path.exists() {
         fs::read(&splatmap_path)
             .map_err(|e| format!("read splatmap failed: {e}"))?
     } else {
         eprintln!(
-            "[map_project] No splatmap.r8 at {splatmap_path:?}; JS layer will synth default."
+            "[map_project] No splatmap sidecar at {splatmap_path:?}; JS layer will synth default."
         );
         Vec::new()
     };
     // colorpaint.r8 is optional — pre-v5 projects don't have one, and
     // fresh v5 projects skip the write until the user actually paints.
     // Absent file → empty Vec → JS layer synthesises a zero-tint buffer.
-    let colorpaint_path = dir_path.join("colorpaint.r8");
+    let colorpaint_path = resolve_asset_path(&dir_path, &map_name, "colorpaint.r8");
     let colorpaint_bytes = if colorpaint_path.exists() {
         fs::read(&colorpaint_path)
             .map_err(|e| format!("read colorpaint failed: {e}"))?
@@ -108,7 +178,7 @@ pub fn open_map_project(dir: String) -> Result<MapBundle, String> {
     // Thumbnail is optional — older projects (or any project that has
     // never been saved with the thumbnail feature) won't have one. Empty
     // Vec signals "absent" to the JS side without failing the load.
-    let thumbnail_path = dir_path.join("thumbnail.png");
+    let thumbnail_path = resolve_asset_path(&dir_path, &map_name, "thumbnail.png");
     let thumbnail_bytes = if thumbnail_path.exists() {
         fs::read(&thumbnail_path).unwrap_or_else(|e| {
             eprintln!(
@@ -143,9 +213,11 @@ pub struct MapBundleMeta {
 #[tauri::command]
 pub fn open_map_project_meta_only(dir: String) -> Result<MapBundleMeta, String> {
     let dir_path = PathBuf::from(&dir);
-    let manifest_json = fs::read_to_string(dir_path.join("manifest.json"))
-        .map_err(|e| format!("read manifest failed: {e}"))?;
-    let thumbnail_path = dir_path.join("thumbnail.png");
+    let map_name = map_name_from_dir(&dir_path);
+    let manifest_path = resolve_asset_path(&dir_path, &map_name, "manifest.json");
+    let manifest_json = fs::read_to_string(&manifest_path)
+        .map_err(|e| format!("read manifest failed ({}): {e}", manifest_path.display()))?;
+    let thumbnail_path = resolve_asset_path(&dir_path, &map_name, "thumbnail.png");
     let thumbnail_bytes = if thumbnail_path.exists() {
         fs::read(&thumbnail_path).unwrap_or_default()
     } else {
@@ -318,22 +390,43 @@ pub fn autosave_map_project(dir: String, bundle: MapBundle) -> Result<(), String
 // ---------------------------------------------------------------------------
 
 fn write_bundle_atomic(dir: &Path, bundle: &MapBundle) -> Result<(), String> {
-    write_atomic(&dir.join("manifest.json"), bundle.manifest_json.as_bytes())?;
-    write_atomic(&dir.join("heightmap.r32"), &bundle.heightmap_bytes)?;
+    let map_name = map_name_from_dir(dir);
+    // Always write the new-style prefixed filenames. We intentionally do
+    // NOT delete any pre-existing bare-named siblings: that's the
+    // least-destructive choice (least risk of nuking the owner's only
+    // copy if something else hiccups during the save). The next manual
+    // cleanup pass / future "migrate" button can remove the duplicates.
+    write_atomic(
+        &dir.join(format!("{map_name}.manifest.json")),
+        bundle.manifest_json.as_bytes(),
+    )?;
+    write_atomic(
+        &dir.join(format!("{map_name}.heightmap.r32")),
+        &bundle.heightmap_bytes,
+    )?;
     if !bundle.splatmap_bytes.is_empty() {
-        write_atomic(&dir.join("splatmap.r8"), &bundle.splatmap_bytes)?;
+        write_atomic(
+            &dir.join(format!("{map_name}.splatmap.r8")),
+            &bundle.splatmap_bytes,
+        )?;
     }
     // Color-paint sidecar: skip when empty (no painted content) so
     // legacy maps don't gain an empty stub file. The JS layer
     // synthesises an empty buffer at load time when the file's absent.
     if !bundle.colorpaint_bytes.is_empty() {
-        write_atomic(&dir.join("colorpaint.r8"), &bundle.colorpaint_bytes)?;
+        write_atomic(
+            &dir.join(format!("{map_name}.colorpaint.r8")),
+            &bundle.colorpaint_bytes,
+        )?;
     }
     // Thumbnail is best-effort: skip writing when no bytes were provided
     // (autosave, headless test, capture failure) rather than overwriting
     // an existing good thumbnail with zeros.
     if !bundle.thumbnail_bytes.is_empty() {
-        write_atomic(&dir.join("thumbnail.png"), &bundle.thumbnail_bytes)?;
+        write_atomic(
+            &dir.join(format!("{map_name}.thumbnail.png")),
+            &bundle.thumbnail_bytes,
+        )?;
     }
     Ok(())
 }
@@ -369,7 +462,11 @@ fn write_atomic(target: &Path, contents: &[u8]) -> Result<(), String> {
 /// Copy the current manifest+heightmap+splatmap into `.bak/<unix_ts>/`,
 /// then trim the backup folder to the 10 most recent snapshots.
 fn rotate_baks(dir: &Path) -> Result<(), String> {
-    let manifest = dir.join("manifest.json");
+    let map_name = map_name_from_dir(dir);
+    // Look for the current manifest under EITHER the new-style or
+    // bare-name convention — rotate_baks runs before save, so the prior
+    // version on disk could be from a previous (old-format) save.
+    let manifest = resolve_asset_path(dir, &map_name, "manifest.json");
     if !manifest.exists() {
         return Ok(());
     }
@@ -383,20 +480,25 @@ fn rotate_baks(dir: &Path) -> Result<(), String> {
     // when seconds-since-epoch eventually rolls a digit.
     let stamp_dir = bak_dir.join(format!("{now:020}"));
     fs::create_dir_all(&stamp_dir).map_err(|e| format!("create stamp dir: {e}"))?;
+    // Backup snapshots inside `.bak/<ts>/` use the bare asset names —
+    // they're nested under a timestamp dir, so there's no ambiguity to
+    // resolve (the directory itself disambiguates). Keeping bare names
+    // here also means the snapshots don't churn if the project folder
+    // gets renamed.
     let _ = fs::copy(&manifest, stamp_dir.join("manifest.json"));
-    let _ = fs::copy(
-        dir.join("heightmap.r32"),
-        stamp_dir.join("heightmap.r32"),
-    );
-    let splatmap = dir.join("splatmap.r8");
+    let heightmap = resolve_asset_path(dir, &map_name, "heightmap.r32");
+    if heightmap.exists() {
+        let _ = fs::copy(&heightmap, stamp_dir.join("heightmap.r32"));
+    }
+    let splatmap = resolve_asset_path(dir, &map_name, "splatmap.r8");
     if splatmap.exists() {
         let _ = fs::copy(&splatmap, stamp_dir.join("splatmap.r8"));
     }
-    let colorpaint = dir.join("colorpaint.r8");
+    let colorpaint = resolve_asset_path(dir, &map_name, "colorpaint.r8");
     if colorpaint.exists() {
         let _ = fs::copy(&colorpaint, stamp_dir.join("colorpaint.r8"));
     }
-    let thumbnail = dir.join("thumbnail.png");
+    let thumbnail = resolve_asset_path(dir, &map_name, "thumbnail.png");
     if thumbnail.exists() {
         let _ = fs::copy(&thumbnail, stamp_dir.join("thumbnail.png"));
     }
