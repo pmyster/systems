@@ -75,9 +75,42 @@ import {
 /** Default vertical offset above the unit Position.y. Tuned for mk01 (~3m tall). */
 export const DEFAULT_Y_OFFSET = 3.2;
 
-/** Default bar size in world units. Readable at typical RTS distance (~30-50m). */
+/**
+ * Legacy fixed world-space bar size. Retained as a fallback for the
+ * (deprecated) no-camera code path — the constant-screen-size path
+ * computes scale per-frame from camera distance and ignores these.
+ *
+ * They still seed each sprite's initial scale at construction; the first
+ * camera-aware `updateFromWorld` overwrites those values immediately.
+ */
 export const DEFAULT_BAR_WIDTH = 2.5;
 export const DEFAULT_BAR_HEIGHT = 0.35;
+
+/**
+ * Constant-screen-size targets — what the owner actually sees.
+ *
+ * The bar should READ at any zoom: small enough at close range that it
+ * doesn't cover the unit, large enough at far range that it's still
+ * legible. Per-frame we re-scale each sprite so it lands on these pixel
+ * dimensions in the final render — `world_units_per_pixel` derived from
+ * the camera's FOV + the entity's distance + the viewport height.
+ *
+ * 60 × 8 px is the standard SC2-ish proportion: long-thin, ~3 mm tall on
+ * a 1080p monitor at typical seating distance, readable at a glance.
+ */
+export const HP_BAR_TARGET_WIDTH_PX = 60;
+export const HP_BAR_TARGET_HEIGHT_PX = 8;
+
+/**
+ * Safety floor on the distance used for scale computation. Without it, a
+ * unit directly under the camera (distance ≈ 0) would receive a near-zero
+ * world scale → effectively invisible — followed by a divide-by-near-zero
+ * spike if anyone refactors the formula. 1m is far below any practical
+ * RTS camera distance (the camera is always well above the ground), so
+ * this floor never bites in normal gameplay; it exists to make the math
+ * robust.
+ */
+export const HP_BAR_MIN_DISTANCE = 1;
 
 /** Pool cap. Same order of magnitude as the per-type instance cap. */
 export const DEFAULT_MAX_BARS = 256;
@@ -93,6 +126,37 @@ function colourFor(fraction: number): THREE.Color {
   if (fraction > 0.66) return COLOR_GREEN;
   if (fraction > 0.33) return COLOR_YELLOW;
   return COLOR_RED;
+}
+
+/**
+ * World-units-per-screen-pixel at a given camera distance.
+ *
+ * Derivation (perspective projection):
+ *   The view frustum at distance `d` has height
+ *     H_world = 2 * d * tan(fov / 2)
+ *   which maps to `viewportHeightPx` pixels on screen. Therefore one
+ *   screen pixel covers
+ *     H_world / viewportHeightPx
+ *   world units.
+ *
+ * Used to convert a target pixel size (e.g. 60 px wide HP bar) into the
+ * world scale a `THREE.Sprite` must take this frame so it lands on that
+ * pixel size in the final raster.
+ *
+ * `distance` is clamped to >= HP_BAR_MIN_DISTANCE to keep the scale
+ * positive and finite when the camera is right on top of a unit.
+ *
+ * Exported for tests.
+ */
+export function computeWorldUnitsPerPixel(
+  distance: number,
+  fovDegrees: number,
+  viewportHeightPx: number,
+): number {
+  const safeDistance = Math.max(HP_BAR_MIN_DISTANCE, distance);
+  const safeViewport = Math.max(1, viewportHeightPx);
+  const fovRad = (fovDegrees * Math.PI) / 180;
+  return (2 * safeDistance * Math.tan(fovRad / 2)) / safeViewport;
 }
 
 interface BarSlot {
@@ -143,6 +207,11 @@ export class HpBarRenderer {
   private readonly hideAtFullHealth: boolean;
   private readonly warnedMissingHealth = new Set<number>();
   private visible = true;
+  /**
+   * Scratch vector reused for camera→unit distance math. Pre-allocated to
+   * keep `updateFromWorld` allocation-free (called every frame at 60Hz).
+   */
+  private readonly _tmpVec = new THREE.Vector3();
 
   constructor(opts: HpBarRendererOptions = {}) {
     this.maxBars = opts.maxBars ?? DEFAULT_MAX_BARS;
@@ -217,11 +286,22 @@ export class HpBarRenderer {
    * free list — the sprite stays parented but invisible until a new eid
    * claims its slot.
    *
+   * Constant-screen-size scaling: when `camera` + `viewportHeightPx` are
+   * supplied, each sprite's world scale is computed from the camera→unit
+   * distance so the bar lands on HP_BAR_TARGET_WIDTH_PX × HP_BAR_TARGET_HEIGHT_PX
+   * in the final raster — readable at any zoom level. When they are
+   * omitted (e.g. unit tests without a camera) we fall back to the legacy
+   * fixed world-space size — visible but not zoom-stable.
+   *
    * Performance: at 200 units this completes in well under 1ms on dev
    * hardware (mostly typed-array reads + Vector3.set + bool toggles).
    * The `query` call is bitECS's memoised SparseSet view — cheap.
    */
-  updateFromWorld(world: SimWorld): void {
+  updateFromWorld(
+    world: SimWorld,
+    camera?: THREE.PerspectiveCamera,
+    viewportHeightPx?: number,
+  ): void {
     // If the toggle is off, nothing to do — keep the bookkeeping in case
     // the user toggles back on without state drift.
     if (!this.visible) {
@@ -305,9 +385,32 @@ export class HpBarRenderer {
       s.bg.position.set(px, py, pz);
       s.fill.position.set(px, py, pz);
 
+      // ---- Per-frame size ------------------------------------------------
+      //
+      // If a camera+viewport are provided we compute the world scale this
+      // frame so the sprite lands at exactly TARGET_WIDTH_PX × TARGET_HEIGHT_PX
+      // in the final raster. The further the camera is, the larger the
+      // world units behind one pixel — linear in distance.
+      //
+      // Without a camera (test/headless path), fall back to the legacy
+      // fixed world-space size.
+      let widthWorld = this.barWidth;
+      let heightWorld = this.barHeight;
+      if (camera && viewportHeightPx !== undefined) {
+        this._tmpVec.set(px, py, pz);
+        const distance = camera.position.distanceTo(this._tmpVec);
+        const worldPerPx = computeWorldUnitsPerPixel(
+          distance,
+          camera.fov,
+          viewportHeightPx,
+        );
+        widthWorld = HP_BAR_TARGET_WIDTH_PX * worldPerPx;
+        heightWorld = HP_BAR_TARGET_HEIGHT_PX * worldPerPx;
+      }
+
       // Width: bg stays at full; fill scales horizontally by fraction.
-      s.bg.scale.set(this.barWidth, this.barHeight, 1);
-      s.fill.scale.set(this.barWidth * fraction, this.barHeight, 1);
+      s.bg.scale.set(widthWorld, heightWorld, 1);
+      s.fill.scale.set(widthWorld * fraction, heightWorld, 1);
 
       // Colour by zone.
       (s.fill.material as THREE.SpriteMaterial).color.copy(colourFor(fraction));

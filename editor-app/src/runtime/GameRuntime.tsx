@@ -903,7 +903,16 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
       projRenderer.update(sim.world);
       // Per-frame HP bar sync — reads Position + Health, writes sprite
       // pose/scale/colour. Cheap (≤ ~100 units in Phase 1 budget).
-      hpBars.updateFromWorld(sim.world);
+      //
+      // Pass camera + viewport height so the renderer computes a per-unit
+      // world scale that lands on a constant ~60×8 px size in the final
+      // raster — readable at any zoom (close-up doesn't drown the unit,
+      // far-out doesn't shrink to a speck).
+      hpBars.updateFromWorld(
+        sim.world,
+        camera,
+        renderer.domElement.clientHeight,
+      );
       renderer.render(scene, camera);
 
       fpsAccum += dtReal;

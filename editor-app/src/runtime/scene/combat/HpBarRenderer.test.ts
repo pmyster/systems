@@ -24,6 +24,10 @@ import {
   HpBarRenderer,
   DEFAULT_BAR_WIDTH,
   DEFAULT_Y_OFFSET,
+  HP_BAR_TARGET_WIDTH_PX,
+  HP_BAR_TARGET_HEIGHT_PX,
+  HP_BAR_MIN_DISTANCE,
+  computeWorldUnitsPerPixel,
 } from "./HpBarRenderer";
 
 /** Spawn a minimal "unit" entity with Position + Health + Renderable. */
@@ -236,6 +240,140 @@ describe("HpBarRenderer", () => {
     expect(near(fill.position.x, 7)).toBe(true);
     expect(near(fill.position.y, 2 + DEFAULT_Y_OFFSET)).toBe(true);
     expect(near(fill.position.z, -3)).toBe(true);
+
+    bars.dispose();
+  });
+
+  // --- Constant-screen-size scaling --------------------------------------
+  //
+  // These tests cover the camera-aware code path. The renderer scales each
+  // sprite's world size per-frame so it lands on a constant pixel size
+  // (HP_BAR_TARGET_WIDTH_PX × HP_BAR_TARGET_HEIGHT_PX) regardless of the
+  // camera's distance from the unit. Far units get LARGER world-scale,
+  // near units get SMALLER — both end up the same on screen.
+
+  /** Standard test camera at a known position, FOV, and viewport height. */
+  function makeTestCamera(): {
+    camera: THREE.PerspectiveCamera;
+    viewportHeightPx: number;
+  } {
+    const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 5000);
+    const viewportHeightPx = 720;
+    return { camera, viewportHeightPx };
+  }
+
+  it("computeWorldUnitsPerPixel: matches the closed-form perspective formula", () => {
+    // For fov=60°, viewport=720px, distance=10m:
+    //   H_world = 2 * 10 * tan(30°) ≈ 11.547
+    //   per pixel = 11.547 / 720 ≈ 0.016037
+    const wpp = computeWorldUnitsPerPixel(10, 60, 720);
+    const expected = (2 * 10 * Math.tan(Math.PI / 6)) / 720;
+    expect(near(wpp, expected, 1e-6)).toBe(true);
+  });
+
+  it("constant-screen scaling: at distance 10m the sprite matches the formula", () => {
+    const world = createSimWorld();
+    const bars = new HpBarRenderer();
+    const eid = spawnUnit(world, 0, 0, 0, 100, 100);
+
+    const { camera, viewportHeightPx } = makeTestCamera();
+    // Place camera 10m directly above the unit's bar anchor (y + yOffset).
+    camera.position.set(0, DEFAULT_Y_OFFSET + 10, 0);
+
+    bars.updateFromWorld(world, camera, viewportHeightPx);
+
+    const bg = bars.getBgSpriteForTesting(eid)!;
+    const expectedPerPx = computeWorldUnitsPerPixel(10, 60, viewportHeightPx);
+    const expectedWidth = HP_BAR_TARGET_WIDTH_PX * expectedPerPx;
+    const expectedHeight = HP_BAR_TARGET_HEIGHT_PX * expectedPerPx;
+
+    expect(near(bg.scale.x, expectedWidth, 1e-4)).toBe(true);
+    expect(near(bg.scale.y, expectedHeight, 1e-4)).toBe(true);
+
+    bars.dispose();
+  });
+
+  it("constant-screen scaling: distance 100m → world scale is 10× distance 10m (linear)", () => {
+    const world = createSimWorld();
+    const bars = new HpBarRenderer();
+    const eid = spawnUnit(world, 0, 0, 0, 100, 100);
+
+    const { camera, viewportHeightPx } = makeTestCamera();
+
+    // First sample at 10m.
+    camera.position.set(0, DEFAULT_Y_OFFSET + 10, 0);
+    bars.updateFromWorld(world, camera, viewportHeightPx);
+    const scaleAt10 = bars.getBgSpriteForTesting(eid)!.scale.x;
+
+    // Then sample at 100m.
+    camera.position.set(0, DEFAULT_Y_OFFSET + 100, 0);
+    bars.updateFromWorld(world, camera, viewportHeightPx);
+    const scaleAt100 = bars.getBgSpriteForTesting(eid)!.scale.x;
+
+    // Linear in distance → 100m should be ~10× larger world scale than 10m.
+    expect(near(scaleAt100 / scaleAt10, 10, 1e-3)).toBe(true);
+
+    bars.dispose();
+  });
+
+  it("constant-screen scaling: distance below MIN_DISTANCE clamps (no infinity / no shrink to zero)", () => {
+    const world = createSimWorld();
+    const bars = new HpBarRenderer();
+    const eid = spawnUnit(world, 0, 0, 0, 100, 100);
+
+    const { camera, viewportHeightPx } = makeTestCamera();
+    // Camera ON TOP OF the bar anchor — distance ≈ 0.
+    camera.position.set(0, DEFAULT_Y_OFFSET, 0);
+
+    bars.updateFromWorld(world, camera, viewportHeightPx);
+
+    const bg = bars.getBgSpriteForTesting(eid)!;
+    // Scale must equal the floor (MIN_DISTANCE), not be 0 or Infinity.
+    const expectedPerPx = computeWorldUnitsPerPixel(
+      HP_BAR_MIN_DISTANCE,
+      60,
+      viewportHeightPx,
+    );
+    const expectedWidth = HP_BAR_TARGET_WIDTH_PX * expectedPerPx;
+
+    expect(Number.isFinite(bg.scale.x)).toBe(true);
+    expect(bg.scale.x).toBeGreaterThan(0);
+    expect(near(bg.scale.x, expectedWidth, 1e-4)).toBe(true);
+
+    bars.dispose();
+  });
+
+  it("constant-screen scaling: fill width still scales by health fraction (50% damaged)", () => {
+    const world = createSimWorld();
+    const bars = new HpBarRenderer();
+    const eid = spawnUnit(world, 0, 0, 0, 50, 100);
+
+    const { camera, viewportHeightPx } = makeTestCamera();
+    camera.position.set(0, DEFAULT_Y_OFFSET + 20, 0);
+
+    bars.updateFromWorld(world, camera, viewportHeightPx);
+
+    const bg = bars.getBgSpriteForTesting(eid)!;
+    const fill = bars.getFillSpriteForTesting(eid)!;
+    // Fill should be exactly half the background's width — independent of
+    // the world scale chosen for the constant-pixel target.
+    expect(near(fill.scale.x, bg.scale.x * 0.5, 1e-4)).toBe(true);
+    // Heights match (only X is the health indicator).
+    expect(near(fill.scale.y, bg.scale.y, 1e-4)).toBe(true);
+
+    bars.dispose();
+  });
+
+  it("constant-screen scaling: no-camera path uses legacy fixed world size (back-compat)", () => {
+    const world = createSimWorld();
+    const bars = new HpBarRenderer();
+    const eid = spawnUnit(world, 0, 0, 0, 100, 100);
+
+    // Call without camera/viewport — exercises the legacy fallback.
+    bars.updateFromWorld(world);
+
+    const bg = bars.getBgSpriteForTesting(eid)!;
+    expect(near(bg.scale.x, DEFAULT_BAR_WIDTH)).toBe(true);
 
     bars.dispose();
   });
