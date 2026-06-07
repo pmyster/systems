@@ -16,6 +16,8 @@ import { describe, it, expect } from "vitest";
 import {
   heightmapToGrayscale,
   sampleSlopeDeg,
+  canvasFractionToWorld,
+  worldToCanvasFraction,
 } from "./PlaceBuildingsStep";
 import {
   clampPlacementToMap,
@@ -127,6 +129,148 @@ describe("clampPlacementToMap", () => {
     );
     expect(position).toEqual([0, 100]);
     expect(wasClamped).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pixel → world conversion. Owner reported "where I put the units on the
+// minimap doesn't matter or is not precise" — these tests pin the
+// convention so any future regression surfaces here loudly instead of in
+// the spawn behavior.
+//
+// Convention under test:
+//   - Canvas (0,0) ↔ world (0,0) (TOP-LEFT corner origin, NOT centered).
+//   - Canvas (1,1) ↔ world (mapWm, mapDm) (BOTTOM-RIGHT corner).
+//   - mapWm = (widthPx-1)*tileM — corner-sampled heightmap convention.
+// ---------------------------------------------------------------------------
+describe("canvasFractionToWorld", () => {
+  // Mirror the Green_Fields map dimensions: 513×513 heightmap at
+  // tileM=1 ⇒ rendered terrain spans world [0, 512] × [0, 512].
+  const mapWm = 512;
+  const mapDm = 512;
+
+  it("maps canvas center to world center", () => {
+    const [wx, wz] = canvasFractionToWorld(0.5, 0.5, mapWm, mapDm);
+    expect(wx).toBeCloseTo(256);
+    expect(wz).toBeCloseTo(256);
+  });
+
+  it("maps canvas top-left to world (0, 0)", () => {
+    const [wx, wz] = canvasFractionToWorld(0, 0, mapWm, mapDm);
+    expect(wx).toBe(0);
+    expect(wz).toBe(0);
+  });
+
+  it("maps canvas bottom-right to world (mapWm, mapDm)", () => {
+    const [wx, wz] = canvasFractionToWorld(1, 1, mapWm, mapDm);
+    expect(wx).toBe(mapWm);
+    expect(wz).toBe(mapDm);
+  });
+
+  it("maps canvas top-right to world (mapWm, 0)", () => {
+    const [wx, wz] = canvasFractionToWorld(1, 0, mapWm, mapDm);
+    expect(wx).toBe(mapWm);
+    expect(wz).toBe(0);
+  });
+
+  it("maps canvas bottom-left to world (0, mapDm)", () => {
+    const [wx, wz] = canvasFractionToWorld(0, 1, mapWm, mapDm);
+    expect(wx).toBe(0);
+    expect(wz).toBe(mapDm);
+  });
+
+  it("maps a quarter-from-top-left to (mapWm/4, mapDm/4)", () => {
+    const [wx, wz] = canvasFractionToWorld(0.25, 0.25, mapWm, mapDm);
+    expect(wx).toBeCloseTo(128);
+    expect(wz).toBeCloseTo(128);
+  });
+});
+
+describe("worldToCanvasFraction (inverse)", () => {
+  const mapWm = 512;
+  const mapDm = 512;
+
+  it("maps world (0,0) to canvas (0,0)", () => {
+    const [fx, fy] = worldToCanvasFraction(0, 0, mapWm, mapDm);
+    expect(fx).toBe(0);
+    expect(fy).toBe(0);
+  });
+
+  it("maps world center to canvas (0.5, 0.5)", () => {
+    const [fx, fy] = worldToCanvasFraction(256, 256, mapWm, mapDm);
+    expect(fx).toBeCloseTo(0.5);
+    expect(fy).toBeCloseTo(0.5);
+  });
+
+  it("maps world (mapWm, mapDm) to canvas (1, 1)", () => {
+    const [fx, fy] = worldToCanvasFraction(mapWm, mapDm, mapWm, mapDm);
+    expect(fx).toBe(1);
+    expect(fy).toBe(1);
+  });
+
+  it("guards against div-by-zero on degenerate dimensions", () => {
+    const [fx, fy] = worldToCanvasFraction(10, 10, 0, 0);
+    expect(fx).toBe(0);
+    expect(fy).toBe(0);
+  });
+});
+
+describe("pixel↔world round-trip", () => {
+  // Tests of the form: world → fraction → world should be lossless.
+  const mapWm = 512;
+  const mapDm = 512;
+
+  it("round-trips a center placement losslessly", () => {
+    const [fx, fy] = worldToCanvasFraction(256, 256, mapWm, mapDm);
+    const [wx, wz] = canvasFractionToWorld(fx, fy, mapWm, mapDm);
+    expect(wx).toBeCloseTo(256);
+    expect(wz).toBeCloseTo(256);
+  });
+
+  it("round-trips an arbitrary placement losslessly", () => {
+    const [fx, fy] = worldToCanvasFraction(173.5, 411.2, mapWm, mapDm);
+    const [wx, wz] = canvasFractionToWorld(fx, fy, mapWm, mapDm);
+    expect(wx).toBeCloseTo(173.5);
+    expect(wz).toBeCloseTo(411.2);
+  });
+
+  it("round-trips the corners exactly", () => {
+    for (const [wxIn, wzIn] of [
+      [0, 0],
+      [mapWm, 0],
+      [0, mapDm],
+      [mapWm, mapDm],
+    ]) {
+      const [fx, fy] = worldToCanvasFraction(wxIn, wzIn, mapWm, mapDm);
+      const [wxOut, wzOut] = canvasFractionToWorld(fx, fy, mapWm, mapDm);
+      expect(wxOut).toBe(wxIn);
+      expect(wzOut).toBe(wzIn);
+    }
+  });
+});
+
+describe("pixel→world non-square maps + non-unit tile sizes", () => {
+  // A small wide map: 65×33 heightmap at tileM=8.
+  //   widthM = (65-1)*8 = 512m
+  //   depthM = (33-1)*8 = 256m
+  // Owner's regression: if the conversion used widthPx*tileM (520m,
+  // 264m) instead of (widthPx-1)*tileM, click at canvas right edge
+  // would land at world 520m — 8m outside the actual terrain — and
+  // the spawned building would float at world (520, h, ?) past the
+  // playable area.
+  const mapWm = 512;
+  const mapDm = 256;
+
+  it("maps top-right click to the wide map's actual right edge", () => {
+    const [wx, wz] = canvasFractionToWorld(1, 0, mapWm, mapDm);
+    expect(wx).toBe(512);
+    expect(wz).toBe(0);
+  });
+
+  it("maps center click to the wide map's actual center", () => {
+    const [wx, wz] = canvasFractionToWorld(0.5, 0.5, mapWm, mapDm);
+    expect(wx).toBe(256);
+    expect(wz).toBe(128);
   });
 });
 

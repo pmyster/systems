@@ -154,6 +154,51 @@ export function sampleSlopeDeg(
 }
 
 // ---------------------------------------------------------------------------
+// Pixel ↔ world conversion (pure, exported for tests).
+//
+// Convention recap (see the on-click handler for the full comment block):
+//   - Origin at world (0,0) maps to canvas (0,0) (top-left corner).
+//   - +X → right in the image; +Z → down in the image.
+//   - mapWm = (widthPx - 1) * tileM (corner-sampled heightmap).
+//   - Click coords are normalized to fractional 0..1 using the canvas
+//     bounding-rect dimensions so any CSS scaling is invisible to the
+//     conversion.
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert a fractional canvas position (0..1 in each axis) to a world
+ * (x, z) tuple. Pure — exported for round-trip + corner-coverage tests.
+ */
+export function canvasFractionToWorld(
+  fx: number,
+  fy: number,
+  mapWidthM: number,
+  mapDepthM: number,
+): readonly [number, number] {
+  return [fx * mapWidthM, fy * mapDepthM] as const;
+}
+
+/**
+ * Convert a world (x, z) to a fractional canvas position (0..1 in each
+ * axis). Inverse of `canvasFractionToWorld`. Pure — exported for
+ * round-trip tests.
+ *
+ * Guards against div-by-zero on a degenerate 1×1 heightmap (mapWidthM
+ * or mapDepthM = 0): returns 0 for that axis, since "fraction of zero
+ * width" has no meaningful answer.
+ */
+export function worldToCanvasFraction(
+  worldX: number,
+  worldZ: number,
+  mapWidthM: number,
+  mapDepthM: number,
+): readonly [number, number] {
+  const fx = mapWidthM > 0 ? worldX / mapWidthM : 0;
+  const fy = mapDepthM > 0 ? worldZ / mapDepthM : 0;
+  return [fx, fy] as const;
+}
+
+// ---------------------------------------------------------------------------
 // Component.
 // ---------------------------------------------------------------------------
 
@@ -163,8 +208,15 @@ export function PlaceBuildingsStep(
   const { map, placements, onPlacementsChange } = props;
 
   const tileM = map.manifest.terrain.tileSizeM ?? 1;
-  const mapWm = map.manifest.terrain.widthPx * tileM;
-  const mapDm = map.manifest.terrain.heightPx * tileM;
+  // World extent of the rendered terrain. Must match RuntimeTerrain and
+  // MapPreviewRenderer.buildPreviewTerrainMesh — both use (px-1)*tileM,
+  // NOT px*tileM. A 513×513 heightmap at tileM=1 occupies world meters
+  // [0, 512] × [0, 512] (the heightmap stores corner samples, hence
+  // px-1 spans between them). Using widthPx*tileM here would silently
+  // map clicks to world coords ~1 tile beyond the actual terrain edge,
+  // and the spawned building would sit just outside the playable zone.
+  const mapWm = (map.manifest.terrain.widthPx - 1) * tileM;
+  const mapDm = (map.manifest.terrain.heightPx - 1) * tileM;
 
   const [selectedClass, setSelectedClass] =
     useState<BuildingChassisClass>("building_turret");
@@ -268,22 +320,60 @@ export function PlaceBuildingsStep(
     img.src = previewUrl;
   }, [previewUrl]);
 
-  // Convert a canvas pixel (offsetX, offsetY) to a world (x, z) tuple.
-  const canvasToWorld = useCallback(
-    (px: number, py: number): readonly [number, number] => {
-      const wx = (px / PREVIEW_PX) * mapWm;
-      const wz = (py / PREVIEW_PX) * mapDm;
-      return [wx, wz] as const;
-    },
+  // -----------------------------------------------------------------
+  // PIXEL ↔ WORLD coordinate conversion for PlaceBuildings.
+  //
+  // The preview renders the map with:
+  //   - World origin (0, 0, 0) at the TOP-LEFT corner of the rendered
+  //     image — NOT the map center. Matches RuntimeTerrain, which
+  //     anchors the terrain mesh at world (0..widthM, 0..depthM).
+  //   - X axis: +X is RIGHT in the rendered image (image-x grows right
+  //     ⇒ world +X grows right).
+  //   - Z axis: +Z is DOWN in the rendered image (per d52c104:
+  //     camera.up = (0,0,-1) combined with top > bottom puts world +Z
+  //     at image-bottom, i.e. screen-Y grows down ⇒ world +Z grows
+  //     down). NO Y-axis flip is required at the conversion layer.
+  //   - Image dimensions: rendered at 1024×1024 px, displayed at
+  //     `canvas.clientWidth` × `canvas.clientHeight` (which equals
+  //     PREVIEW_PX in normal layout but may differ under CSS scaling,
+  //     hi-DPI rendering, or responsive flex shrink — so we use the
+  //     displayed-pixel basis as the source of truth, not PREVIEW_PX).
+  //
+  // World extent: (widthPx-1)*tileM × (heightPx-1)*tileM — see mapWm
+  // above. Heightmap samples are at corners, so n samples span n-1
+  // tile lengths.
+  //
+  // Therefore (with `rect` = canvas.getBoundingClientRect()):
+  //   worldX = ((clientX - rect.left) / rect.width)  * mapWm
+  //   worldZ = ((clientY - rect.top)  / rect.height) * mapDm
+  //
+  // Inverse (for token overlay rendering — the overlay is sized to the
+  // SAME displayed dimensions as the canvas, so PREVIEW_PX is fine):
+  //   px = (worldX / mapWm) * PREVIEW_PX
+  //   py = (worldZ / mapDm) * PREVIEW_PX
+  // -----------------------------------------------------------------
+
+  // Convert a FRACTIONAL canvas position (0..1 in each axis) to a
+  // world (x, z) tuple. The caller is responsible for normalizing the
+  // raw click coords using the canvas's bounding-rect dimensions —
+  // this keeps the conversion robust to CSS scaling, browser zoom, or
+  // any future responsive layout that shrinks the canvas display.
+  // Delegates to the pure `canvasFractionToWorld` so the on-click path
+  // and the placeBuildings.test.ts tests share ONE conversion impl.
+  const fractionalToWorld = useCallback(
+    (fx: number, fy: number): readonly [number, number] =>
+      canvasFractionToWorld(fx, fy, mapWm, mapDm),
     [mapWm, mapDm],
   );
 
-  // Convert a world coord to a canvas pixel for token rendering.
+  // Convert a world coord to a canvas pixel for token rendering. The
+  // SVG overlay matches the canvas's PREVIEW_PX dimensions exactly, so
+  // we multiply the fractional result by PREVIEW_PX. Same pure helper
+  // → tests cover the inverse direction too.
   const worldToCanvas = useCallback(
     (wx: number, wz: number): readonly [number, number] => {
-      const px = (wx / mapWm) * PREVIEW_PX;
-      const py = (wz / mapDm) * PREVIEW_PX;
-      return [px, py] as const;
+      const [fx, fy] = worldToCanvasFraction(wx, wz, mapWm, mapDm);
+      return [fx * PREVIEW_PX, fy * PREVIEW_PX] as const;
     },
     [mapWm, mapDm],
   );
@@ -291,9 +381,24 @@ export function PlaceBuildingsStep(
   const onCanvasClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       const rect = e.currentTarget.getBoundingClientRect();
-      const px = e.clientX - rect.left;
-      const py = e.clientY - rect.top;
-      const [wx, wz] = canvasToWorld(px, py);
+      // Normalize click into 0..1 fractional space using the DISPLAYED
+      // canvas dimensions, not the internal buffer size. This is the
+      // load-bearing line: `clientX/Y` are in CSS pixels, and
+      // `rect.width/height` is the canvas's CSS size — so the ratio is
+      // resolution-independent and survives any CSS scaling or
+      // hi-DPI/device-pixel-ratio quirks. Guard against a zero-size
+      // rect (defensive; shouldn't happen but a div:0 here would
+      // silently place at world (NaN, NaN)).
+      const rectW = rect.width > 0 ? rect.width : PREVIEW_PX;
+      const rectH = rect.height > 0 ? rect.height : PREVIEW_PX;
+      const fx = (e.clientX - rect.left) / rectW;
+      const fy = (e.clientY - rect.top) / rectH;
+      // Canvas-space pixel coords (in PREVIEW_PX basis) for token
+      // hit-testing against the SVG overlay, which is sized at
+      // PREVIEW_PX.
+      const px = fx * PREVIEW_PX;
+      const py = fy * PREVIEW_PX;
+      const [wx, wz] = fractionalToWorld(fx, fy);
 
       // First check if the click hit an existing token (within 16 canvas
       // px). Selects it for edit rather than placing a new one.
@@ -346,7 +451,7 @@ export function PlaceBuildingsStep(
       onPlacementsChange,
       selectedClass,
       selectedFaction,
-      canvasToWorld,
+      fractionalToWorld,
       worldToCanvas,
       map,
       mapWm,
