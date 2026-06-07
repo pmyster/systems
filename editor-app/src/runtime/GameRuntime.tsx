@@ -510,6 +510,10 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
     // positions). Wired up here because they bridge sim ↔ runtime.
     const tmpQuat = new THREE.Quaternion();
     const tmpVec = new THREE.Vector3();
+    // Scratch vector for per-frame selection-driven camera focus updates.
+    // Allocated once outside the RAF loop so we don't churn GC every
+    // frame just to read three component values into a Vector3.
+    const tmpFocusPos = new THREE.Vector3();
     const lookupProjectile = (typeId: number): ProjectileSchematic | undefined => {
       return match.projectileRegistry.byId(typeId)?.schematic;
     };
@@ -700,6 +704,35 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
         });
         return;
       }
+      // F — frame the selected unit (SC2-style "double-tap-W"). Snap the
+      // camera onto exactly-one-selected unit with no lerp + pull the zoom
+      // in. Multi-select or no-select → no-op (the lerp path covers the
+      // "glide to the centroid" case better than a hard cut would).
+      // Skipped in replay mode (input controllers are gated off there).
+      if ((e.key === "f" || e.key === "F") && replaySession === null) {
+        // Don't steal focus from text inputs / textareas (defensive — the
+        // game scene doesn't have any today, but the Exit-Match button is
+        // a focusable element and we don't want F on a focused button to
+        // do anything weird).
+        const target = e.target as HTMLElement | null;
+        const tag = target?.tagName ?? "";
+        if (tag === "INPUT" || tag === "TEXTAREA") return;
+        e.preventDefault();
+        if (selection) {
+          const selectedEids = selection.getSelectedEids();
+          if (selectedEids.length === 1) {
+            const eid = selectedEids[0];
+            rtsCamera.frameSelected(
+              new THREE.Vector3(
+                Position.x[eid],
+                Position.y[eid],
+                Position.z[eid],
+              ),
+            );
+          }
+        }
+        return;
+      }
       // F11 — toggle replay recording. Disabled in replay mode (would be
       // recording the replay-of-the-replay, which is just the source file).
       if (e.key === "F11") {
@@ -756,6 +789,29 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
 
       // Drive the sim — only place wall-clock enters /sim.
       const stepsThisFrame = sim.advance(nowSec);
+
+      // Selection-driven orbit pivot. When EXACTLY one unit is selected,
+      // the RtsCamera eases its orbit pivot to that unit's position each
+      // frame — classic RTS feel (SC2, AoE2, Total War). When 0 or 2+
+      // are selected, the pivot eases back to the user's pan focus so
+      // rotation behaves as before. Re-reading every frame (not just on
+      // selection-change) is what makes the pivot follow a unit that
+      // moves — relevant once mobile chassis lands (Task #13).
+      if (selection) {
+        const sel = selection.getSelectedEids();
+        if (sel.length === 1) {
+          const eid = sel[0];
+          rtsCamera.setFocusTarget(
+            tmpFocusPos.set(
+              Position.x[eid],
+              Position.y[eid],
+              Position.z[eid],
+            ),
+          );
+        } else {
+          rtsCamera.setFocusTarget(null);
+        }
+      }
 
       // RTS camera (real wall-clock seconds).
       rtsCamera.update(dtReal);
@@ -975,6 +1031,7 @@ function MatchScene(props: MatchSceneProps): React.JSX.Element {
         )}
         <div>[`] Damage numbers: {damageOverlayVisible ? "on" : "off"}</div>
         <div>[H] HP bars: {hpBarsVisible ? "on" : "off"}</div>
+        <div>[F] Frame selected unit</div>
       </div>
       {/* Transient toast — auto-clears after a few seconds via effect below. */}
       {toast && <div style={TOAST_STYLE}>{toast}</div>}
