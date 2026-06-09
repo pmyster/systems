@@ -520,13 +520,14 @@ export function MeshViewer({
       }
       if (isDragging) {
         const orbit = orbitRef.current;
-        if (mouseStart.button === 0) {
-          // Left-drag = orbit
+        if (mouseStart.button === 2) {
+          // Right-drag = orbit. Matches Play view (commit e9d93db) +
+          // BattlefieldPreview for editor-wide consistency.
           orbit.azimuth = mouseStart.az - dx * 0.008;
           orbit.elevation = clampElevation(mouseStart.el + dy * 0.008);
           applyOrbit(sceneBundle.camera, orbit);
         } else if (mouseStart.button === 1) {
-          // Middle-drag = pan
+          // Middle-drag = pan (unchanged — consistent with Play view).
           const speed = orbit.distance * 0.0025;
           orbit.camTarget.set(mouseStart.tx, mouseStart.ty, mouseStart.tz);
           panOrbit(orbit, -dx * speed, dy * speed);

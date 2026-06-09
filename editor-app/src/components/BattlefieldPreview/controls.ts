@@ -84,8 +84,9 @@ export function attachControls(
   let sunDragY = 0;
 
   const onPointerDown = (e: PointerEvent) => {
-    if (e.button === 0) {
-      // Left button: orbit the camera.
+    if (e.button === 2) {
+      // Right button: orbit the camera. Matches the Play view convention
+      // (commit e9d93db — RMB drag = rotate around pivot).
       orbitDragging = true;
       orbitDragX = e.clientX;
       orbitDragY = e.clientY;
