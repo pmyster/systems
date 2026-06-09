@@ -136,6 +136,16 @@ export function createMeshScene(): MeshScene {
       gh.dispose();
     }
 
+    // `renderer.dispose()` releases Three.js bookkeeping (programs, render
+    // targets) but does NOT free the underlying WebGL context. Browsers
+    // cap that at ~16 simultaneous contexts per page; each tab swap that
+    // mounts a new Three.js scene without releasing the old context eats
+    // one slot. After ~12 swaps the GPU starts force-killing old contexts
+    // (the user sees "Too many active WebGL contexts" warnings followed
+    // by blank canvases). `forceContextLoss()` triggers the WEBGL_lose_context
+    // extension which frees the slot immediately — the only call that
+    // actually returns the context to the browser pool.
+    renderer.forceContextLoss();
     renderer.dispose();
   };
 

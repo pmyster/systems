@@ -26,6 +26,7 @@ import * as THREE from "three";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import { TEMPLATES } from "../../lib/templates";
+import { buildProceduralBuildingMesh } from "../../runtime/scene/proceduralMeshes";
 import { voxelizeMesh } from "../../lib/voxelizer";
 import { useMeshAssets } from "../../state/mesh-assets";
 import type { MeshAssetRef, UnitSchematic } from "../../types/unit";
@@ -250,6 +251,24 @@ export function MeshWorkspace({
           `Couldn't reload mesh — unknown template "${ref.template_id}".`,
         );
       }
+      return undefined;
+    }
+
+    // Phase 2 Stage 1 — procedural building meshes are an in-memory
+    // Three.js Group built by /runtime/scene/proceduralMeshes.ts. The
+    // Unit Editor surfaces them so the author can preview building
+    // geometry without a GLB; the same builder is used at match-load
+    // time so previews match the in-game render.
+    if (ref.kind === "procedural_building") {
+      // /runtime/scene/proceduralMeshes is the SAME builder used by
+      // /runtime/loader/prefabBank at match-load time — so what the
+      // Unit Editor previews is what spawns in-game. Stage 4 will swap
+      // the in-memory builders for Hunyuan-generated GLBs; this branch
+      // stays unchanged (the swap is inside proceduralMeshes.ts).
+      setCurrentMesh(buildProceduralBuildingMesh(ref.building_chassis));
+      setSelectedTemplateId(null);
+      setSkinImage(null);
+      appliedAssetRef.current = meshAssetKey;
       return undefined;
     }
 

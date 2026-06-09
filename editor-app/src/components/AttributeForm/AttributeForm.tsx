@@ -36,6 +36,7 @@ import { ChassisSection } from "./ChassisSection";
 import { CostsSection } from "./CostsSection";
 import { DerivedStatsPanel } from "./DerivedStatsPanel";
 import { HardpointSection } from "./HardpointSection";
+import { MeshHardpointSection } from "./MeshHardpointSection";
 import { MetaSection } from "./MetaSection";
 import { PartsSection } from "./PartsSection";
 import { RigSection } from "./RigSection";
@@ -60,6 +61,7 @@ export function AttributeForm(props: AttributeFormProps): ReactNode {
       <ChassisSection unit={unit} onUnitChange={onUnitChange} />
       <HardpointSection unit={unit} onUnitChange={onUnitChange} />
       <RigSection unit={unit} onUnitChange={onUnitChange} />
+      <MeshHardpointSection unit={unit} onUnitChange={onUnitChange} />
       <PartsSection unit={unit} onUnitChange={onUnitChange} />
       <CostsSection unit={unit} onUnitChange={onUnitChange} />
       <DerivedStatsPanel unit={unit} />

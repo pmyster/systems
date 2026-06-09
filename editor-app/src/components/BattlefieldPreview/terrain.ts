@@ -27,62 +27,27 @@
 
 import * as THREE from "three";
 
-import { MAP_SIZE_M, TERRAIN_AMP } from "../../lib";
-
-// ---------------------------------------------------------------------------
-// Deterministic noise stack (prototype 3 lines 190-216).
-// ---------------------------------------------------------------------------
-
-function hash2(x: number, y: number): number {
-  let h = x * 374761393 + y * 668265263;
-  h = (h ^ (h >>> 13)) * 1274126177;
-  h = h ^ (h >>> 16);
-  return ((h >>> 0) / 4294967295) * 2 - 1;
-}
-
-function smoothNoise(x: number, y: number): number {
-  const xi = Math.floor(x);
-  const yi = Math.floor(y);
-  const xf = x - xi;
-  const yf = y - yi;
-  const u = xf * xf * (3 - 2 * xf);
-  const v = yf * yf * (3 - 2 * yf);
-  const a = hash2(xi, yi);
-  const b = hash2(xi + 1, yi);
-  const c = hash2(xi, yi + 1);
-  const d = hash2(xi + 1, yi + 1);
-  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
-}
-
-function fbm(x: number, y: number): number {
-  let v = 0;
-  let amp = 1;
-  let freq = 1;
-  let total = 0;
-  for (let i = 0; i < 4; i++) {
-    v += smoothNoise(x * freq, y * freq) * amp;
-    total += amp;
-    amp *= 0.5;
-    freq *= 2;
-  }
-  return v / total;
-}
+import { MAP_SIZE_M } from "../../lib";
 
 // ---------------------------------------------------------------------------
 // Height query.
 // ---------------------------------------------------------------------------
+//
+// NOTE: SUNNY-GRASS MODE has retired the deterministic noise stack
+// (hash2 / smoothNoise / fbm) that previously drove FBM-based hills.
+// If the "moody hills" toggle is restored, lift the stack back from
+// tools/battlefield-viewer/index.html lines 190-216.
 
 /**
  * The single formula shared between the mesh build (vertex Y) and the
  * runtime query. Keeps unit feet on the surface — change one, change
  * both.
  */
-function noiseHeight(localX: number, localZ: number): number {
-  const nx = (localX / MAP_SIZE_M) * 4;
-  const nz = (localZ / MAP_SIZE_M) * 4;
-  let h = fbm(nx, nz) * TERRAIN_AMP;
-  h += smoothNoise(localX * 0.02, localZ * 0.02) * 1.5;
-  return h;
+function noiseHeight(_localX: number, _localZ: number): number {
+  // SUNNY-GRASS MODE: flat terrain so projectile arcs and unit silhouettes
+  // read clearly against a uniform ground plane. The "moody hills" mode
+  // can return later as a toggle if cinematic preview is wanted.
+  return 0;
 }
 
 /** World-space height at (wx, wz). Inverse of the mesh's centring. */
@@ -131,17 +96,13 @@ export function buildTerrain(): TerrainHandle {
     const h = noiseHeight(x, z);
     positions.setY(i, h);
 
-    // Banding by height — post-apocalyptic burnt-earth palette.
-    if (h < -1) tempColor.setHex(0x1a1814);
-    else if (h < 0.5) tempColor.setHex(0x3a3225);
-    else if (h < 2) tempColor.setHex(0x5a4a35);
-    else tempColor.setHex(0x6e5a3e);
-
-    // Per-vertex flicker for grain.
-    const flicker = (Math.random() - 0.5) * 0.08;
-    tempColor.r = Math.max(0, Math.min(1, tempColor.r + flicker));
+    // SUNNY-GRASS MODE: uniform mid-saturated grass green with
+    // per-vertex flicker so it doesn't read as a flat-shaded billboard.
+    tempColor.setHex(0x4a8a3c);
+    const flicker = (Math.random() - 0.5) * 0.06;
+    tempColor.r = Math.max(0, Math.min(1, tempColor.r + flicker * 0.6));
     tempColor.g = Math.max(0, Math.min(1, tempColor.g + flicker));
-    tempColor.b = Math.max(0, Math.min(1, tempColor.b + flicker));
+    tempColor.b = Math.max(0, Math.min(1, tempColor.b + flicker * 0.4));
 
     colorAttr[i * 3 + 0] = tempColor.r;
     colorAttr[i * 3 + 1] = tempColor.g;

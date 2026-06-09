@@ -22,13 +22,27 @@ body,
 }
 
 .app-shell {
-  display: grid;
-  grid-template-rows: 32px 36px 1fr 24px;
+  /* Flex column lets each child claim its natural height and the
+   * workspace (`.workspace`) consume the rest via `flex: 1`. Previously
+   * this was a 4-row CSS grid that mismatched the JSX once UnitSubTabs
+   * shipped — the result was the workspace getting squeezed to ~38px
+   * and pane headers appearing near the screen bottom. A flex column is
+   * structurally simpler (no row-count drift) and matches how the rest
+   * of the app reasons about top-down bars. */
+  display: flex;
+  flex-direction: column;
   height: 100vh;
   width: 100vw;
   background-color: #1a1a1d;
   color: #e6e6e6;
   overflow: hidden;
+}
+
+/* Centralize the unit-subtabs strip styling so it can't drift from
+ * inline overrides in App.tsx. flex-shrink:0 protects its height when
+ * the workspace below claims `flex: 1`. */
+.unit-subtabs {
+  flex-shrink: 0;
 }
 
 /* --- Mode tab strip (Unit Editor / Map Editor) --- */
@@ -96,6 +110,9 @@ body,
   gap: 1px;
   background-color: #2a2a2f;
   overflow: hidden;
+  /* Claim the remaining vertical space in the flex-column app-shell. */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .workspace-map {
@@ -108,6 +125,13 @@ body,
   position: relative;
   background-color: #000;
   overflow: hidden;
+}
+
+/* Fixed-height bars sit above the workspace in the flex column. */
+.mode-tabs,
+.app-header,
+.app-footer {
+  flex-shrink: 0;
 }
 
 .pane {

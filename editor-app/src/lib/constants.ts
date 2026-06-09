@@ -65,14 +65,14 @@ export const GRID_DEFAULT_DENSITY_KG_M3 = 1000 as const;
 // ---------------------------------------------------------------------------
 
 export const MAP_SIZE_M = 128 as const;
-export const TERRAIN_AMP = 4.5 as const;
+export const TERRAIN_AMP = 0 as const;
 
 export const CAM_PITCH_MIN = Math.PI * 0.18;
 export const CAM_PITCH_MAX = Math.PI * 0.44;
 export const CAM_PITCH_DEFAULT = Math.PI * 0.32;
 
 export const ZOOM_MIN = 25 as const;
-export const ZOOM_MAX = 220 as const;
+export const ZOOM_MAX = 500 as const;
 export const ZOOM_DEFAULT = 90 as const;
 
 // ---------------------------------------------------------------------------

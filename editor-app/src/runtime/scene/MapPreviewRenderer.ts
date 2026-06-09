@@ -475,6 +475,12 @@ async function renderViaWebGL(
   // and orphaned WebGL contexts cap at ~16 in most browsers, so leaking
   // one per match-load would gradually break the app.
   renderTarget.dispose();
+  // forceContextLoss() actually returns the WebGL context slot to the
+  // browser pool. renderer.dispose() alone only releases Three.js
+  // bookkeeping — the underlying context lingers until GC, and we hit
+  // the ~16-context browser cap fast if the user previews multiple
+  // maps in a session.
+  renderer.forceContextLoss();
   renderer.dispose();
   disposeScene(scene);
 

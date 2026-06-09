@@ -1,0 +1,270 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/pmyster/systems/schemas/projectile.schema.json",
+  "title": "Projectile Schematic",
+  "description": "A standalone projectile definition referenced by weapon parts. Two orthogonal axes: delivery (how it gets to the target) and effect (what it does when it arrives). Per DESIGN.md Principle 2, this schema carries PHYSICAL INPUTS ONLY — damage, range, cooldown, penetration, blast radius are derived by the engine and MUST NEVER appear here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "physics_version", "delivery", "effect", "mass_kg", "delivery_params", "effect_params"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "description": "Unique projectile identifier. Lowercase, may contain digits, hyphen, underscore; starts with a letter."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "description": "Human-readable display name."
+    },
+    "physics_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "Physics Constitution version. Per the Invariance rule, a projectile keeps its original version forever; only an explicit version-bump action mutates it."
+    },
+    "delivery": {
+      "type": "string",
+      "enum": ["ballistic", "guided", "beam", "placed", "dropped"],
+      "description": "How the projectile reaches its target."
+    },
+    "effect": {
+      "type": "string",
+      "enum": ["kinetic", "explosive", "energy", "electronic", "persistent_area"],
+      "description": "What the projectile does on impact / activation."
+    },
+    "mass_kg": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Total projectile mass. Beams may legitimately be 0; ballistic/kinetic and most others should be > 0 — that check is left to a derived validation pass, not the JSON schema."
+    },
+    "delivery_params": {
+      "type": "object",
+      "description": "Delivery-specific physical parameters. Shape is conditional on the value of `delivery`; see the oneOf below."
+    },
+    "effect_params": {
+      "type": "object",
+      "description": "Effect-specific physical parameters. Shape is conditional on the value of `effect`; see the oneOf below."
+    },
+    "cluster": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trigger", "trigger_value", "spread_radius_m", "child_projectile_id"],
+      "properties": {
+        "trigger": {
+          "type": "string",
+          "enum": ["altitude", "proximity", "timer"],
+          "description": "What event causes the projectile to split into children."
+        },
+        "trigger_value": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Altitude m, proximity m, or timer s depending on trigger."
+        },
+        "spread_radius_m": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Radius over which children are distributed."
+        },
+        "child_projectile_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "description": "ID of another projectile schematic (file at units/projectiles/<id>.proj.json)."
+        }
+      },
+      "description": "Optional cluster modifier. Present for any delivery+effect combo where the projectile splits before final delivery."
+    },
+    "physics_tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Engine-readable physics tags (e.g. armor_piercing, incendiary, tracer). Tags MAY influence engine behavior but never replace explicit physical inputs."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "delivery": { "const": "ballistic" } }, "required": ["delivery"] },
+      "then": {
+        "properties": {
+          "delivery_params": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "muzzle_velocity_mps", "ballistic_coefficient"],
+            "properties": {
+              "kind": { "const": "ballistic" },
+              "muzzle_velocity_mps": { "type": "number", "exclusiveMinimum": 0 },
+              "ballistic_coefficient": { "type": "number", "exclusiveMinimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "delivery": { "const": "guided" } }, "required": ["delivery"] },
+      "then": {
+        "properties": {
+          "delivery_params": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "thrust_n", "fuel_mass_kg", "guidance_quality"],
+            "properties": {
+              "kind": { "const": "guided" },
+              "thrust_n": { "type": "number", "exclusiveMinimum": 0 },
+              "fuel_mass_kg": { "type": "number", "minimum": 0 },
+              "guidance_quality": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "delivery": { "const": "beam" } }, "required": ["delivery"] },
+      "then": {
+        "properties": {
+          "delivery_params": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "beam_power_kw", "dwell_time_s", "divergence_mrad"],
+            "properties": {
+              "kind": { "const": "beam" },
+              "beam_power_kw": { "type": "number", "exclusiveMinimum": 0 },
+              "dwell_time_s": { "type": "number", "exclusiveMinimum": 0 },
+              "divergence_mrad": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "delivery": { "const": "placed" } }, "required": ["delivery"] },
+      "then": {
+        "properties": {
+          "delivery_params": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "trigger_type", "arming_delay_s", "lifetime_s"],
+            "properties": {
+              "kind": { "const": "placed" },
+              "trigger_type": {
+                "type": "string",
+                "enum": ["proximity", "timer", "tripwire", "command"]
+              },
+              "arming_delay_s": { "type": "number", "minimum": 0 },
+              "lifetime_s": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "delivery": { "const": "dropped" } }, "required": ["delivery"] },
+      "then": {
+        "properties": {
+          "delivery_params": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "drag_coefficient"],
+            "properties": {
+              "kind": { "const": "dropped" },
+              "drag_coefficient": { "type": "number", "exclusiveMinimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "effect": { "const": "kinetic" } }, "required": ["effect"] },
+      "then": {
+        "properties": {
+          "effect_params": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "penetrator_material", "sectional_density_kgm2"],
+            "properties": {
+              "kind": { "const": "kinetic" },
+              "penetrator_material": {
+                "type": "string",
+                "enum": ["steel", "tungsten", "du", "composite"]
+              },
+              "sectional_density_kgm2": { "type": "number", "exclusiveMinimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "effect": { "const": "explosive" } }, "required": ["effect"] },
+      "then": {
+        "properties": {
+          "effect_params": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "payload_mass_kg", "blast_yield_mj"],
+            "properties": {
+              "kind": { "const": "explosive" },
+              "payload_mass_kg": { "type": "number", "exclusiveMinimum": 0 },
+              "blast_yield_mj": { "type": "number", "exclusiveMinimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "effect": { "const": "energy" } }, "required": ["effect"] },
+      "then": {
+        "properties": {
+          "effect_params": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "joules_delivered", "medium"],
+            "properties": {
+              "kind": { "const": "energy" },
+              "joules_delivered": { "type": "number", "exclusiveMinimum": 0 },
+              "medium": {
+                "type": "string",
+                "enum": ["visible", "ir", "uv", "particle", "plasma"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "effect": { "const": "electronic" } }, "required": ["effect"] },
+      "then": {
+        "properties": {
+          "effect_params": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "disruption_power_kw", "area_radius_m"],
+            "properties": {
+              "kind": { "const": "electronic" },
+              "disruption_power_kw": { "type": "number", "exclusiveMinimum": 0 },
+              "area_radius_m": { "type": "number", "exclusiveMinimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "effect": { "const": "persistent_area" } }, "required": ["effect"] },
+      "then": {
+        "properties": {
+          "effect_params": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "medium", "duration_s", "density"],
+            "properties": {
+              "kind": { "const": "persistent_area" },
+              "medium": {
+                "type": "string",
+                "enum": ["gas", "fire", "smoke", "acid"]
+              },
+              "duration_s": { "type": "number", "exclusiveMinimum": 0 },
+              "density": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

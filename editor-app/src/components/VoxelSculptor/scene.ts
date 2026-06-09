@@ -207,6 +207,9 @@ export function createSculptScene(): SculptScene {
     cursorEdgesGeom.dispose();
     cursorEdgeMat.dispose();
 
+    // Free the WebGL context slot — see MeshWorkspace/scene.ts for the
+    // matching fix and the "Too many active WebGL contexts" rationale.
+    renderer.forceContextLoss();
     renderer.dispose();
   };
 

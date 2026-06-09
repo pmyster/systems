@@ -9,5 +9,7 @@
 export { AttributeForm } from "./AttributeForm";
 export { HardpointSection } from "./HardpointSection";
 export type { HardpointSectionProps } from "./HardpointSection";
+export { MeshHardpointSection } from "./MeshHardpointSection";
+export type { MeshHardpointSectionProps } from "./MeshHardpointSection";
 export { RigSection } from "./RigSection";
 export type { RigSectionProps } from "./RigSection";

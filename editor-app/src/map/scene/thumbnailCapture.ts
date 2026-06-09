@@ -48,6 +48,7 @@ export function captureThumbnail(
   canvas.width = canvas.height = size;
   const ctx = canvas.getContext("2d");
   if (!ctx) {
+    renderer.forceContextLoss();
     renderer.dispose();
     throw new Error("captureThumbnail: 2D context unavailable");
   }
@@ -69,6 +70,8 @@ export function captureThumbnail(
   const bytes = new Uint8Array(binaryStr.length);
   for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
 
+  // Free the WebGL context slot — `renderer.dispose()` alone leaks it.
+  renderer.forceContextLoss();
   renderer.dispose();
   return bytes;
 }

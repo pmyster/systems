@@ -47,15 +47,15 @@ export interface LightingHandle {
  * so the caller can later rotate the sun or dispose lights on unmount.
  */
 export function buildLighting(scene: THREE.Scene): LightingHandle {
-  const hemi = new THREE.HemisphereLight(0xffeacc, 0x4a4636, 0.95);
+  const hemi = new THREE.HemisphereLight(0xc8e6ff, 0x6ba14a, 1.15);
   scene.add(hemi);
 
-  const sun = new THREE.DirectionalLight(0xfff2d8, 2.2);
+  const sun = new THREE.DirectionalLight(0xfff8e8, 2.6);
   sun.castShadow = true;
   sun.shadow.mapSize.width = 2048;
   sun.shadow.mapSize.height = 2048;
   sun.shadow.camera.near = 1;
-  sun.shadow.camera.far = 250;
+  sun.shadow.camera.far = 700;
   sun.shadow.camera.left = -MAP_SIZE_M * 0.78;
   sun.shadow.camera.right = MAP_SIZE_M * 0.78;
   sun.shadow.camera.top = MAP_SIZE_M * 0.78;
@@ -68,7 +68,7 @@ export function buildLighting(scene: THREE.Scene): LightingHandle {
   scene.add(sun);
   scene.add(sun.target);
 
-  const fill = new THREE.DirectionalLight(0x6a86b0, 0.5);
+  const fill = new THREE.DirectionalLight(0x9fbfe0, 0.5);
   fill.position.set(-30, 20, -40);
   scene.add(fill);
 

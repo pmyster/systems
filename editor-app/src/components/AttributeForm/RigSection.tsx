@@ -18,8 +18,23 @@ import * as THREE from "three";
 
 import { RIG_MOTIONS, humanizeEnum } from "../../lib/enums";
 import { useMeshAssets } from "../../state/mesh-assets";
-import type { RigAxisConstraint, RigEntry, RigMotion, UnitSchematic } from "../../types/unit";
+import type {
+  MuzzleForwardAxis,
+  RigAxisConstraint,
+  RigEntry,
+  RigMotion,
+  UnitSchematic,
+} from "../../types/unit";
 import styles from "./AttributeForm.module.css";
+
+const MUZZLE_FORWARD_OPTIONS: readonly MuzzleForwardAxis[] = [
+  "+x",
+  "-x",
+  "+y",
+  "-y",
+  "+z",
+  "-z",
+];
 
 interface RigSectionProps {
   readonly unit: UnitSchematic;
@@ -153,6 +168,51 @@ export function RigSection({ unit, onUnitChange }: RigSectionProps): ReactNode {
     update(patchEntry(rig, index, { parent_rig: value === "" ? undefined : value }));
   }
 
+  /**
+   * Toggle the muzzle flag on rig N. Enforces the single-muzzle invariant
+   * by clearing the flag on every OTHER rig when turning it on. When
+   * enabling, seed `muzzle_forward` to "+z" if not already set so the
+   * dropdown has a sensible default.
+   */
+  function setMuzzle(index: number, enabled: boolean): void {
+    if (!enabled) {
+      // Clearing: drop both fields on this rig only — leave others alone.
+      const entry = rig[index];
+      if (!entry) return;
+      const { muzzle: _m, muzzle_forward: _f, ...rest } = entry;
+      void _m;
+      void _f;
+      update(rig.map((e, i) => (i === index ? rest : e)));
+      return;
+    }
+    // Enabling on index N: turn on N (seed forward if missing), clear on
+    // every other rig. This is the constitution-aware loud-over-silent
+    // path — we never quietly let two rigs hold the flag at once.
+    update(
+      rig.map((e, i) => {
+        if (i === index) {
+          return {
+            ...e,
+            muzzle: true,
+            muzzle_forward: e.muzzle_forward ?? "+z",
+          };
+        }
+        if (e.muzzle === true || e.muzzle_forward !== undefined) {
+          const { muzzle: _m, muzzle_forward: _f, ...rest } = e;
+          void _m;
+          void _f;
+          return rest;
+        }
+        return e;
+      }),
+    );
+  }
+
+  /** Set the muzzle_forward axis on a rig (only meaningful when muzzle=true). */
+  function setMuzzleForward(index: number, axis: MuzzleForwardAxis): void {
+    update(patchEntry(rig, index, { muzzle_forward: axis }));
+  }
+
   return (
     <section className={styles.section}>
       <h3 className={styles.sectionHeader}>
@@ -226,6 +286,45 @@ export function RigSection({ unit, onUnitChange }: RigSectionProps): ReactNode {
                   </option>
                 ))}
               </select>
+
+              {/* Muzzle — flag this rig as the projectile spawn + aim point.
+                  Toggling on here clears the flag on every other rig (single
+                  muzzle invariant). The forward-axis dropdown appears next to
+                  it when enabled; it controls which LOCAL axis of this rig's
+                  node points out of the barrel. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <label
+                  className={styles.label}
+                  style={{ display: "flex", alignItems: "center", gap: 4 }}
+                  title="When checked, the Fire-Test projectile spawns from this rig's world position and flies along the selected forward axis. Only one rig per unit may be the muzzle."
+                >
+                  <input
+                    type="checkbox"
+                    checked={entry.muzzle === true}
+                    onChange={(e) => setMuzzle(i, e.target.checked)}
+                  />
+                  Muzzle
+                </label>
+                {entry.muzzle === true && (
+                  <>
+                    <label className={styles.label}>Forward</label>
+                    <select
+                      className={styles.select}
+                      value={entry.muzzle_forward ?? "+z"}
+                      onChange={(e) =>
+                        setMuzzleForward(i, e.target.value as MuzzleForwardAxis)
+                      }
+                      title="Local axis of this rig's node that points out of the barrel."
+                    >
+                      {MUZZLE_FORWARD_OPTIONS.map((a) => (
+                        <option key={a} value={a}>
+                          {a.toUpperCase()}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
+              </div>
 
               {entry.motion === "reactive" && (
                 <>

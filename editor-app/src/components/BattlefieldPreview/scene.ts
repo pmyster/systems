@@ -15,8 +15,8 @@
  *   - The aspect ratio is initialised to 1 and updated by the
  *     BattlefieldPreview component via ResizeObserver — the prototype's
  *     `window.innerWidth` reads are intentionally NOT lifted.
- *   - Fog colour matches the scene background so the map's edges fade
- *     out instead of clipping abruptly, which keeps the camera-zoom
+ *   - Sky-blue fog so distant terrain dissolves into a hazy horizon
+ *     instead of clipping abruptly, which keeps the camera-zoom
  *     experience feeling natural at MAP_SIZE_M = 128.
  */
 
@@ -72,7 +72,7 @@ export interface CameraRig {
 }
 
 function makeCameraRig(): CameraRig {
-  const camera = new THREE.PerspectiveCamera(35, 1, 0.5, 600);
+  const camera = new THREE.PerspectiveCamera(35, 1, 0.5, 1500);
   const target = new THREE.Vector3(MAP_SIZE_M / 2, 0, MAP_SIZE_M / 2);
   const rig: CameraRig = {
     camera,
@@ -133,10 +133,10 @@ export interface BattlefieldScene {
  */
 export function buildBattlefieldScene(): BattlefieldScene {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x1a1d28);
+  scene.background = new THREE.Color(0x9fcfff);
   // Fog horizon should sit near the map's far edge for the default
   // zoom; both numbers come from prototype 3's tuning.
-  scene.fog = new THREE.Fog(0x1a1d28, 80, 220);
+  scene.fog = new THREE.Fog(0x9fcfff, 350, 900);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
@@ -145,7 +145,7 @@ export function buildBattlefieldScene(): BattlefieldScene {
   // Three's typings sometimes mark ACESFilmicToneMapping as readonly;
   // assign by value (it's a number constant) for forward-compat.
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 1.15;
   renderer.setSize(1, 1, false); // real size comes via ResizeObserver
 
   const cameraRig = makeCameraRig();
@@ -172,6 +172,13 @@ export function buildBattlefieldScene(): BattlefieldScene {
       scene.remove(terrain.mesh);
       disposeTerrain(terrain);
       disposeLighting(scene, lighting);
+      // `renderer.dispose()` does NOT free the underlying WebGL context.
+      // Browsers cap concurrent contexts at ~16 per page; sub-tab swaps
+      // (Layout ↔ Mesh Composer) repeatedly created new contexts without
+      // returning the old slot. `forceContextLoss()` triggers the
+      // WEBGL_lose_context extension which actually returns the slot.
+      // See MeshWorkspace/scene.ts for the matching fix.
+      renderer.forceContextLoss();
       renderer.dispose();
     },
   };

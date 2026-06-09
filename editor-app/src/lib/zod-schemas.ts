@@ -111,6 +111,11 @@ const chassisClassSchema = z.enum([
   "orbital",
   "static_structure",
   "static_wall",
+  // Phase 2 Stage 1 — buildings. See types/unit.ts header comment.
+  "building_turret",
+  "building_wall",
+  "building_aa",
+  "building_bunker",
 ]);
 
 const structureTypeSchema = z.enum([
@@ -538,6 +543,21 @@ const rigEntrySchema = z.object({
 const meshAssetRefSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("template"), template_id: z.string() }),
   z.object({ kind: z.literal("file"), path: z.string() }),
+  // Phase 2 Stage 1 — procedural building meshes. The four allowed
+  // chassis values are duplicated from BUILDING_CHASSIS_CLASSES (types/unit.ts)
+  // intentionally — Zod can't read TS const arrays at runtime. If this
+  // list drifts from the source enum, the `_AssertMeshAssetRef` check
+  // at the bottom of this file FAILS to typecheck — a loud-over-silent
+  // gate against schema drift.
+  z.object({
+    kind: z.literal("procedural_building"),
+    building_chassis: z.enum([
+      "building_turret",
+      "building_wall",
+      "building_aa",
+      "building_bunker",
+    ]),
+  }),
 ]);
 
 // ---------------------------------------------------------------------------

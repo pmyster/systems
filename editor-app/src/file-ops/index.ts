@@ -22,3 +22,15 @@ export {
   toCanonicalJson,
 } from "./save";
 export { bumpPhysicsVersion } from "./version-bump";
+export {
+  ProjectileCycleError,
+  ProjectileLoadValidationError,
+  ProjectileParseError,
+  ProjectileSaveValidationError,
+  hasCycle,
+  listProjectiles,
+  loadProjectile,
+  saveProjectile,
+  toCanonicalProjectileJson,
+  type ProjectileFileEntry,
+} from "./projectile-ops";

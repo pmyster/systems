@@ -131,7 +131,17 @@ export class MapSceneManager {
       );
     }
 
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    // preserveDrawingBuffer: true so the eyedropper
+    // (PaintColorController.sampleColorAt) can call gl.readPixels()
+    // from a click handler — i.e. AFTER the browser has presented the
+    // last frame. Without it, the backbuffer is invalidated post-
+    // present and readPixels returns zeros (black). Small perf/memory
+    // cost; acceptable for an editor at 60fps.
+    this.renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      preserveDrawingBuffer: true,
+    });
     this.renderer.setPixelRatio(window.devicePixelRatio);
 
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.1, 5000);
@@ -617,6 +627,10 @@ export class MapSceneManager {
     this.axes.dispose();
     this.skyDome.dispose();
     this.waterPlane.dispose();
+    // Free the WebGL context slot — `renderer.dispose()` only releases
+    // Three.js bookkeeping. See MeshWorkspace/scene.ts for the matching
+    // fix on the unit-editor side.
+    this.renderer.forceContextLoss();
     this.renderer.dispose();
   }
 }

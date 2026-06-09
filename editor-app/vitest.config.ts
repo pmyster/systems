@@ -13,6 +13,17 @@
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // Allow tests to import fixture content (unit schematics) from the
+  // repo-level `units/` directory one level above editor-app/. Vite's
+  // default fs.strict gate would otherwise deny these imports with
+  // "Denied ID" because they fall outside the editor-app workspace
+  // root. The directories listed here are READ-ONLY fixture sources;
+  // tests never write to them.
+  server: {
+    fs: {
+      allow: ["..", "../units"],
+    },
+  },
   test: {
     environment: "jsdom",
     globals: false,

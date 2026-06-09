@@ -54,7 +54,13 @@ export type ProjectileLookup = (
   typeId: number,
 ) => ProjectileSchematic | undefined;
 
-const BEAM_LIFETIME_MS = 50;
+// Bumped from 50ms → 1000ms 2026-06-09 for diagnostic visibility.
+// Owner can't see/screenshot beams that flash for 1.5 frames. At 1 second
+// the beam holds long enough to inspect muzzle position + direction of fire.
+// Revisit once we have a per-projectile-schematic beam_lifetime_ms field
+// for proper authored values per weapon (long laser pulse vs short pulse vs
+// instant-blink combat sim).
+const BEAM_LIFETIME_MS = 1000;
 
 export function projectileSpawnSystem(
   world: SimWorld,
