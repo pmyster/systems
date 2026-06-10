@@ -604,6 +604,7 @@ export function MeshWorkspace({
           >
             <MaterialPainter
               voxels={voxels}
+              mesh={currentMesh}
               onApply={handlePainterApply}
               onCancel={handlePainterCancel}
             />

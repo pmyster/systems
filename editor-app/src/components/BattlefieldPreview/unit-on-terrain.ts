@@ -47,6 +47,48 @@ import type { TerrainHandle } from "./terrain";
  */
 const TARGET_UNIT_SIZE_M = 8;
 
+/**
+ * Ground an Object3D so its world bbox.min.y === 0 in its parent's local
+ * frame, regardless of any scale already applied to it or its descendants.
+ *
+ * This is the same class of defensive grounding the runtime applies via
+ * `root.position.multiplyScalar(UNIT_RENDER_SCALE)` in prefabBank.ts (see
+ * commit 73d5043) — when a scale change leaves an authored grounding
+ * offset out of step with the now-scaled geometry, the unit floats above
+ * (or sinks below) the surface. Rather than carry an inverse-scale fixup
+ * everywhere, this helper measures the post-scale bbox and shifts the
+ * object's `position.y` so its lowest vertex sits at parent-y=0.
+ *
+ * Loud-over-silent: warns when the measured bbox is empty (no geometry
+ * traversed), since a silent no-op would mask the real issue (e.g. a
+ * group with only lights / cameras / empty groups).
+ *
+ * Also centres XZ on the parent's origin. The caller is then free to
+ * place the parent at whatever world position the unit should stand at.
+ *
+ * SAFE to call on an unparented Object3D: setFromObject internally
+ * propagates `updateWorldMatrix(true, false)` which, for a parentless
+ * root, makes the local matrix the world matrix. The bbox values are
+ * therefore in the object's own local frame too, which is what we
+ * need to subtract from `position`.
+ */
+function groundObject3DToParentBase(obj: THREE.Object3D, label: string): void {
+  const box = new THREE.Box3().setFromObject(obj);
+  if (box.isEmpty()) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[BattlefieldPreview] groundObject3DToParentBase("${label}") — empty ` +
+        `bbox; no geometry to ground against. The unit will sit at its ` +
+        `current authored position (likely at y=0).`,
+    );
+    return;
+  }
+  const center = box.getCenter(new THREE.Vector3());
+  obj.position.x -= center.x;
+  obj.position.z -= center.z;
+  obj.position.y -= box.min.y;
+}
+
 // ---------------------------------------------------------------------------
 // Debug instrumentation: rotation-chain visibility.
 // We need to see EXACTLY where the rotation chain breaks between the rig
@@ -1025,6 +1067,13 @@ export function createUnitOnTerrain(
       if (voxelChassisScale > 0 && voxelChassisScale !== 1) {
         mesh.scale.setScalar(voxelChassisScale);
       }
+      // Defensive grounding: the voxel builder produces a mesh whose base
+      // SHOULD sit at local y=0, but any author-set scale or an internal
+      // pivot offset can break that invariant — and silently floating
+      // above the terrain is exactly the bug the owner reports. Measure
+      // and correct before parenting so the mesh's lowest vertex lands
+      // on the terrain anchor regardless of builder quirks.
+      groundObject3DToParentBase(mesh, `voxel:${next.id}`);
       parent.add(mesh);
       handle.current = mesh;
 
@@ -1088,11 +1137,14 @@ export function createUnitOnTerrain(
 
       // Recompute the post-scale bbox, then offset so the group is centred on
       // XZ and its base (min.y) rests at y=0 within the terrain-anchored parent.
-      const postBox = new THREE.Box3().setFromObject(cloneGroup);
-      const center = postBox.getCenter(new THREE.Vector3());
-      cloneGroup.position.x -= center.x;
-      cloneGroup.position.z -= center.z;
-      cloneGroup.position.y -= postBox.min.y;
+      // The mesh-loader pre-grounded the GLB root with `position = (-cx, -minY,
+      // -cz)`, but that offset is in PRE-SCALE meters; once we apply
+      // `effectiveScale`, the cancellation only happens at scale=1. For any
+      // other scale the lowest vertex floats by `minY*(scale - 1)` — exactly
+      // the float bug the owner reports for non-unit length_m on mk01 et al.
+      // The helper measures the post-scale bbox and corrects regardless of
+      // which scale knob is active.
+      groundObject3DToParentBase(cloneGroup, `mesh:effectiveScale=${effectiveScale.toFixed(3)}`);
 
       // Parent FIRST, refresh world matrices, THEN skin. The box-projection
       // shader samples by WORLD position, so applySkin's bounding box must be

@@ -13,7 +13,13 @@ export * from "./voxel-stats";
 export * from "./voxel-renderer";
 export * from "./derive-stats";
 export * from "./zod-schemas";
-export { voxelizeMesh, voxelMapToGrid } from "./voxelizer";
+export {
+  voxelizeMesh,
+  voxelMapToGrid,
+  computeNormalization,
+  worldToGrid,
+} from "./voxelizer";
+export type { NormalizationParams } from "./voxelizer";
 export {
   paintBrush, floodFill, assignShellCore, assignHeightBands, swapMaterial,
 } from "./material-ops";

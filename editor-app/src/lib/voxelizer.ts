@@ -192,7 +192,7 @@ function extractTriangles(object: THREE.Object3D): Triangle[] {
 // Mesh normalization — map world-space bounding box to grid space.
 // ---------------------------------------------------------------------------
 
-interface NormalizationParams {
+export interface NormalizationParams {
   /** World-space center of the mesh bounding box. */
   readonly meshCenter: THREE.Vector3;
   /** Uniform scale: multiply a world-space offset to get grid-space offset. */
@@ -207,8 +207,14 @@ interface NormalizationParams {
  * at (GRID_SIZE/2, GRID_SIZE/2, GRID_SIZE/2).
  *
  * Returns null if the bounding box is degenerate (zero-size mesh).
+ *
+ * EXPORTED so the MaterialPainter's mesh-paint mode can share the same
+ * world↔grid math the voxelizer uses; otherwise the painted voxel cell
+ * and the auto-voxelize cell could drift by a sub-cell margin and the
+ * owner-facing paint feedback wouldn't match what `voxelizeMesh` would
+ * write into the same coords.
  */
-function computeNormalization(object: THREE.Object3D): NormalizationParams | null {
+export function computeNormalization(object: THREE.Object3D): NormalizationParams | null {
   const box = new THREE.Box3();
   box.setFromObject(object);
 
@@ -238,8 +244,14 @@ function computeNormalization(object: THREE.Object3D): NormalizationParams | nul
 /**
  * Convert a world-space point to normalized grid space using the params
  * computed by `computeNormalization`.
+ *
+ * EXPORTED for the same reason `computeNormalization` is — the painter's
+ * mesh-paint mode needs to convert raycast hit points to voxel coords
+ * with the IDENTICAL math the voxelizer uses, so a paint at (mesh hit
+ * point P) lands in the same voxel that `voxelizeMesh` would fill if
+ * the geometry covered P.
  */
-function worldToGrid(
+export function worldToGrid(
   worldPt: THREE.Vector3,
   params: NormalizationParams,
 ): THREE.Vector3 {

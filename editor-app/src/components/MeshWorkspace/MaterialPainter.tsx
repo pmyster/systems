@@ -35,9 +35,11 @@ import {
   MATERIALS,
   assignHeightBands,
   assignShellCore,
+  computeNormalization,
   floodFill,
   paintBrush,
 } from "../../lib";
+import type { NormalizationParams } from "../../lib";
 import type { MaterialId, MutableVoxelMap, VoxelMap } from "../../types/voxel";
 import {
   applyOrbit,
@@ -60,12 +62,35 @@ import { hexToRgb, inferMaterialsFromImage } from "./color-inference";
 
 export interface MaterialPainterProps {
   voxels: VoxelMap;
+  /**
+   * Optional source mesh (the same THREE.Group the MeshViewer is showing).
+   * When present, the painter enables a "Mesh" surface-paint mode that
+   * raycasts onto the mesh triangles and maps the hit point to the
+   * underlying voxel cell. When absent (or null), Mesh mode is hidden
+   * and only Voxel-cell mode is available.
+   *
+   * Passing the mesh is OPT-IN per the owner brief: voxel-only authors
+   * (legacy starter-pack units, procedural buildings) keep the
+   * pre-existing voxel-cell painting unchanged. Mesh authors get the
+   * artist-friendly paint-what-you-see UX while voxels remain the
+   * source of truth for physics.
+   */
+  mesh?: THREE.Group | null;
   onApply: (updated: MutableVoxelMap) => void;
   onCancel: () => void;
 }
 
 type BrushSize = 1 | 2 | 3;
 type PaintMode = "brush" | "fill";
+
+/**
+ * Painting surface selection. "voxel" preserves the legacy per-cell
+ * picker (raycast hits the voxel cubes directly). "mesh" raycasts the
+ * actual mesh surface and maps the hit point to the voxel that
+ * contains it — the artist-friendly mode the owner asked for. Default
+ * is "mesh" when a mesh prop is present, "voxel" otherwise.
+ */
+type PaintSurface = "mesh" | "voxel";
 
 // ---------------------------------------------------------------------------
 // Mesh helpers (mirrors VoxelSculptor's buildVoxelMesh / disposeVoxelMesh).
@@ -105,6 +130,61 @@ function disposeVoxelMesh(mesh: THREE.Mesh): void {
 // ---------------------------------------------------------------------------
 // Pure helpers.
 // ---------------------------------------------------------------------------
+
+/**
+ * Convert a raycast hit (in world-grid space, where voxel cell `(x,y,z)` lives
+ * at world `[x, x+1) × [y, y+1) × [z, z+1)`) into the integer voxel cell it
+ * falls inside. Returns null when the hit is outside the editable grid.
+ *
+ * EXPORTED so tests can verify the conversion without spinning up a scene.
+ * The painter holds the SAME invariant the voxel renderer holds: cell
+ * `(x,y,z)`'s mesh is positioned at `(x+0.5, y+0.5, z+0.5)`, so flooring
+ * the world coord gives the cell index.
+ */
+export function meshHitToVoxelCell(
+  hit: THREE.Vector3,
+  gridSize: number = GRID_SIZE,
+): { x: number; y: number; z: number } | null {
+  const x = Math.floor(hit.x);
+  const y = Math.floor(hit.y);
+  const z = Math.floor(hit.z);
+  if (x < 0 || x >= gridSize) return null;
+  if (y < 0 || y >= gridSize) return null;
+  if (z < 0 || z >= gridSize) return null;
+  return { x, y, z };
+}
+
+/**
+ * Apply a normalization (computeNormalization output) directly onto a
+ * cloned mesh group so its world-space coordinates land in voxel-grid
+ * space. After this transform, raycasting against the mesh and flooring
+ * the hit point yields the voxel cell the hit falls inside.
+ *
+ * Equivalent to the voxelizer's `worldToGrid(meshVertex, params)`:
+ *   gridX = (worldX - meshCenter.x) * scale + gridCenter.x
+ *   gridY = (worldY - meshCenter.y) * scale + gridCenter.y
+ *   gridZ = (worldZ - meshCenter.z) * scale + gridCenter.z
+ *
+ * Implemented as a translate-then-scale on the group's transform so
+ * three.js does the math on every vertex via the world matrix — no
+ * geometry mutation, the clone is safely disposable on tear-down.
+ */
+function alignMeshToVoxelGrid(
+  group: THREE.Group,
+  params: NormalizationParams,
+): void {
+  // Compose: gridPos = (worldPos - meshCenter) * scale + gridCenter
+  //                  = worldPos * scale + (gridCenter - meshCenter * scale)
+  // three.js applies T then R then S; the equivalent root transform is:
+  //   group.scale = scale
+  //   group.position = gridCenter - meshCenter * scale
+  group.scale.setScalar(params.scale);
+  group.position.set(
+    params.gridCenter.x - params.meshCenter.x * params.scale,
+    params.gridCenter.y - params.meshCenter.y * params.scale,
+    params.gridCenter.z - params.meshCenter.z * params.scale,
+  );
+}
 
 /** Convert a MATERIALS catalog hex number to a CSS color string. */
 function matColorCss(hex: number): string {
@@ -353,6 +433,7 @@ const S = {
 
 export function MaterialPainter({
   voxels,
+  mesh,
   onApply,
   onCancel,
 }: MaterialPainterProps) {
@@ -362,7 +443,22 @@ export function MaterialPainter({
   const [brushMaterial, setBrushMaterial] = useState<MaterialId>("armor");
   const [brushSize, setBrushSize] = useState<BrushSize>(1);
   const [mode, setMode] = useState<PaintMode>("brush");
-  const [hoverCell, setHoverCell] = useState<CursorCell | null>(null);
+  // Paint surface: mesh-surface raycast vs voxel-cell raycast. Default
+  // to "mesh" when a mesh prop was passed, "voxel" otherwise — the
+  // owner's preferred default is "paint what you see" any time it's
+  // available.
+  const [paintSurface, setPaintSurface] = useState<PaintSurface>(
+    mesh ? "mesh" : "voxel",
+  );
+  // hoverCell is the active voxel cell the cursor is over (in either
+  // mode). Additionally we capture the live world hit-point in mesh
+  // mode so the status bar can surface it ("mesh @ world 1.2, 0.8, 3.4
+  // → voxel (6,6,1)"). Held in a single state object so the readout is
+  // consistent across renders.
+  const [hoverState, setHoverState] = useState<{
+    cell: CursorCell | null;
+    meshHit: THREE.Vector3 | null;
+  }>({ cell: null, meshHit: null });
   const [error, setError] = useState<string | null>(null);
 
   // ----- Scene refs --------------------------------------------------------
@@ -371,6 +467,16 @@ export function MaterialPainter({
   const sceneRef = useRef<SculptScene | null>(null);
   const orbitRef = useRef(createOrbitState());
   const meshMapRef = useRef<Map<string, THREE.Mesh>>(new Map());
+  // Cloned source mesh added to the painter's scene for mesh-mode
+  // raycasting. The clone is independent (own geometry + materials)
+  // so disposing it on tear-down or surface-change can't corrupt the
+  // master in MeshViewer.
+  const meshCloneRef = useRef<THREE.Group | null>(null);
+  // Latest normalization params used to align the mesh clone to the
+  // voxel grid. Stashed for diagnostics and potential future use
+  // (e.g. surfacing the mapping in the HUD); the raycast itself
+  // doesn't need them — the clone is already in grid space.
+  const meshNormRef = useRef<NormalizationParams | null>(null);
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
 
   // File-input ref for the image base-coat path.
@@ -378,8 +484,8 @@ export function MaterialPainter({
 
   // Latest state read by stable pointer-listener closures (avoids stale
   // closures without re-binding listeners mid-drag).
-  const liveRef = useRef({ working, brushMaterial, brushSize, mode });
-  liveRef.current = { working, brushMaterial, brushSize, mode };
+  const liveRef = useRef({ working, brushMaterial, brushSize, mode, paintSurface });
+  liveRef.current = { working, brushMaterial, brushSize, mode, paintSurface };
 
   // ----- Mount: build scene, attach canvas --------------------------------
 
@@ -403,6 +509,23 @@ export function MaterialPainter({
         disposeVoxelMesh(mesh);
       }
       meshMapRef.current.clear();
+      // Dispose the mesh clone (if mesh mode left one). The clone owns
+      // independent geometry + overlay materials; freeing them here
+      // mirrors the voxel-mesh cleanup above so we don't leak GPU
+      // resources on unmount.
+      const clone = meshCloneRef.current;
+      if (clone) {
+        sceneBundle.scene.remove(clone);
+        clone.traverse((node) => {
+          if (node instanceof THREE.Mesh) {
+            node.geometry.dispose();
+            const mats = Array.isArray(node.material) ? node.material : [node.material];
+            for (const m of mats) m.dispose();
+          }
+        });
+        meshCloneRef.current = null;
+        meshNormRef.current = null;
+      }
       if (sceneBundle.renderer.domElement.parentNode === container) {
         container.removeChild(sceneBundle.renderer.domElement);
       }
@@ -411,6 +534,88 @@ export function MaterialPainter({
       setCanvas(null);
     };
   }, []);
+
+  // ----- Mesh clone for mesh-surface raycasting ---------------------------
+  //
+  // When mesh-surface paint mode is active AND a source mesh is available,
+  // deep-clone the mesh into the painter's scene aligned to voxel-grid
+  // space. The clone is positioned/scaled via `alignMeshToVoxelGrid` so
+  // that raycast hits in world coords map DIRECTLY to voxel cells via
+  // `meshHitToVoxelCell` (floor of the world coord). When mesh mode is
+  // off OR the source mesh is null, the clone is removed and disposed.
+  //
+  // We use a slightly translucent override material so the underlying
+  // voxel cells stay visible during paint — the artist sees "this surface
+  // → that cell" mapping live as they hover.
+
+  useEffect(() => {
+    const sceneBundle = sceneRef.current;
+    if (!sceneBundle) return undefined;
+
+    // Tear down any prior clone before deciding whether to mount a new one.
+    const prior = meshCloneRef.current;
+    if (prior) {
+      sceneBundle.scene.remove(prior);
+      prior.traverse((node) => {
+        if (node instanceof THREE.Mesh) {
+          node.geometry.dispose();
+          const mats = Array.isArray(node.material) ? node.material : [node.material];
+          for (const m of mats) m.dispose();
+        }
+      });
+      meshCloneRef.current = null;
+      meshNormRef.current = null;
+    }
+
+    if (paintSurface !== "mesh" || mesh === null || mesh === undefined) {
+      return undefined;
+    }
+
+    // Compute normalization against the SOURCE mesh (not the clone), so
+    // we share params with the voxelizer's view of the same mesh. Then
+    // clone, align, and add. computeNormalization can return null on a
+    // degenerate (empty) mesh — surface that loud-over-silent rather
+    // than silently rendering nothing.
+    const norm = computeNormalization(mesh);
+    if (norm === null) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[MaterialPainter] mesh paint mode: source mesh has no usable " +
+          "bounding box (empty or degenerate). Falling back to voxel mode.",
+      );
+      setPaintSurface("voxel");
+      return undefined;
+    }
+
+    const clone = mesh.clone(true);
+    clone.traverse((node) => {
+      if (node instanceof THREE.Mesh) {
+        node.geometry = node.geometry.clone();
+        // Override with a translucent material so painted voxels remain
+        // visible through the mesh surface. The original material is
+        // owned by the source mesh — never touched here.
+        const overlay = new THREE.MeshStandardMaterial({
+          color: 0xc9a55c,
+          roughness: 0.7,
+          metalness: 0.05,
+          transparent: true,
+          opacity: 0.35,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+        node.material = overlay;
+      }
+    });
+    alignMeshToVoxelGrid(clone, norm);
+    clone.name = "MaterialPainterMeshClone";
+    sceneBundle.scene.add(clone);
+    meshCloneRef.current = clone;
+    meshNormRef.current = norm;
+
+    return undefined;
+    // The cleanup runs at the top of the next effect (or unmount) — the
+    // explicit teardown above handles both paths.
+  }, [mesh, paintSurface]);
 
   // ----- Reconcile working → scene meshes ---------------------------------
 
@@ -539,8 +744,53 @@ export function MaterialPainter({
     const sceneBundle = sceneRef.current;
     if (!sceneBundle) return undefined;
 
-    /** Cast against current voxel meshes and paint the hovered cell. */
-    const paintAt = (clientX: number, clientY: number): void => {
+    /**
+     * Pick a voxel cell from a pointer position. Two paths:
+     *
+     *   - MESH mode: raycast against the cloned mesh surface (positioned
+     *     in voxel-grid space). The hit point's `floor(x,y,z)` is the
+     *     voxel cell. Also returns the raw world hit so the HUD can
+     *     surface "mesh @ world ... → voxel ..." for the owner.
+     *   - VOXEL mode: legacy behaviour — raycast against the voxel cubes
+     *     and use the picked-cell logic.
+     *
+     * Returns null when no usable hit is found.
+     */
+    const pickCell = (
+      clientX: number,
+      clientY: number,
+    ): {
+      cell: CursorCell;
+      meshHit: THREE.Vector3 | null;
+    } | null => {
+      const live = liveRef.current;
+
+      if (live.paintSurface === "mesh" && meshCloneRef.current !== null) {
+        // Mesh raycast — uses the painter's own raycaster so we don't
+        // depend on getIntersect's voxel-mesh interface.
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return null;
+        const ndc = new THREE.Vector2(
+          ((clientX - rect.left) / rect.width) * 2 - 1,
+          -((clientY - rect.top) / rect.height) * 2 + 1,
+        );
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(ndc, sceneBundle.camera);
+        const hits = raycaster.intersectObject(meshCloneRef.current, true);
+        if (hits.length === 0) return null;
+        const hit = hits[0];
+        const cell = meshHitToVoxelCell(hit.point);
+        if (cell === null) return null;
+        // resolveRemoveCell expects an `Intersect` shape; for mesh mode
+        // we synthesise a CursorCell directly. `inside` is always true
+        // here — meshHitToVoxelCell only returns cells in-bounds.
+        return {
+          cell: { x: cell.x, y: cell.y, z: cell.z, inside: true },
+          meshHit: hit.point.clone(),
+        };
+      }
+
+      // Voxel-cell mode (legacy).
       const meshes = Array.from(meshMapRef.current.values());
       const result = getIntersect(
         canvas,
@@ -550,9 +800,17 @@ export function MaterialPainter({
         clientX,
         clientY,
       );
-      if (!result || result.type !== "voxel") return;
+      if (!result || result.type !== "voxel") return null;
       const cell = resolveRemoveCell(result);
-      if (!cell || !cell.inside) return;
+      if (!cell || !cell.inside) return null;
+      return { cell, meshHit: null };
+    };
+
+    /** Cast against the current surface and paint the picked cell. */
+    const paintAt = (clientX: number, clientY: number): void => {
+      const picked = pickCell(clientX, clientY);
+      if (picked === null) return;
+      const cell = picked.cell;
 
       const live = liveRef.current;
       const strokeKey = `${cell.x},${cell.y},${cell.z}`;
@@ -579,20 +837,12 @@ export function MaterialPainter({
 
     /** Update the hover-cell readout (no painting). */
     const updateHover = (clientX: number, clientY: number): void => {
-      const meshes = Array.from(meshMapRef.current.values());
-      const result = getIntersect(
-        canvas,
-        sceneBundle.camera,
-        meshes,
-        sceneBundle.ground,
-        clientX,
-        clientY,
-      );
-      if (!result || result.type !== "voxel") {
-        setHoverCell(null);
+      const picked = pickCell(clientX, clientY);
+      if (picked === null) {
+        setHoverState({ cell: null, meshHit: null });
         return;
       }
-      setHoverCell(resolveRemoveCell(result));
+      setHoverState({ cell: picked.cell, meshHit: picked.meshHit });
     };
 
     const onContextMenu = (e: MouseEvent): void => {
@@ -756,6 +1006,40 @@ export function MaterialPainter({
       <aside style={S.sidebar}>
         <p style={S.heading}>MATERIAL PAINTER</p>
 
+        {/* Paint surface toggle — Mesh vs Voxel cell.
+            Mesh mode raycasts the visible mesh surface and auto-maps the hit
+            to its underlying voxel (artist-friendly: paint what you see).
+            Voxel mode raycasts the voxel cubes directly (legacy/power-user).
+            The Mesh button is disabled when no source mesh is available. */}
+        <div>
+          <h3 style={S.sectionHeading}>Paint surface</h3>
+          <div style={S.btnRow}>
+            <button
+              type="button"
+              disabled={!mesh}
+              style={S.toggleBtn(paintSurface === "mesh", !mesh)}
+              onClick={() => {
+                if (mesh) setPaintSurface("mesh");
+              }}
+              title={
+                mesh
+                  ? "Paint on the visible mesh surface; the system maps each click to the underlying voxel."
+                  : "No mesh available — import a mesh first to enable Mesh paint mode."
+              }
+            >
+              Mesh
+            </button>
+            <button
+              type="button"
+              style={S.toggleBtn(paintSurface === "voxel")}
+              onClick={() => setPaintSurface("voxel")}
+              title="Paint the voxel cells directly (legacy mode)."
+            >
+              Voxel
+            </button>
+          </div>
+        </div>
+
         {/* Material palette */}
         <div>
           <h3 style={S.sectionHeading}>Material</h3>
@@ -853,6 +1137,13 @@ export function MaterialPainter({
         {/* Controls hint */}
         <div style={S.hint}>
           Left-drag paint · Right-drag orbit · Wheel zoom
+          {paintSurface === "mesh" && (
+            <>
+              <br />
+              <span style={{ color: "#c9a55c" }}>Mesh mode:</span> click the
+              visible surface; the voxel underneath gets painted.
+            </>
+          )}
         </div>
 
         {/* Apply / Cancel */}
@@ -869,11 +1160,25 @@ export function MaterialPainter({
       <div style={S.canvasWrap} ref={containerRef}>
         <div style={S.overlay}>
           <span>hover: </span>
-          <span style={S.overlayValue}>
-            {hoverCell
-              ? `(${hoverCell.x},${hoverCell.y},${hoverCell.z})`
-              : "—"}
-          </span>
+          {paintSurface === "mesh" && hoverState.meshHit !== null ? (
+            <>
+              <span style={S.overlayValue}>
+                {`mesh @ world ${hoverState.meshHit.x.toFixed(1)}, ${hoverState.meshHit.y.toFixed(1)}, ${hoverState.meshHit.z.toFixed(1)}`}
+              </span>
+              {" → "}
+              <span style={S.overlayValue}>
+                {hoverState.cell
+                  ? `voxel (${hoverState.cell.x},${hoverState.cell.y},${hoverState.cell.z})`
+                  : "voxel —"}
+              </span>
+            </>
+          ) : (
+            <span style={S.overlayValue}>
+              {hoverState.cell
+                ? `(${hoverState.cell.x},${hoverState.cell.y},${hoverState.cell.z})`
+                : "—"}
+            </span>
+          )}
           {" · "}
           <span>
             brush{" "}
