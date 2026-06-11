@@ -1,0 +1,12 @@
+# Python virtual environment (multi-GB — never commit)
+venv/
+
+# The TripoSR upstream clone is fetched + patched by setup.ps1, not committed.
+# (Its model weights live in the HuggingFace cache, not here.)
+TripoSR/
+
+# Test / generated artifacts
+*.glb
+test_input.png
+__pycache__/
+*.pyc

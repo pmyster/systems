@@ -1,0 +1,51 @@
+{
+  "name": "childoflight-editor",
+  "description": "Native unit Schematic editor for Child of Light",
+  "version": "0.1.0",
+  "author": "pmyster <spnhang@gmail.com>",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:determinism": "vitest run src/sim/simRunner.test.ts src/sim/determinism.test.ts",
+    "check:sim-purity": "npx tsx scripts/check-sim-purity.mts",
+    "verify": "tsc --noEmit && npm run check:sim-purity && npm test && npm run test:determinism && npm run build",
+    "starter-pack": "starter-pack\\scripts\\run.bat"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "0.12.0",
+    "@recast-navigation/generators": "0.43.1",
+    "@recast-navigation/three": "0.43.1",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-opener": "^2",
+    "bitecs": "^0.4.0",
+    "immer": "^11.1.8",
+    "nanoid": "^5.1.11",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "recast-navigation": "0.43.1",
+    "simplex-noise": "^4.0.3",
+    "three": "^0.180.0",
+    "zod": "^3.25.0",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@types/three": "^0.180.0",
+    "@vitejs/plugin-react": "^4.6.0",
+    "@vitest/ui": "^4.1.7",
+    "jsdom": "^29.1.1",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.4",
+    "vitest": "^4.1.7"
+  }
+}

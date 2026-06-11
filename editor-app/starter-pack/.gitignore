@@ -1,0 +1,41 @@
+# Starter-pack ignore — keep the workflow + scripts in git, exclude artifacts.
+# Owner-facing: this file is why your photos/models/logs never get committed.
+
+# Python venv (huge, machine-specific)
+venv/
+
+# Python bytecode cache (regenerated on every import; never useful in git)
+__pycache__/
+*.pyc
+
+# Upstream Hunyuan3D repo clone (we don't ship it; it's a per-machine
+# checkout used only as a python-path source for `hy3dgen`)
+Hunyuan3D-2/
+
+# HuggingFace model cache (model weights ~5-6 GB)
+_hf_cache/
+
+# Per-run logs (regenerated each run)
+_logs/
+
+# User-dropped photos (per-machine input — never commit IP/owned imagery)
+photos/**/*.png
+photos/**/*.jpg
+photos/**/*.jpeg
+photos/**/*.webp
+photos/**/*.bmp
+
+# Per-photo error logs that may appear next to inputs
+photos/**/*.error.log
+
+# Generated meshes (large, regenerated from photos)
+*.glb
+*.obj
+*.ply
+
+# Sanity-check / temp test outputs
+_sanity_*
+_tmp_*
+
+# Keep the directory placeholders (.gitkeep is allowed)
+!.gitkeep

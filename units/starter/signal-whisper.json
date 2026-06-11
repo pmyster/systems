@@ -1,0 +1,83 @@
+{
+  "kind": "unit",
+  "id": "signal-whisper",
+  "physics_version": "1.0",
+  "name": "Whisper",
+  "faction": "signal",
+  "description": "Signal's hallmark scout. Lightweight, fast, and almost invisible to enemy radar thanks to a stealth hull and passive-sensor doctrine. Mounts a minimal weapon — its real purpose is to see first and report.",
+  "designer": "STARTER_KIT",
+  "chassis": {
+    "chassis_class": "ground_wheeled",
+    "mass_kg": 4200,
+    "engine_kW": 220,
+    "drivetrain_efficiency": 0.82,
+    "energy_source": "battery",
+    "battery_capacity_MJ": 320,
+    "battery_recharge_rate_MJs": 0.4,
+    "fuel_capacity_MJ": 0,
+    "fuel_consumption_rate_MJs": 0,
+    "solar_collection_area_m2": 6,
+    "armor_thickness_mm": 25,
+    "armor_material": "alloy_composite",
+    "hardpoint_count": 3,
+    "compatibility_tags": ["wheeled", "stealth_hull", "all_weather"],
+    "thermal_capacity_MJ": 80
+  },
+  "parts": [
+    {
+      "id": "scout-lmg",
+      "category": "weapon",
+      "name": "Light Machine Gun (suppressed)",
+      "mass_kg": 90,
+      "power_draw_kW": 1,
+      "weapon_type": "kinetic",
+      "propellant_energy_MJ": 0.03,
+      "projectile_mass_kg": 0.01,
+      "barrel_thermal_capacity_MJ": 5,
+      "per_shot_heat_MJ": 0.05,
+      "cooling_rate_MJs": 0.3,
+      "drag_coefficient": 0.35,
+      "elevation_range_deg": [-10, 60]
+    },
+    {
+      "id": "long-range-passive-array",
+      "category": "sensor",
+      "name": "Long-Range Passive Array",
+      "mass_kg": 180,
+      "power_draw_kW": 12,
+      "sensor_modality": "radar",
+      "sensor_range_m": 6500,
+      "sensor_sensitivity": 1.4,
+      "sensor_active": false
+    },
+    {
+      "id": "thermal-passive",
+      "category": "sensor",
+      "name": "Thermal Eyepiece",
+      "mass_kg": 40,
+      "power_draw_kW": 2,
+      "sensor_modality": "thermal",
+      "sensor_range_m": 3500,
+      "sensor_sensitivity": 1.2,
+      "sensor_active": false
+    },
+    {
+      "id": "tactical-uplink",
+      "category": "communications",
+      "name": "Tactical Uplink",
+      "mass_kg": 25,
+      "power_draw_kW": 4,
+      "communications_type": "laser_link",
+      "communications_range_m": 15000
+    }
+  ],
+  "costs": {
+    "scrap": 80,
+    "alloy": 35,
+    "tech_fragments": 2,
+    "power": 12
+  },
+  "build_time_seconds": 90,
+  "tech_requirements": ["signal_passive_sensors"],
+  "tags": ["starter", "tier_1", "scout", "stealth", "recon"]
+}

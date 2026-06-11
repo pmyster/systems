@@ -1,0 +1,44 @@
+{
+  "kind": "unit",
+  "id": "building_bunker_v1",
+  "physics_version": "1.0",
+  "name": "Repair Bunker",
+  "faction": "neutral",
+  "description": "Phase 2 Stage 1 — bunker. BunkerHealRange heals friendly units within 12m each tick (1 MJ/tick → 30 MJ/sec at 30Hz). No weapons. Heavy armor — it's a survivability anchor your line forms around.",
+  "designer": "phase2-stage1",
+  "chassis": {
+    "chassis_class": "building_bunker",
+    "mass_kg": 18000,
+    "length_m": 6.0,
+    "hardpoint_units_version": "world_m",
+    "engine_kW": 0,
+    "drivetrain_efficiency": 0,
+    "energy_source": "grid_tethered",
+    "battery_capacity_MJ": 400,
+    "battery_recharge_rate_MJs": 3,
+    "armor_thickness_mm": 250,
+    "armor_material": "alloy_composite",
+    "hardpoint_count": 0,
+    "compatibility_tags": [],
+    "thermal_capacity_MJ": 80
+  },
+  "parts": [],
+  "mesh_asset": {
+    "kind": "procedural_building",
+    "building_chassis": "building_bunker"
+  },
+  "hardpoints": [],
+  "vulnerability": {
+    "armor_zones": {
+      "front": { "thickness_mm": 250, "material": "composite" },
+      "side":  { "thickness_mm": 250, "material": "composite" },
+      "rear":  { "thickness_mm": 250, "material": "composite" },
+      "top":   { "thickness_mm": 250, "material": "composite" }
+    },
+    "electronics": [],
+    "crew": { "count": 4, "exposure": "sealed" },
+    "thermal_dissipation_kws": 10,
+    "mobility_redundancy": 1.0,
+    "structural_integrity_mj": 40
+  }
+}

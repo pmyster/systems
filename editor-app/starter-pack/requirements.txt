@@ -1,0 +1,47 @@
+# Hunyuan3D-2mini starter-pack — pinned dependency snapshot.
+#
+# Tested combination (2026-06-03) on:
+#   Windows 11, Python 3.11.9, CUDA driver 596.21 (CUDA 13.2), RTX 3070 Ti Laptop (8 GB).
+#
+# IMPORTANT: PyTorch CUDA wheels are NOT on PyPI — they come from
+# https://download.pytorch.org/whl/cu121. The setup script handles the
+# correct index URL. Do not just `pip install -r requirements.txt` blindly
+# unless you also pass `--extra-index-url https://download.pytorch.org/whl/cu121`.
+
+# --- PyTorch (CUDA 12.1 wheel) ---
+torch==2.5.1
+torchvision==0.20.1
+
+# --- Diffusion stack ---
+diffusers==0.31.0
+transformers==4.48.3
+accelerate==1.1.1
+huggingface_hub==0.26.5
+safetensors
+
+# --- Numerics + utility ---
+numpy==1.26.4
+einops
+omegaconf
+tqdm
+pyyaml
+ninja
+pybind11
+
+# --- Mesh I/O + processing ---
+trimesh==4.5.3
+pygltflib==1.16.4
+pymeshlab==2025.7.post1
+xatlas==0.0.11
+fast-simplification==0.1.13
+
+# --- Image I/O + segmentation (rembg uses ONNX runtime for U2Net background removal) ---
+opencv-python==4.10.0.84
+rembg==2.0.59
+onnxruntime==1.20.0
+
+# --- Schematic validation ---
+pydantic==2.9.2
+
+# --- Hunyuan3D-2 package itself (installed editable from ./Hunyuan3D-2/) ---
+# hy3dgen — installed via `pip install --no-deps -e ./Hunyuan3D-2`

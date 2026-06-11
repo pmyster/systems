@@ -1,0 +1,387 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/pmyster/systems/schemas/unit.schema.json",
+  "title": "Unit Schematic",
+  "description": "A complete unit definition for the Child of Light game engine. Declares physical inputs; gameplay stats (speed, range, damage, cooldown) are derived by the engine from these inputs through the equations in physics.md.",
+  "type": "object",
+  "required": ["kind", "id", "physics_version", "name", "chassis"],
+  "properties": {
+    "kind": { "type": "string", "const": "unit" },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "description": "Unique identifier within the Schematic namespace. Lowercase with hyphens or underscores."
+    },
+    "physics_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "The Physics Constitution version this unit resolves against (per the Invariance rule). Old units keep their original version forever."
+    },
+    "name": { "type": "string" },
+    "faction": {
+      "type": "string",
+      "enum": ["reclaimer", "bulwark", "signal", "cinder_crown", "neutral", "tethered", "quiet_court", "burnward", "drifters", "veiled"],
+      "description": "Faction affinity. Earth-faction units are restricted by faction tech. Returner units are V2+."
+    },
+    "description": { "type": "string" },
+    "designer": {
+      "type": "string",
+      "description": "Salvage Signature — the original designer's name. Carries forward through every derivative and salvage. Use STARTER_KIT for the base game's stock units."
+    },
+    "chassis": {
+      "type": "object",
+      "required": ["chassis_class", "mass_kg", "engine_kW", "drivetrain_efficiency"],
+      "properties": {
+        "chassis_class": {
+          "type": "string",
+          "enum": [
+            "ground_tracked",
+            "ground_wheeled",
+            "ground_legged",
+            "walker_fusion",
+            "air_fixed_wing",
+            "air_rotary",
+            "naval_surface",
+            "naval_submarine",
+            "subterranean",
+            "orbital",
+            "static_structure",
+            "static_wall",
+            "building_turret",
+            "building_wall",
+            "building_aa",
+            "building_bunker"
+          ]
+        },
+        "mass_kg": { "type": "number", "minimum": 1 },
+        "scale": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Optional overall unit scale factor applied at runtime in the Battlefield Preview ONLY (not in the Mesh Workspace — authoring always happens at base scale 1). 1.0 = base imported size; 0.7 ≈ 30% smaller; 1.5 = 50% larger. Mass scales by scale^3 if volume conservation is desired (designer's choice). Defaults to 1.0 when omitted (backwards compatible). SUPERSEDED by `length_m` when that field is set."
+        },
+        "length_m": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Target rendered size (longest bbox dimension) of this unit, in world meters. When set, the runtime scales the mesh so its longest axis equals this value; `chassis.scale` is then ignored. When absent, the unit renders at the mesh-loader's normalize target (8 m) multiplied by `chassis.scale`. Authoring intent: 'this tank is 9 m long' → length_m = 9."
+        },
+        "hardpoint_units_version": {
+          "type": "string",
+          "enum": ["pre_bake", "world_m"],
+          "description": "Coordinate-system version for hardpoints[].local_position. 'world_m' = positions are in world meters (post-Option-C convention). 'pre_bake' (or absent) = positions were authored against a mesh root with a non-unit normalize scale; the runtime multiplies them by the mesh's normalizeScale at mount time and prompts a re-save. New units get 'world_m' automatically."
+        },
+        "engine_kW": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Primary engine output in kilowatts. 0 acceptable for static structures."
+        },
+        "drivetrain_efficiency": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Fraction of engine output that reaches motion (0-1). Real values: tracked vehicles ~0.6-0.75; wheeled ~0.75-0.85; legged ~0.4-0.6."
+        },
+        "energy_source": {
+          "type": "string",
+          "enum": ["battery", "fuel_cell", "fusion", "hybrid", "grid_tethered", "solar_only"]
+        },
+        "battery_capacity_MJ": { "type": "number", "minimum": 0 },
+        "battery_recharge_rate_MJs": { "type": "number", "minimum": 0 },
+        "fuel_capacity_MJ": { "type": "number", "minimum": 0 },
+        "fuel_consumption_rate_MJs": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Fuel burn at full engine power. Cruise consumption is approximately 40-60% of this."
+        },
+        "solar_collection_area_m2": { "type": "number", "minimum": 0 },
+        "armor_thickness_mm": { "type": "number", "minimum": 0 },
+        "armor_material": {
+          "type": "string",
+          "enum": ["salvaged_steel", "alloy_composite", "ceramic_layered", "exotic_lattice"]
+        },
+        "hardpoint_count": { "type": "integer", "minimum": 0 },
+        "compatibility_tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "tracked", "wheeled", "legged", "tunneling", "displacement_hull",
+              "vacuum_rated", "low_g_stable", "high_g_rated",
+              "high_radiation", "thermal_extreme", "stealth_hull",
+              "amphibious", "all_weather"
+            ]
+          },
+          "description": "Capability tags. Determine which environments the unit can enter."
+        },
+        "thermal_capacity_MJ": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Chassis-level thermal mass for heat sinking (separate from per-weapon heat budgets)."
+        },
+        "voxel_data": {
+          "type": "object",
+          "description": "Optional voxel chassis data sculpted in the Editor App. Format TBD; placeholder for now."
+        },
+        "structure_type": {
+          "type": "string",
+          "enum": ["tower", "wall", "gate", "bunker", "factory", "depot", "relay"],
+          "description": "Subtype for static_structure and static_wall chassis. Governs placement rules and upgrade chains in the game engine."
+        },
+        "hardpoints": {
+          "type": "array",
+          "description": "Named weapon/module slots. Each slot has an ID and a type that constrains which weapon platform can be mounted. For mobile units, prefer bare hardpoint_count. For structures, use this array for full slot identity.",
+          "items": {
+            "type": "object",
+            "required": ["id", "type"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique slot name within this unit (e.g. 'main_gun', 'aux_1', 'gate_north')"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["heavy_gun", "light_gun", "missile", "flak", "aux", "shield", "sensor", "gate"],
+                "description": "Slot class — constrains which part types can mount here"
+              },
+              "occupied_by": {
+                "type": "string",
+                "description": "Part schematic ID currently mounted in this slot. Omit for empty slot."
+              }
+            }
+          }
+        }
+      }
+    },
+    "parts": {
+      "type": "array",
+      "description": "Mounted parts. Each occupies one hardpoint. May exceed hardpoint_count only for built-in components.",
+      "items": { "$ref": "part.schema.json" }
+    },
+    "costs": {
+      "type": "object",
+      "description": "Build cost per resource. Power is per-tick streaming cost; others are one-time stockpile cost.",
+      "properties": {
+        "power": { "type": "number", "minimum": 0 },
+        "scrap": { "type": "number", "minimum": 0 },
+        "alloy": { "type": "number", "minimum": 0 },
+        "fuel": { "type": "number", "minimum": 0 },
+        "tech_fragments": { "type": "number", "minimum": 0 },
+        "exotic_matter": { "type": "number", "minimum": 0 },
+        "biomass": { "type": "number", "minimum": 0 },
+        "helium_3": { "type": "number", "minimum": 0 },
+        "water_ice": { "type": "number", "minimum": 0 },
+        "rare_earths": { "type": "number", "minimum": 0 }
+      }
+    },
+    "build_time_seconds": { "type": "number", "minimum": 0 },
+    "tech_requirements": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "IDs of tech nodes that must be researched before this unit can be built."
+    },
+    "evolution": {
+      "type": "array",
+      "description": "Successor Schematics this unit can evolve into under specific conditions.",
+      "items": {
+        "type": "object",
+        "required": ["trigger", "successor"],
+        "properties": {
+          "trigger": { "type": "object" },
+          "successor": { "type": "string" }
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Free-form tags for searching/categorizing."
+    },
+    "mesh_asset": {
+      "type": "object",
+      "description": "Reference to the visual mesh this unit uses, so the editor can reload it on open. Either a built-in template, an imported file path, or a procedural building mesh resolved at runtime (Phase 2 Stage 1).",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["template", "file", "procedural_building"] },
+        "template_id": { "type": "string" },
+        "path": { "type": "string" },
+        "building_chassis": {
+          "type": "string",
+          "enum": ["building_turret", "building_wall", "building_aa", "building_bunker"],
+          "description": "Building chassis class for procedural_building mesh refs. Resolved by /runtime/scene/proceduralMeshes.ts."
+        }
+      }
+    },
+    "rig": {
+      "type": "array",
+      "description": "Moving-part definitions. Each entry rigs a named mesh node for motion: passive (auto-spin/roll), reactive (aim within yaw/pitch constraint arcs), or active (animation state machine). Recoil is derived from weapon physics, never authored here.",
+      "items": {
+        "type": "object",
+        "required": ["id", "target_node", "motion"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique rig id within the unit (e.g. 'main_turret', 'barrel')."
+          },
+          "target_node": {
+            "type": "string",
+            "description": "Name of the mesh node / sub-object this rig moves."
+          },
+          "motion": {
+            "type": "string",
+            "enum": ["passive", "reactive", "active"]
+          },
+          "pivot": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "Local pivot point [x,y,z] the node rotates about. Defaults to the node's bounding-box centre when omitted."
+          },
+          "yaw": {
+            "type": "object",
+            "description": "Horizontal traverse constraint (rotation about the up axis).",
+            "properties": {
+              "min_deg": { "type": "number" },
+              "max_deg": { "type": "number" },
+              "rate_dps": { "type": "number", "minimum": 0, "description": "Traverse speed in degrees/second." },
+              "invert": { "type": "boolean", "description": "Reverse the rotation direction for this axis (for models authored facing the opposite way)." }
+            }
+          },
+          "pitch": {
+            "type": "object",
+            "description": "Vertical elevation constraint (barrel up/down).",
+            "properties": {
+              "min_deg": { "type": "number" },
+              "max_deg": { "type": "number" },
+              "rate_dps": { "type": "number", "minimum": 0 },
+              "invert": { "type": "boolean", "description": "Reverse the rotation direction for this axis (for models authored facing the opposite way)." }
+            }
+          },
+          "parent_rig": {
+            "type": "string",
+            "description": "Optional id of a parent rig whose motion this one composes onto (e.g. a barrel's parent_rig is the turret)."
+          },
+          "muzzle": {
+            "type": "boolean",
+            "description": "When true, this rig is the projectile spawn point AND aim direction for the Fire-Test. At most one rig per unit may carry this flag; the editor enforces single-muzzle on toggle. Optional — units without a muzzle rig fall back to the legacy bbox top-front + south aim."
+          },
+          "muzzle_forward": {
+            "type": "string",
+            "enum": ["+x", "-x", "+y", "-y", "+z", "-z"],
+            "description": "Local axis of this rig's target_node that points OUT of the barrel. Default '+z'. Only meaningful when muzzle=true."
+          }
+        }
+      }
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "scout",
+        "light_attack",
+        "main_battle",
+        "heavy_assault",
+        "artillery",
+        "support",
+        "air_fighter",
+        "gunship",
+        "naval",
+        "structure",
+        "elite"
+      ],
+      "description": "Tactical role. Used by the game AI for squad composition and target priority."
+    },
+    "hardpoints": {
+      "type": "array",
+      "description": "Artist-placed weapon-mount sockets. Each has a unique id, an optional parent rig (by rig id), and a full local position + quaternion transform. The engine spawns projectiles at the hardpoint's world position, flying along its world +Z axis (Three.js convention). Optional — old units load fine without it.",
+      "items": {
+        "type": "object",
+        "required": ["id", "parent_rig_id", "local_position", "local_quaternion"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Unique id within the unit, e.g. 'main_gun'."
+          },
+          "parent_rig_id": {
+            "type": ["string", "null"],
+            "description": "Id of the rig (from the unit's rig array) whose target_node this hardpoint is parented to. null = parented to the unit root."
+          },
+          "local_position": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "Local-space position [x,y,z] relative to the parent."
+          },
+          "local_quaternion": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "Local-space unit quaternion [x,y,z,w] relative to the parent."
+          },
+          "weapon_part_id": {
+            "type": "string",
+            "description": "Optional reference to a parts[].id with category 'weapon'. When set, this hardpoint fires that weapon's projectile and respects its timing model (charge/fire_rate/burst/cooldown). Absent or stale references render the hardpoint as 'unarmed' (cannot fire)."
+          }
+        }
+      }
+    },
+    "vulnerability": {
+      "type": "object",
+      "description": "Per-zone armor + electronics + crew + thermal + structural inputs the engine uses to resolve projectile interactions. Physical inputs only — outcomes (damage taken, EMP susceptibility) are derived at engine time. Optional on disk for backwards compatibility; the editor materializes defaults from chassis fields when loading older files.",
+      "required": [
+        "armor_zones",
+        "electronics",
+        "crew",
+        "thermal_dissipation_kws",
+        "mobility_redundancy",
+        "structural_integrity_mj"
+      ],
+      "properties": {
+        "armor_zones": {
+          "type": "object",
+          "required": ["front", "side", "rear", "top"],
+          "properties": {
+            "front": { "$ref": "#/definitions/zoneArmor" },
+            "side": { "$ref": "#/definitions/zoneArmor" },
+            "rear": { "$ref": "#/definitions/zoneArmor" },
+            "top": { "$ref": "#/definitions/zoneArmor" }
+          }
+        },
+        "electronics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["system", "hardening_db"],
+            "properties": {
+              "system": { "type": "string", "minLength": 1 },
+              "hardening_db": { "type": "number", "minimum": 0 }
+            }
+          }
+        },
+        "crew": {
+          "type": "object",
+          "required": ["count", "exposure"],
+          "properties": {
+            "count": { "type": "integer", "minimum": 0 },
+            "exposure": { "type": "string", "enum": ["sealed", "partial", "open"] }
+          }
+        },
+        "thermal_dissipation_kws": { "type": "number", "minimum": 0 },
+        "mobility_redundancy": { "type": "number", "minimum": 0, "maximum": 1 },
+        "structural_integrity_mj": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    }
+  },
+  "definitions": {
+    "zoneArmor": {
+      "type": "object",
+      "required": ["thickness_mm", "material"],
+      "properties": {
+        "thickness_mm": { "type": "number", "minimum": 0 },
+        "material": { "type": "string", "enum": ["steel", "composite", "reactive", "ceramic"] }
+      }
+    }
+  }
+}

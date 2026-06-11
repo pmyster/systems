@@ -1,0 +1,353 @@
+/*
+ * AttributeForm — dark-theme form styling that matches App.css's palette.
+ *
+ * Conventions:
+ *   - sections are visually distinct cards with a subtle border.
+ *   - rows are a label + control pair, control on the right.
+ *   - inputs / selects share width so the form has a clean vertical axis.
+ *   - read-only fields use a desaturated background so they're obviously
+ *     not editable.
+ */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  font-size: 13px;
+  color: #e6e6e6;
+  background-color: #1f1f23;
+  height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background-color: #262629;
+  border: 1px solid #2a2a2f;
+  border-radius: 4px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 4px 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #b9b9c0;
+  user-select: none;
+}
+
+.sectionBadge {
+  font-size: 10px;
+  font-weight: 500;
+  color: #6f6f78;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.rowFull {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.label {
+  font-size: 12px;
+  color: #b9b9c0;
+  user-select: none;
+}
+
+.unit {
+  font-size: 10px;
+  color: #6f6f78;
+  margin-left: 4px;
+}
+
+.input,
+.select,
+.textarea {
+  background-color: #161619;
+  color: #e6e6e6;
+  border: 1px solid #2a2a2f;
+  border-radius: 3px;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  border-color: #6b9eb3;
+}
+
+.input:read-only,
+.readonly {
+  background-color: #1c1c1f;
+  color: #8a8a92;
+  cursor: not-allowed;
+}
+
+.textarea {
+  resize: vertical;
+  min-height: 40px;
+  font-family: inherit;
+}
+
+.help {
+  font-size: 10px;
+  color: #6f6f78;
+  margin-top: 2px;
+}
+
+.button {
+  background-color: #2a2a30;
+  color: #e6e6e6;
+  border: 1px solid #3a3a42;
+  border-radius: 3px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.button:hover {
+  background-color: #34343a;
+}
+
+.buttonPrimary {
+  background-color: #3a5b6e;
+  border-color: #4a7286;
+  color: #e6e6e6;
+}
+
+.buttonPrimary:hover {
+  background-color: #4a7286;
+}
+
+.buttonDanger {
+  background-color: transparent;
+  color: #c16060;
+  border-color: transparent;
+  padding: 2px 6px;
+  font-weight: 600;
+}
+
+.buttonDanger:hover {
+  background-color: #2a1818;
+  color: #e09090;
+}
+
+.partCard {
+  background-color: #1f1f23;
+  border: 1px solid #2a2a2f;
+  border-radius: 4px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.partHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.partTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: #c9a55c;
+}
+
+.partSubtitle {
+  font-size: 10px;
+  color: #6f6f78;
+  margin-left: 6px;
+  font-weight: normal;
+}
+
+.addPart {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.tagChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background-color: #2a2a30;
+  color: #b9b9c0;
+  border-radius: 10px;
+  padding: 2px 8px;
+  font-size: 11px;
+  margin-right: 4px;
+  margin-bottom: 4px;
+}
+
+.tagRemove {
+  color: #6f6f78;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0 2px;
+  background: none;
+  border: none;
+}
+
+.tagRemove:hover {
+  color: #c16060;
+}
+
+.tagList {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.derivedGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.derivedRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 2px 0;
+  border-bottom: 1px dashed #2a2a2f;
+}
+
+.derivedLabel {
+  color: #8a8a92;
+}
+
+.derivedValue {
+  color: #e6e6e6;
+  font-variant-numeric: tabular-nums;
+}
+
+.derivedValueGood {
+  color: #8ac88a;
+}
+
+.derivedValueWarn {
+  color: #d4b46b;
+}
+
+.derivedValueBad {
+  color: #c16060;
+}
+
+.derivedGroupTitle {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b9eb3;
+  margin: 4px 0 2px 0;
+}
+
+.weaponBlock {
+  border-left: 2px solid #c9a55c;
+  padding-left: 8px;
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+
+.weaponName {
+  font-size: 12px;
+  font-weight: 600;
+  color: #c9a55c;
+}
+
+.weaponType {
+  font-size: 10px;
+  color: #6f6f78;
+  margin-left: 4px;
+  font-weight: normal;
+}
+
+.validationOk {
+  color: #8ac88a;
+  font-size: 12px;
+}
+
+.validationError {
+  color: #c16060;
+  font-size: 12px;
+}
+
+.validationList {
+  margin: 4px 0 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.validationItem {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 6px;
+  font-size: 11px;
+  padding: 2px 0;
+  border-bottom: 1px dashed #2a2a2f;
+}
+
+.validationPath {
+  color: #d4b46b;
+  font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+}
+
+.validationMessage {
+  color: #e09090;
+}
+
+.empty {
+  font-style: italic;
+  color: #5a5a64;
+  padding: 6px 0;
+  font-size: 12px;
+}
+
+.archetypeBtn {
+  background: #1e2535;
+  color: #c9a55c;
+  border: 1px solid #3a4150;
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.archetypeBtn:hover {
+  background: #252d3f;
+  border-color: #c9a55c;
+}

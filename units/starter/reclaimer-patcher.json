@@ -1,0 +1,69 @@
+{
+  "kind": "unit",
+  "id": "reclaimer-patcher",
+  "physics_version": "1.0",
+  "name": "Patcher",
+  "faction": "reclaimer",
+  "description": "The Reclaimer's first-line salvage walker. Designed to recover material from Ruins while defending itself against light scavenger threats. Built to be cheap, durable, and easily repaired in the field.",
+  "designer": "STARTER_KIT",
+  "chassis": {
+    "chassis_class": "ground_tracked",
+    "mass_kg": 18000,
+    "engine_kW": 450,
+    "drivetrain_efficiency": 0.7,
+    "energy_source": "fuel_cell",
+    "fuel_capacity_MJ": 600,
+    "fuel_consumption_rate_MJs": 4.5,
+    "armor_thickness_mm": 60,
+    "armor_material": "salvaged_steel",
+    "hardpoint_count": 3,
+    "compatibility_tags": ["tracked", "all_weather"],
+    "thermal_capacity_MJ": 120
+  },
+  "parts": [
+    {
+      "id": "light-autocannon",
+      "category": "weapon",
+      "name": "Light Autocannon",
+      "mass_kg": 280,
+      "power_draw_kW": 5,
+      "weapon_type": "kinetic",
+      "propellant_energy_MJ": 0.4,
+      "projectile_mass_kg": 0.15,
+      "barrel_thermal_capacity_MJ": 25,
+      "per_shot_heat_MJ": 1.2,
+      "cooling_rate_MJs": 2.5,
+      "drag_coefficient": 0.3,
+      "elevation_range_deg": [-10, 30]
+    },
+    {
+      "id": "salvage-arm",
+      "category": "utility",
+      "name": "Salvage Manipulator Arm",
+      "mass_kg": 420,
+      "power_draw_kW": 25,
+      "utility_function": "constructor",
+      "utility_effect_radius_m": 8,
+      "utility_effect_rate": 1.0
+    },
+    {
+      "id": "basic-radar",
+      "category": "sensor",
+      "name": "Mast Radar",
+      "mass_kg": 90,
+      "power_draw_kW": 8,
+      "sensor_modality": "radar",
+      "sensor_range_m": 1200,
+      "sensor_sensitivity": 0.7,
+      "sensor_active": true
+    }
+  ],
+  "costs": {
+    "scrap": 120,
+    "alloy": 25,
+    "fuel": 30,
+    "power": 4
+  },
+  "build_time_seconds": 60,
+  "tags": ["starter", "tier_1", "utility", "salvage"]
+}

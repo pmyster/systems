@@ -1,0 +1,73 @@
+{
+  "kind": "unit",
+  "id": "building_aa_v1",
+  "physics_version": "1.0",
+  "name": "Anti-Air Tower",
+  "faction": "neutral",
+  "description": "Phase 2 Stage 1 — AA tower. AAFiringArc gates target acquisition to elevated targets (pitchMinRad ~20°). Stage 1 has no flying units, so this acquires nothing and idles — that is correct. Stage 1+ swaps the elevation gate for a hasComponent(Flying) check when aircraft land.",
+  "designer": "phase2-stage1",
+  "chassis": {
+    "chassis_class": "building_aa",
+    "mass_kg": 9000,
+    "length_m": 6.0,
+    "hardpoint_units_version": "world_m",
+    "engine_kW": 0,
+    "drivetrain_efficiency": 0,
+    "energy_source": "grid_tethered",
+    "battery_capacity_MJ": 250,
+    "battery_recharge_rate_MJs": 2,
+    "armor_thickness_mm": 120,
+    "armor_material": "alloy_composite",
+    "hardpoint_count": 1,
+    "compatibility_tags": [],
+    "thermal_capacity_MJ": 150
+  },
+  "parts": [
+    {
+      "id": "aa_flak",
+      "name": "AA Flak Gun",
+      "mass_kg": 60,
+      "power_draw_kW": 8,
+      "category": "weapon",
+      "weapon_type": "kinetic",
+      "propellant_energy_MJ": 0.8,
+      "projectile_mass_kg": 0.5,
+      "projectile_id": "part_2_projectile",
+      "barrel_thermal_capacity_MJ": 100,
+      "per_shot_heat_MJ": 2,
+      "cooling_rate_MJs": 5,
+      "drag_coefficient": 0.25,
+      "elevation_range_deg": [15, 85],
+      "fire_rate_ms": 400,
+      "burst_count": 4,
+      "burst_delay_ms": 150,
+      "cooldown_ms": 1200
+    }
+  ],
+  "mesh_asset": {
+    "kind": "procedural_building",
+    "building_chassis": "building_aa"
+  },
+  "hardpoints": [
+    {
+      "id": "aa_hp",
+      "parent_rig_id": null,
+      "local_position": [0, 4.5, 0.7],
+      "local_quaternion": [0, 0, 0, 1],
+      "weapon_part_id": "aa_flak"
+    }
+  ],
+  "vulnerability": {
+    "armor_zones": {
+      "front": { "thickness_mm": 120, "material": "composite" },
+      "side":  { "thickness_mm": 120, "material": "composite" },
+      "rear":  { "thickness_mm": 120, "material": "composite" },
+      "top":   { "thickness_mm": 120, "material": "composite" }
+    },
+    "electronics": [],
+    "crew": { "count": 0, "exposure": "sealed" },
+    "thermal_dissipation_kws": 18,
+    "mobility_redundancy": 1.0,
+    "structural_integrity_mj": 15
+  }
+}

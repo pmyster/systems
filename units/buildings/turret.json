@@ -1,0 +1,71 @@
+{
+  "kind": "unit",
+  "id": "building_turret_v1",
+  "physics_version": "1.0",
+  "name": "Defensive Turret",
+  "faction": "neutral",
+  "description": "Phase 2 Stage 1 — auto-firing defensive turret. Long range, thick armor, single hardpoint with the mk01 kinetic weapon. Uses procedural placeholder geometry; Hunyuan'd mesh swap drops in at Stage 4.",
+  "designer": "phase2-stage1",
+  "chassis": {
+    "chassis_class": "building_turret",
+    "mass_kg": 12000,
+    "length_m": 6.0,
+    "hardpoint_units_version": "world_m",
+    "engine_kW": 0,
+    "drivetrain_efficiency": 0,
+    "energy_source": "grid_tethered",
+    "battery_capacity_MJ": 300,
+    "battery_recharge_rate_MJs": 2,
+    "armor_thickness_mm": 200,
+    "armor_material": "alloy_composite",
+    "hardpoint_count": 1,
+    "compatibility_tags": [],
+    "thermal_capacity_MJ": 200
+  },
+  "parts": [
+    {
+      "id": "turret_cannon",
+      "name": "Defensive Cannon",
+      "mass_kg": 80,
+      "power_draw_kW": 5,
+      "category": "weapon",
+      "weapon_type": "kinetic",
+      "propellant_energy_MJ": 1.2,
+      "projectile_mass_kg": 2,
+      "projectile_id": "part_2_projectile",
+      "barrel_thermal_capacity_MJ": 80,
+      "per_shot_heat_MJ": 4,
+      "cooling_rate_MJs": 3,
+      "drag_coefficient": 0.3,
+      "elevation_range_deg": [-10, 30],
+      "fire_rate_ms": 1200,
+      "cooldown_ms": 800
+    }
+  ],
+  "mesh_asset": {
+    "kind": "procedural_building",
+    "building_chassis": "building_turret"
+  },
+  "hardpoints": [
+    {
+      "id": "main_hp",
+      "parent_rig_id": null,
+      "local_position": [0, 3.0, 1.5],
+      "local_quaternion": [0, 0, 0, 1],
+      "weapon_part_id": "turret_cannon"
+    }
+  ],
+  "vulnerability": {
+    "armor_zones": {
+      "front": { "thickness_mm": 200, "material": "composite" },
+      "side":  { "thickness_mm": 200, "material": "composite" },
+      "rear":  { "thickness_mm": 200, "material": "composite" },
+      "top":   { "thickness_mm": 200, "material": "composite" }
+    },
+    "electronics": [],
+    "crew": { "count": 0, "exposure": "sealed" },
+    "thermal_dissipation_kws": 20,
+    "mobility_redundancy": 1.0,
+    "structural_integrity_mj": 25
+  }
+}

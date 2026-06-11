@@ -1,0 +1,74 @@
+{
+  "kind": "unit",
+  "id": "cinder-pyre",
+  "physics_version": "1.0",
+  "name": "Pyre",
+  "faction": "cinder_crown",
+  "description": "Cinder Crown's signature fire-bomber. Fast, lightly armored, equipped with a thermal-incendiary launcher. Designed to deny terrain through fire rather than hold it. Burns out fast — meant to be expendable.",
+  "designer": "STARTER_KIT",
+  "chassis": {
+    "chassis_class": "ground_legged",
+    "mass_kg": 9500,
+    "engine_kW": 380,
+    "drivetrain_efficiency": 0.55,
+    "energy_source": "fuel_cell",
+    "fuel_capacity_MJ": 280,
+    "fuel_consumption_rate_MJs": 6.5,
+    "armor_thickness_mm": 35,
+    "armor_material": "alloy_composite",
+    "hardpoint_count": 3,
+    "compatibility_tags": ["legged", "thermal_extreme", "all_weather"],
+    "thermal_capacity_MJ": 60
+  },
+  "parts": [
+    {
+      "id": "incendiary-launcher",
+      "category": "weapon",
+      "name": "Incendiary Launcher",
+      "mass_kg": 380,
+      "power_draw_kW": 10,
+      "weapon_type": "thermal",
+      "propellant_energy_MJ": 3.5,
+      "projectile_mass_kg": 2.2,
+      "barrel_thermal_capacity_MJ": 90,
+      "per_shot_heat_MJ": 8,
+      "cooling_rate_MJs": 4,
+      "drag_coefficient": 0.45,
+      "elevation_range_deg": [10, 65]
+    },
+    {
+      "id": "secondary-flamer",
+      "category": "weapon",
+      "name": "Short-Range Flamer",
+      "mass_kg": 140,
+      "power_draw_kW": 4,
+      "weapon_type": "thermal",
+      "propellant_energy_MJ": 0.2,
+      "projectile_mass_kg": 0.05,
+      "barrel_thermal_capacity_MJ": 20,
+      "per_shot_heat_MJ": 0.4,
+      "cooling_rate_MJs": 1.2,
+      "drag_coefficient": 0.6,
+      "elevation_range_deg": [-15, 30]
+    },
+    {
+      "id": "fire-jammer",
+      "category": "utility",
+      "name": "Heat-Signature Jammer",
+      "mass_kg": 65,
+      "power_draw_kW": 18,
+      "utility_function": "jammer",
+      "utility_effect_radius_m": 200,
+      "utility_effect_rate": 0.8
+    }
+  ],
+  "costs": {
+    "scrap": 95,
+    "alloy": 30,
+    "fuel": 55,
+    "power": 14
+  },
+  "build_time_seconds": 75,
+  "tech_requirements": ["cinder_incendiary_doctrine"],
+  "tags": ["starter", "tier_1", "skirmisher", "incendiary", "area_denial"]
+}

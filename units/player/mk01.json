@@ -1,0 +1,757 @@
+{
+  "kind": "unit",
+  "id": "mk01",
+  "physics_version": "1.0",
+  "name": "\"Mk1 Gun Towe",
+  "faction": "reclaimer",
+  "description": "Defensive Rail Gun Laser Turret",
+  "chassis": {
+    "chassis_class": "static_structure",
+    "mass_kg": 8000,
+    "engine_kW": 0,
+    "drivetrain_efficiency": 0,
+    "energy_source": "grid_tethered",
+    "battery_capacity_MJ": 200,
+    "battery_recharge_rate_MJs": 1,
+    "armor_thickness_mm": 80,
+    "armor_material": "alloy_composite",
+    "hardpoint_count": 2,
+    "compatibility_tags": [],
+    "thermal_capacity_MJ": 120,
+    "voxel_data": {
+      "format": "sparse_grid_v1",
+      "grid_size": [
+        16,
+        16,
+        16
+      ],
+      "cell_size_m": 0.5,
+      "bounding_box": {
+        "min": [
+          4,
+          5,
+          1
+        ],
+        "max": [
+          11,
+          9,
+          8
+        ]
+      },
+      "derived_mass_kg": 31050,
+      "voxel_count": 92,
+      "voxels": [
+        [
+          4,
+          5,
+          5,
+          "hull"
+        ],
+        [
+          4,
+          5,
+          6,
+          "hull"
+        ],
+        [
+          4,
+          5,
+          7,
+          "hull"
+        ],
+        [
+          4,
+          6,
+          6,
+          "hull"
+        ],
+        [
+          5,
+          5,
+          3,
+          "hull"
+        ],
+        [
+          5,
+          5,
+          4,
+          "hull"
+        ],
+        [
+          5,
+          5,
+          5,
+          "hull"
+        ],
+        [
+          5,
+          5,
+          6,
+          "hull"
+        ],
+        [
+          5,
+          5,
+          7,
+          "hull"
+        ],
+        [
+          5,
+          6,
+          3,
+          "hull"
+        ],
+        [
+          5,
+          6,
+          5,
+          "hull"
+        ],
+        [
+          5,
+          6,
+          6,
+          "hull"
+        ],
+        [
+          5,
+          6,
+          7,
+          "hull"
+        ],
+        [
+          6,
+          5,
+          2,
+          "hull"
+        ],
+        [
+          6,
+          5,
+          3,
+          "hull"
+        ],
+        [
+          6,
+          5,
+          4,
+          "hull"
+        ],
+        [
+          6,
+          5,
+          5,
+          "hull"
+        ],
+        [
+          6,
+          5,
+          6,
+          "hull"
+        ],
+        [
+          6,
+          5,
+          7,
+          "hull"
+        ],
+        [
+          6,
+          6,
+          2,
+          "hull"
+        ],
+        [
+          6,
+          6,
+          3,
+          "hull"
+        ],
+        [
+          6,
+          6,
+          4,
+          "hull"
+        ],
+        [
+          6,
+          6,
+          5,
+          "hull"
+        ],
+        [
+          6,
+          6,
+          6,
+          "hull"
+        ],
+        [
+          6,
+          6,
+          7,
+          "hull"
+        ],
+        [
+          6,
+          9,
+          5,
+          "hull"
+        ],
+        [
+          7,
+          5,
+          1,
+          "hull"
+        ],
+        [
+          7,
+          5,
+          2,
+          "hull"
+        ],
+        [
+          7,
+          5,
+          3,
+          "hull"
+        ],
+        [
+          7,
+          5,
+          4,
+          "hull"
+        ],
+        [
+          7,
+          5,
+          5,
+          "hull"
+        ],
+        [
+          7,
+          5,
+          6,
+          "hull"
+        ],
+        [
+          7,
+          5,
+          7,
+          "hull"
+        ],
+        [
+          7,
+          5,
+          8,
+          "hull"
+        ],
+        [
+          7,
+          6,
+          1,
+          "hull"
+        ],
+        [
+          7,
+          6,
+          2,
+          "hull"
+        ],
+        [
+          7,
+          6,
+          3,
+          "hull"
+        ],
+        [
+          7,
+          6,
+          4,
+          "hull"
+        ],
+        [
+          7,
+          6,
+          5,
+          "hull"
+        ],
+        [
+          7,
+          6,
+          6,
+          "hull"
+        ],
+        [
+          7,
+          6,
+          7,
+          "hull"
+        ],
+        [
+          7,
+          6,
+          8,
+          "hull"
+        ],
+        [
+          7,
+          7,
+          8,
+          "hull"
+        ],
+        [
+          7,
+          9,
+          2,
+          "hull"
+        ],
+        [
+          7,
+          9,
+          4,
+          "hull"
+        ],
+        [
+          7,
+          9,
+          5,
+          "hull"
+        ],
+        [
+          8,
+          5,
+          1,
+          "hull"
+        ],
+        [
+          8,
+          5,
+          2,
+          "hull"
+        ],
+        [
+          8,
+          5,
+          3,
+          "hull"
+        ],
+        [
+          8,
+          5,
+          4,
+          "hull"
+        ],
+        [
+          8,
+          5,
+          5,
+          "hull"
+        ],
+        [
+          8,
+          5,
+          6,
+          "hull"
+        ],
+        [
+          8,
+          5,
+          7,
+          "hull"
+        ],
+        [
+          8,
+          5,
+          8,
+          "hull"
+        ],
+        [
+          8,
+          6,
+          1,
+          "hull"
+        ],
+        [
+          8,
+          6,
+          2,
+          "hull"
+        ],
+        [
+          8,
+          6,
+          3,
+          "hull"
+        ],
+        [
+          8,
+          6,
+          4,
+          "hull"
+        ],
+        [
+          8,
+          6,
+          5,
+          "hull"
+        ],
+        [
+          8,
+          6,
+          6,
+          "hull"
+        ],
+        [
+          8,
+          6,
+          7,
+          "hull"
+        ],
+        [
+          8,
+          6,
+          8,
+          "hull"
+        ],
+        [
+          8,
+          7,
+          8,
+          "hull"
+        ],
+        [
+          8,
+          9,
+          2,
+          "hull"
+        ],
+        [
+          8,
+          9,
+          4,
+          "hull"
+        ],
+        [
+          8,
+          9,
+          5,
+          "hull"
+        ],
+        [
+          9,
+          5,
+          2,
+          "hull"
+        ],
+        [
+          9,
+          5,
+          3,
+          "hull"
+        ],
+        [
+          9,
+          5,
+          4,
+          "hull"
+        ],
+        [
+          9,
+          5,
+          5,
+          "hull"
+        ],
+        [
+          9,
+          5,
+          6,
+          "hull"
+        ],
+        [
+          9,
+          5,
+          7,
+          "hull"
+        ],
+        [
+          9,
+          6,
+          2,
+          "hull"
+        ],
+        [
+          9,
+          6,
+          3,
+          "hull"
+        ],
+        [
+          9,
+          6,
+          4,
+          "hull"
+        ],
+        [
+          9,
+          6,
+          5,
+          "hull"
+        ],
+        [
+          9,
+          6,
+          6,
+          "hull"
+        ],
+        [
+          9,
+          6,
+          7,
+          "hull"
+        ],
+        [
+          9,
+          9,
+          5,
+          "hull"
+        ],
+        [
+          10,
+          5,
+          3,
+          "hull"
+        ],
+        [
+          10,
+          5,
+          4,
+          "hull"
+        ],
+        [
+          10,
+          5,
+          5,
+          "hull"
+        ],
+        [
+          10,
+          5,
+          6,
+          "hull"
+        ],
+        [
+          10,
+          5,
+          7,
+          "hull"
+        ],
+        [
+          10,
+          6,
+          3,
+          "hull"
+        ],
+        [
+          10,
+          6,
+          5,
+          "hull"
+        ],
+        [
+          10,
+          6,
+          6,
+          "hull"
+        ],
+        [
+          10,
+          6,
+          7,
+          "hull"
+        ],
+        [
+          11,
+          5,
+          5,
+          "hull"
+        ],
+        [
+          11,
+          5,
+          6,
+          "hull"
+        ],
+        [
+          11,
+          5,
+          7,
+          "hull"
+        ],
+        [
+          11,
+          6,
+          6,
+          "hull"
+        ]
+      ],
+      "materials": {
+        "armor": {
+          "density_kg_m3": 7800,
+          "color_class": "team-primary",
+          "color_hex": "#8a8a8a",
+          "cell_size_m": 0.5
+        },
+        "hull": {
+          "density_kg_m3": 2700,
+          "color_class": "team-secondary",
+          "color_hex": "#b5b5b5",
+          "cell_size_m": 0.5
+        },
+        "accent": {
+          "density_kg_m3": 4500,
+          "color_class": "team-accent",
+          "color_hex": "#c9a55c",
+          "cell_size_m": 0.5
+        },
+        "glass": {
+          "density_kg_m3": 2500,
+          "color_class": "fixed",
+          "color_hex": "#6bb3c9",
+          "cell_size_m": 0.5
+        },
+        "engine": {
+          "density_kg_m3": 4000,
+          "color_class": "fixed",
+          "color_hex": "#e07050",
+          "cell_size_m": 0.5
+        },
+        "hardpoint": {
+          "density_kg_m3": 500,
+          "color_class": "fixed",
+          "color_hex": "#c9a55c",
+          "cell_size_m": 0.5
+        }
+      },
+      "hardpoints": []
+    },
+    "structure_type": "tower",
+    "hardpoints": [
+      {
+        "id": "main_gun",
+        "type": "heavy_gun"
+      },
+      {
+        "id": "aux_1",
+        "type": "aux"
+      }
+    ],
+    "hardpoint_units_version": "world_m"
+  },
+  "parts": [
+    {
+      "id": "part_1",
+      "name": "mk01",
+      "mass_kg": 100,
+      "power_draw_kW": 5,
+      "category": "weapon",
+      "weapon_type": "beam",
+      "propellant_energy_MJ": 1,
+      "projectile_mass_kg": 0.5,
+      "projectile_id": "part_1_projectile",
+      "barrel_thermal_capacity_MJ": 50,
+      "per_shot_heat_MJ": 3,
+      "cooling_rate_MJs": 2,
+      "drag_coefficient": 0.3,
+      "elevation_range_deg": [
+        -10,
+        30
+      ]
+    }
+  ],
+  "rig": [
+    {
+      "id": "rig_2",
+      "target_node": "rail004_Bottom_0",
+      "motion": "reactive",
+      "parent_rig": "rig_1"
+    },
+    {
+      "id": "rig_3",
+      "target_node": "rail002_Body_0",
+      "motion": "reactive",
+      "pitch": {
+        "min_deg": 45,
+        "max_deg": 45,
+        "rate_dps": 20
+      },
+      "parent_rig": "rig_4"
+    },
+    {
+      "id": "rig_4",
+      "target_node": "rail005_Body_0",
+      "motion": "reactive",
+      "parent_rig": "rig_2"
+    },
+    {
+      "id": "rig_5",
+      "target_node": "rail001_Body_0",
+      "motion": "reactive",
+      "parent_rig": "rig_3"
+    },
+    {
+      "id": "rig_6",
+      "target_node": "rail001_Rail_0",
+      "motion": "reactive",
+      "parent_rig": "rig_5"
+    }
+  ],
+  "mesh_asset": {
+    "kind": "file",
+    "path": "C:\\dev\\Strategy Game\\units\\meshes\\railgun_turret.glb"
+  },
+  "hardpoints": [
+    {
+      "id": "hp_1",
+      "parent_rig_id": null,
+      "local_position": [
+        0,
+        0.012290949496418489,
+        0.009281706785898116
+      ],
+      "local_quaternion": [
+        0,
+        0,
+        0,
+        1
+      ]
+    }
+  ],
+  "vulnerability": {
+    "armor_zones": {
+      "front": {
+        "thickness_mm": 80,
+        "material": "steel"
+      },
+      "side": {
+        "thickness_mm": 80,
+        "material": "steel"
+      },
+      "rear": {
+        "thickness_mm": 80,
+        "material": "steel"
+      },
+      "top": {
+        "thickness_mm": 80,
+        "material": "steel"
+      }
+    },
+    "electronics": [],
+    "crew": {
+      "count": 2,
+      "exposure": "sealed"
+    },
+    "thermal_dissipation_kws": 12,
+    "mobility_redundancy": 0.5,
+    "structural_integrity_mj": 8
+  }
+}

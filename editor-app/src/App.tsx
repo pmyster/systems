@@ -1,0 +1,383 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+
+import "./App.css";
+
+import { AttributeForm } from "./components/AttributeForm";
+import { BattlefieldPreview } from "./components/BattlefieldPreview";
+import { MapEditor } from "./components/MapEditor/MapEditor";
+import { MenuBar } from "./components/MenuBar";
+import { MeshWorkspace } from "./components/MeshWorkspace";
+import { MeshComposer } from "./components/UnitEditor/MeshComposer/MeshComposer";
+import { SettingsModal } from "./components/SettingsModal";
+import { GameRuntime } from "./runtime/GameRuntime";
+import { startAutosave, getAutosavePath, type AutosaveHandle } from "./file-ops";
+import {
+  UnitStateProvider,
+  useUnitState,
+} from "./state";
+import { useAppMode, type AppMode } from "./state/appMode";
+import { MeshAssetProvider } from "./state/mesh-assets";
+import {
+  selectIsDirty,
+  selectUnit,
+  selectVoxels,
+  selectWindowTitle,
+} from "./state/selectors";
+import type { UnitSchematic, VoxelMap } from "./types";
+
+/**
+ * Child of Light Editor - root shell.
+ *
+ * Three-pane layout per docs/editor-app-tauri-brief.md:
+ *   - Left: Mesh workspace (template gallery + Three.js viewer + voxelizer)
+ *   - Center: Attribute form (physical inputs only, per DESIGN.md Principle 2)
+ *   - Right: Battlefield preview (top-down Three.js, TA-style camera)
+ *
+ * All three panes consume the shared UnitState via the React Context
+ * provider defined in src/state. App owns the side-effects: window
+ * title, autosave timer, before-unload guard, and autosave recovery banner.
+ * Pure rendering and state mutation live elsewhere.
+ */
+
+/** Shape of the JSON envelope written by the autosave job. */
+interface AutosaveEnvelope {
+  readonly _autosave: true;
+  readonly savedAt: string;
+  readonly sourcePath: string | null;
+  readonly sessionId: string;
+  readonly unit: UnitSchematic;
+}
+
+function isAutosaveEnvelope(v: unknown): v is AutosaveEnvelope {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    (v as Record<string, unknown>)["_autosave"] === true &&
+    typeof (v as Record<string, unknown>)["savedAt"] === "string" &&
+    typeof (v as Record<string, unknown>)["unit"] === "object"
+  );
+}
+
+/**
+ * Mode tab strip — switches the shell between the existing Unit editor
+ * and the new Map editor. Both panes always sit under the Unit + Mesh
+ * providers (they're cheap when unread) and the unit-side autosave keeps
+ * running in the background regardless of which mode is showing.
+ */
+function ModeTabs({ onOpenSettings }: { onOpenSettings: () => void }) {
+  const mode = useAppMode((s) => s.mode);
+  const setMode = useAppMode((s) => s.setMode);
+
+  const tabs: ReadonlyArray<{ id: AppMode; label: string }> = [
+    { id: "unit", label: "Unit Editor" },
+    { id: "map", label: "Map Editor" },
+    { id: "play", label: "Play" },
+  ];
+
+  return (
+    <div className="mode-tabs" role="tablist" aria-label="Editor mode">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          aria-selected={mode === t.id}
+          className={"mode-tab" + (mode === t.id ? " is-active" : "")}
+          onClick={() => setMode(t.id)}
+        >
+          {t.label}
+        </button>
+      ))}
+      <button
+        type="button"
+        className="settings-gear"
+        onClick={onOpenSettings}
+        title="Settings"
+        aria-label="Open settings"
+      >
+        ⚙
+      </button>
+    </div>
+  );
+}
+
+/**
+ * UnitSubTabs — sub-tab strip inside the Unit Editor mode.
+ *
+ * Switches the unit-mode pane between the existing 3-pane "Layout" view
+ * (Mesh Workspace + Attributes + Battlefield Preview) and the new "Mesh
+ * Composer" view for hand-positioning Hunyuan3D sub-mesh fragments.
+ *
+ * Kept as a separate component (vs. inlining the buttons) so the sub-tab
+ * choice survives a re-render of `AppShell` without ping-ponging.
+ */
+function UnitSubTabs({
+  activeTab,
+  onChange,
+}: {
+  activeTab: "layout" | "composer";
+  onChange: (next: "layout" | "composer") => void;
+}) {
+  const items: ReadonlyArray<{ id: "layout" | "composer"; label: string }> = [
+    { id: "layout", label: "Layout" },
+    { id: "composer", label: "Mesh Composer" },
+  ];
+  return (
+    <div
+      className="unit-subtabs"
+      role="tablist"
+      aria-label="Unit editor sub-tabs"
+      style={{
+        display: "flex",
+        gap: 4,
+        padding: "4px 8px",
+        background: "#0d1117",
+        borderBottom: "1px solid #1f242c",
+        flexShrink: 0,
+      }}
+    >
+      {items.map((t) => {
+        const isActive = activeTab === t.id;
+        return (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            onClick={() => onChange(t.id)}
+            style={{
+              background: isActive ? "#1d2b44" : "transparent",
+              color: isActive ? "#f0f3f8" : "#8a93a3",
+              border: "1px solid " + (isActive ? "#3a4b66" : "#1f242c"),
+              borderRadius: 4,
+              padding: "4px 10px",
+              fontSize: 11,
+              cursor: "pointer",
+              fontFamily: "system-ui, sans-serif",
+              letterSpacing: "0.02em",
+            }}
+          >
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function AppShell() {
+  const { state, dispatch } = useUnitState();
+  const mode = useAppMode((s) => s.mode);
+
+  // Live selectors - recomputed each render, free.
+  const unit: UnitSchematic = selectUnit(state);
+  const voxels: VoxelMap = selectVoxels(state);
+  const isDirty = selectIsDirty(state);
+  const windowTitle = selectWindowTitle(state);
+
+  // Status notice surfaced by MenuBar (save errors, etc.).
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // Settings modal visibility.
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Unit-mode sub-tab: the three-pane layout vs. the Mesh Composer panel.
+  // Lives in App-level state (not a store) — it's purely a UI shell choice
+  // and disappears with the unit-mode pane.
+  const [unitSubTab, setUnitSubTab] = useState<"layout" | "composer">("layout");
+
+  // Autosave recovery — non-null while the banner is visible.
+  const [recoverData, setRecoverData] = useState<AutosaveEnvelope | null>(null);
+
+  // --- Pane callbacks: thin wrappers around dispatch ---------------------
+
+  const handleVoxelsChange = useCallback(
+    (next: VoxelMap) => {
+      dispatch({ type: "SetVoxels", voxels: next });
+    },
+    [dispatch],
+  );
+
+  const handleUnitChange = useCallback(
+    (next: UnitSchematic) => {
+      dispatch({ type: "SetUnit", unit: next });
+    },
+    [dispatch],
+  );
+
+  // --- Window title ------------------------------------------------------
+  useEffect(() => {
+    document.title = windowTitle;
+  }, [windowTitle]);
+
+  // --- Before-unload guard ----------------------------------------------
+  useEffect(() => {
+    if (!isDirty) return undefined;
+    const onBeforeUnload = (ev: BeforeUnloadEvent): void => {
+      ev.preventDefault();
+      ev.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  }, [isDirty]);
+
+  // --- Autosave ----------------------------------------------------------
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  useEffect(() => {
+    const handle: AutosaveHandle = startAutosave(() => stateRef.current);
+    return () => {
+      handle.stop();
+    };
+  }, []);
+
+  // Store this session's autosave path in localStorage so the next
+  // session can offer recovery without needing its own sessionId.
+  useEffect(() => {
+    void getAutosavePath(state.sessionId).then((p) => {
+      localStorage.setItem("col_last_autosave", p);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally once — sessionId never changes mid-session
+
+  // --- Autosave recovery banner (runs once on mount) --------------------
+  useEffect(() => {
+    const savedPath = localStorage.getItem("col_last_autosave");
+    if (!savedPath) return;
+    invoke<string>("read_unit_file", { path: savedPath })
+      .then((raw) => {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          return;
+        }
+        if (isAutosaveEnvelope(parsed)) {
+          setRecoverData(parsed);
+        }
+      })
+      .catch(() => {
+        // No autosave file found — nothing to offer.
+      });
+  }, []);
+
+  // --- Recovery banner handlers -----------------------------------------
+  const handleRestore = useCallback(() => {
+    if (!recoverData) return;
+    dispatch({ type: "SetUnit", unit: recoverData.unit });
+    setRecoverData(null);
+  }, [dispatch, recoverData]);
+
+  const handleDismissRecover = useCallback(() => {
+    setRecoverData(null);
+  }, []);
+
+  const overflowHidden: React.CSSProperties = { overflow: "hidden" };
+
+  return (
+    <div className="app-shell">
+      <ModeTabs onOpenSettings={() => setShowSettings(true)} />
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      <header className="app-header">
+        <MenuBar notice={notice} setNotice={setNotice} />
+        {recoverData !== null && (
+          <div className="autosave-banner" role="alert">
+            <span>
+              {"Autosave found from "}
+              {new Date(recoverData.savedAt).toLocaleString()}
+              {". Restore?"}
+            </span>
+            <button type="button" onClick={handleRestore}>
+              Restore
+            </button>
+            <button type="button" onClick={handleDismissRecover}>
+              Dismiss
+            </button>
+          </div>
+        )}
+      </header>
+      {mode === "unit" && (
+        <>
+          <UnitSubTabs activeTab={unitSubTab} onChange={setUnitSubTab} />
+          {unitSubTab === "layout" && (
+            <main className="workspace">
+              <section className="pane pane-left" aria-label="Mesh workspace">
+                <div className="pane-header">Mesh Workspace</div>
+                <div className="pane-body" style={overflowHidden}>
+                  <MeshWorkspace
+                    voxels={voxels}
+                    onVoxelsUpdated={handleVoxelsChange}
+                    unit={unit}
+                    onUnitChange={handleUnitChange}
+                  />
+                </div>
+              </section>
+              <section className="pane pane-center" aria-label="Attribute form">
+                <div className="pane-header">Attributes</div>
+                <div className="pane-body">
+                  <AttributeForm unit={unit} onUnitChange={handleUnitChange} />
+                </div>
+              </section>
+              <section
+                className="pane pane-right"
+                aria-label="Battlefield preview"
+              >
+                <div className="pane-header">Battlefield Preview</div>
+                <div className="pane-body">
+                  <BattlefieldPreview unit={unit} />
+                </div>
+              </section>
+            </main>
+          )}
+          {unitSubTab === "composer" && (
+            <main
+              className="workspace workspace-composer"
+              style={{ display: "block" }}
+            >
+              <MeshComposer unit={unit} />
+            </main>
+          )}
+        </>
+      )}
+      {mode === "map" && (
+        <main className="workspace workspace-map">
+          <MapEditor />
+        </main>
+      )}
+      {mode === "play" && (
+        <main className="workspace workspace-play">
+          <GameRuntime />
+        </main>
+      )}
+      <footer className="app-footer">
+        <span className="status">
+          {mode === "unit" &&
+            (state.file.path
+              ? "Path: " + state.file.path
+              : "Unsaved - File then Save to set a path") +
+              (isDirty ? " | unsaved changes" : "")}
+          {mode === "map" && "Map Editor (Day 1 scaffold)"}
+          {mode === "play" && "Play (Week 1A runtime foundation)"}
+        </span>
+      </footer>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <UnitStateProvider>
+      <MeshAssetProvider>
+        <AppShell />
+      </MeshAssetProvider>
+    </UnitStateProvider>
+  );
+}
+
+export default App;

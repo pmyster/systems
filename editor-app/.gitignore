@@ -1,0 +1,49 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# Tauri / Rust
+src-tauri/target/
+
+# Editor autosave files (per docs/editor-app-tauri-brief.md)
+*.autosave
+
+# User prefab drop folder — personal authoring assets, not shared via Git.
+# The folder itself is tracked via .gitkeep + README.md.
+public/prefabs/user/*.glb
+
+# Starter-pack-generated unit meshes. Large (~5-10 MB each pre-decimation,
+# ~1-3 MB post-decimation), regenerated from photos via `npm run starter-pack`
+# (or `--rehygiene-only` to refresh existing files). The matching .json
+# schematics ARE tracked — they're the source of truth.
+units/*/meshes/*.glb
+
+# Scoped tsc temp configs (sub-agents create these; Windows ACL on the mount
+# blocks Linux deletes, so we just ignore them).
+tsconfig.*.tmp.json
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
