@@ -1,0 +1,7 @@
+# Milestone 1 — kept deliberately minimal (small, clear, well-tested custom
+# over heavy frameworks; spec section 8).
+pandas
+numpy
+yfinance
+pytest
+requests

@@ -38,3 +38,16 @@ captures/
 
 # Keystore files
 *.jks
+
+# --- trading research (milestone 1) ---
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Immutable local data snapshots live OUTSIDE git (they are frozen local
+# data, recreated via `python -m data.refresh`). The one exception is the
+# small committed fixture snapshot so tests run from a fresh clone.
+data/snapshots/*
+!data/snapshots/fixture/
