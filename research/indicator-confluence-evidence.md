@@ -1,7 +1,7 @@
 # Research: Indicator & Confluence Evidence Review
 
 **Date:** 2026-07-21
-**Method:** 6 parallel research agents, one per factor family, instructed to weight peer-reviewed, data-snooping-corrected, out-of-sample evidence over practitioner content. Status: 5 of 6 complete (calendar/time-of-day agent pending re-run).
+**Method:** 6 parallel research agents, one per factor family, instructed to weight peer-reviewed, data-snooping-corrected, out-of-sample evidence over practitioner content. Status: **all 6 complete.**
 **Question:** Do MACD, RSI, volume, moving averages, crossovers, VIX, cross-index signals — alone or in confluence — carry real, retail-harvestable edge? Which conditions (day, time, volatility regime) matter?
 
 ---
@@ -19,10 +19,13 @@
 | Volume as a **conditioner** on momentum (prefer low-turnover winners) | OBV rules (no corrected US evidence) |
 | Index-ETF dip-buying signals: RSI(2), IBS — post-publication survivors, decaying | "High-volume breakout" reliability (no citable evidence) |
 | VIX backwardation / credit-spread trend as **binary stress flags** | VWAP mean-reversion as a retail signal |
-| | Daily Dow/S&P/Nasdaq/Russell lead-lag (HFT-arbitraged) |
-| | Asia/Europe overnight predicting US (causality runs US→world) |
-| | Intraday MA/MACD anything (7,846 rules, zero survivors on 5-min SPY) |
+| Triple-witching / quarter-end as a **de-risk (volatility) flag** | Daily Dow/S&P/Nasdaq/Russell lead-lag (HFT-arbitraged) |
+| Overnight *reversal* after selloffs (structural) | Asia/Europe overnight predicting US (causality runs US→world) |
+| Halloween / turn-of-month as a **mild seasonal tilt** (weak) | Intraday MA/MACD anything (7,846 rules, zero survivors on 5-min SPY) |
 | | Multi-oscillator confluence (MACD+RSI+volume AND-gates) |
+| | Pre-FOMC drift (gone post-2015); overnight *drift* (gone post-2021) |
+| | Monday effect / day-of-week; January effect (large caps) |
+| | Any calendar rule as standalone alpha (9,452 rules, zero survivors) |
 
 ---
 
@@ -64,6 +67,21 @@ Debunked: daily index lead-lag (Dirac delta at lag zero — HFT territory), over
 
 What professionals actually combine is **weakly correlated return sources at the portfolio level** (trend + value + carry, ρ ≈ 0), where Sharpe compounds by diversification — not correlated oscillators at the signal level.
 
+### 2.6 Calendar & time-of-day
+The benchmark to beat is Sullivan-Timmermann-White (2001): ~9,452 calendar rules tested against a data-snooping Reality Check, **none survive** as standalone timing rules. Everything below is therefore a weak *conditioner/filter*, sized small, never standalone alpha — and the strongest ones have a mechanism (dealer inventory, forced rebalancing, options gamma), which is the best defense against the STW critique.
+
+The dominant theme is **post-publication decay, rescued only conditionally**:
+- **Overnight drift** (the famous "the market makes all its money while closed"; Boyarchenko et al., NY Fed): historically ~3.7%/yr concentrated in a 2–3am ET futures window — but **≈ zero since 2021** (NY Fed's own "Disappearing Overnight Drift," July 2026) and never cost-survivable retail (the NightShares night-effect ETFs launched 2022, badly underperformed, liquidated 2023). Do **not** try to harvest it. What survives is the overnight **reversal after intraday selloffs**, amplified when VIX rises — structural, usable as context not as a standalone trade.
+- **Pre-FOMC drift** (Lucca-Moench: once ~49 bps in the 24h before FOMC, ~80% of the equity premium): **vanished after 2015** (Kurov et al.). Dead — textbook decay.
+- **Intraday last-30-min momentum** (Gao et al. 2018): significant in-sample 1993–2013, but **disappears out-of-sample post-2018** unless conditioned on high-vol/high-volume/macro days. Fragile; the same H10 candidate flagged elsewhere.
+- **10:00am–12:00pm ET** (your original window): the **lunchtime lull** — documented dead drift and low liquidity. The evidence says this is a *stand-aside* window, not a drift-harvesting one.
+- **Turn-of-month** (McConnell-Xu: once the strongest calendar effect, positive in 31 of 35 countries): **shrank to insignificance in US large caps since ~2015** ("arbitraged away"); a faint long tilt at best, stronger internationally.
+- **Halloween / "sell in May"** (Nov–Apr > May–Oct): best long-horizon pedigree of the seasonals (Zhang-Jacobsen, 323 years) but US-specific, post-cost, recent case is specification-sensitive. Mild seasonal tilt only.
+- **Triple-witching / quarter-end** (3rd Friday Mar/Jun/Sep/Dec): the most *mechanically reliable* survivor, but its robust feature is **elevated volatility and flow-dominance, not direction** — so it's a **de-risk / cut-size flag**, not a directional signal.
+- **Debunked:** Monday effect, Turnaround Tuesday, day-of-week (dead in 2015–2026 data); January effect (dead in large caps, weak micro-cap residual); Santa Claus rally (statistically real but tiny/noisy — folklore-adjacent tilt).
+
+Net: no calendar effect is tradable as alpha; the useful outputs are (a) a **de-risk flag** around witching/quarter-end, (b) confirmation that **10am–12pm is dead drift** (stand aside), and (c) the meta-lesson that these effects are **state-dependent** — flat unconditionally, sometimes alive in high-vol states — so every one must be re-tested on 2016–2026 data, net of costs, conditioned on VIX.
+
 **The multiple-testing math for our own planned search:** a 6-family × parameters × filters grid is nominally 10⁵–10⁶ trials, effectively ~500–5,000 independent ones after correlation clustering. On 10 years of daily data, **pure noise will hand that search a Sharpe ≈ 1.0–1.2 "discovery."** A backtest Sharpe of 1 from an uncontrolled sweep is evidence of nothing.
 
 ---
@@ -92,7 +110,7 @@ The architecture the evidence supports is **filters over signals**: a risk backb
 **Risk backbone (strongest evidence):**
 - H1. Conditional vol targeting: scale exposure toward target_vol/realized_vol only when trailing realized vol is in its top decile-quintile; cap leverage at 1.
 - H2. 10-month SMA filter on the index sleeve, monthly evaluation — expect drawdown reduction, not outperformance.
-- H3. Stress flags gating gross exposure: VIX backwardation; HY OAS rising trend.
+- H3. Stress flags gating gross exposure: VIX backwardation; HY OAS rising trend; **triple-witching week / quarter-end as a de-risk (cut-size) flag**.
 
 **Strategy sleeves (test in this order):**
 - H4. VIX-conditioned index dip-buying: RSI(2)<10 or IBS<0.2 on SPY, only when VIX > rolling 80th percentile; exit first up-close/3–5 days; no stops, small size.
@@ -105,10 +123,10 @@ The architecture the evidence supports is **filters over signals**: a risk backb
 - H9. High-volume return premium, long side, liquid small caps (assume 50% haircut; cost-model brutally).
 - H10. Market intraday momentum on SPY (first 30 min → last 30 min, high-volume days only) — the sole intraday candidate with peer-reviewed support; verify post-2018 persistence before caring.
 
-**Explicitly out of scope:** anything from the debunked column; anything intraday other than H10; short-vol; single-stock short-term reversal; overnight-gap games.
+**Explicitly out of scope:** anything from the debunked column; anything intraday other than H10; short-vol; single-stock short-term reversal; overnight-gap/overnight-drift harvesting (dead post-2021, cost-negative); pre-FOMC drift (dead post-2015); day-of-week and January-effect timing. If H10 (or any intraday work) ever runs, avoid the **10am–12pm ET dead-drift window** — stand aside there rather than demand a signal.
 
 ---
 
-## 5. Pending
+## 5. Status
 
-- Calendar/time-of-day agent (overnight vs intraday drift, day-of-week, turn-of-month, OpEx, FOMC drift, seasonality) — to be re-run; note the confluence agent already flags Sullivan-Timmermann-White (2001): ~9,500 calendar rules tested, **none survive** the Reality Check, so the bar for calendar filters is high and the useful output is expected to be about *drift location* (overnight vs intraday) rather than exploitable calendar anomalies.
+All six factor families complete (MACD/MA, RSI/mean-reversion, volume, VIX/cross-index, confluence, calendar/time-of-day). The calendar family confirmed the prior expectation: no calendar effect is standalone alpha (STW 2001: ~9,452 rules, zero survivors), the famous overnight-drift and pre-FOMC-drift edges have decayed to zero in real time, and the only usable outputs are a witching/quarter-end **de-risk flag** and confirmation that the **10am–12pm ET window is dead drift**. Next step is not more research — it is building the backtester per the §3 protocol and running the H1–H10 backlog against it, out-of-sample on 2016–2026 data and net of realistic costs.
