@@ -93,6 +93,8 @@ A strategy is not believed until it is net of all of this. Implement as a single
 
 **Acceptance test for the cost model:** re-run the "random timing" simulation (see `scratchpad/random_timing_sim.py`, port it into the repo as a test) and confirm a high-frequency random strategy loses money in proportion to trade count. If a frequent random strategy shows profit, the cost model is wrong.
 
+**Amendment (Milestone 1, 2026-07-21):** the acceptance test runs on **demeaned** open-to-open returns, not raw returns. On long-only US equities the literal raw-return gate is unsatisfiable: random long-only trading captures roughly half the index drift — at ~151 trades/yr random trading still nets ≈ +$5k raw over 2016–2026 — so only a wrongly-inflated cost model could force raw-return losses. Demeaning removes that drift beta and isolates the cost drag the gate is meant to measure: a zero-cost model correctly FAILS the demeaned gate (no drag to detect), while an honest cost model passes it.
+
 ---
 
 ## 5. The evaluation protocol (the heart of the system — implement fully)

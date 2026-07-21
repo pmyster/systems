@@ -28,10 +28,14 @@ counts. The null hypothesis we are testing is spec §1.1: at blind-timing
 horizons price is ~a martingale, so expected GROSS timing P&L is ~0 and
 expected NET is minus the costs. We therefore evaluate the null on DEMEANED
 open-to-open returns (drift removed). Raw-series results are also reported
-for honesty, never as the gate.
+for honesty, never as the gate. Honesty note: the demeaning subtracts the
+FULL-SAMPLE mean return, which is technically future information — acceptable
+here because this is a null diagnostic of the cost model, not a tradeable
+signal, and nothing downstream may reuse it as one.
 
 Point-in-time ADV: slippage uses a 20-day rolling mean of volume lagged one
-day (only data available before the fill).
+day (only data available before the fill). Bar-0 fills, which have no prior
+volume history at all, are charged without the size-impact term.
 
 Run it:
     python -m costs.random_timing_sim --snapshot fixture --symbol SPY
@@ -40,7 +44,7 @@ Run it:
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -106,11 +110,10 @@ def run_random_timing(
     r_dem = r_raw - r_raw.mean()                    # drift removed (martingale null)
     # .copy(): pandas 3.0 copy-on-write can hand back a read-only view.
     adv = _point_in_time_adv(prices["volume"]).to_numpy(dtype=float)[: n_days + 1].copy()
-    # First bar has no lagged ADV; backfill with the first known value (fills
-    # on bar 0 are impossible anyway — state starts flat and flips execute
-    # from bar 1 onward — but keep the array total, not NaN).
-    if np.isnan(adv[0]):
-        adv[0] = adv[~np.isnan(adv)][0]
+    # Bar 0 has no lagged ADV (NaN — left as NaN on purpose). Bar-0 fills DO
+    # happen: the stationary start draws ~half the paths long, so they enter
+    # at open[0]. Those fills are costed below WITHOUT the size-impact term —
+    # any ADV we could hand them would be bar 0's own volume, a 1-bar lookahead.
 
     if _uniforms is None:
         rng = np.random.default_rng(seed)
@@ -156,9 +159,22 @@ def run_random_timing(
             "adv": adv[day_idx],
         }
     )
-    costed = apply_costs(fills, params)
+    # Two-pass costing. Bar-0 fills have no provably-prior ADV, so they are
+    # charged commission + half-spread + base slippage only: the size-impact
+    # term is dropped because there is no pre-bar-0 volume to price
+    # participation against, and bar 0's own volume would be lookahead.
+    # Every other fill pays the full model.
+    bar0 = day_idx == 0
+    total_cost = np.empty(len(fills), dtype=float)
+    if (~bar0).any():
+        costed = apply_costs(fills.loc[~bar0], params)
+        total_cost[~bar0] = costed["total_cost"].to_numpy()
+    if bar0.any():
+        no_impact = replace(params, slippage_impact_bps=0.0)
+        costed_bar0 = apply_costs(fills.loc[bar0, ["side", "qty", "price"]], no_impact)
+        total_cost[bar0] = costed_bar0["total_cost"].to_numpy()
     cost_per_path = (
-        pd.Series(costed["total_cost"].to_numpy(), index=path_idx)
+        pd.Series(total_cost, index=path_idx)
         .groupby(level=0)
         .sum()
         .reindex(range(n_paths), fill_value=0.0)

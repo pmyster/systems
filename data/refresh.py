@@ -161,6 +161,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-fred", action="store_true", help="skip the FRED HY OAS series")
     args = parser.parse_args(argv)
 
+    # Fail-fast immutability check BEFORE any download: if the target snapshot
+    # already exists, refuse now instead of after minutes of network work.
+    # write_snapshot() re-checks (it remains the enforcement point); this only
+    # fixes the ordering — behavior is otherwise unchanged.
+    target = SNAPSHOTS_DIR / args.snapshot_id
+    if target.exists():
+        raise SnapshotExistsError(
+            f"snapshot '{args.snapshot_id}' already exists at {target} — snapshots are "
+            f"immutable. Use a new --snapshot-id to create another one."
+        )
+
     import yfinance
 
     frames: dict[str, pd.DataFrame] = {}
