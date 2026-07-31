@@ -1,10 +1,18 @@
 """THE no-lookahead proof (milestone 2 definition of done, golden rule 5).
 
-Three independent locks are tested here:
+Four independent locks are tested here:
 
   1. **The view cannot reach forward.** A ``BarContext`` frozen at bar *i*
      never returns bar *i+1*, not even if the strategy stores it and asks
      later.
+  1b. **Nor can it reach forward through an ALIASED BUFFER.** Lock 1 counts
+     rows; this one follows numpy's public ``.base`` chain out of whatever
+     the context handed back and checks where that memory actually ends. A
+     pandas slice is a view, so before this was pinned,
+     ``ctx.history(sym, lookback=1)["close"].values.base`` walked to the full
+     2651-row column and a strategy built on it returned +63,231% against
+     buy-and-hold's +341% — with no private attributes, no disk access and no
+     module globals. Row counts alone would never have caught it.
   2. **The fill cannot happen on the signal bar.** Every fill price equals the
      ADJUSTED OPEN of the bar AFTER the one that produced the signal.
   3. **A strategy that only pays if lock 2 breaks gets exactly nothing.** This
@@ -16,6 +24,7 @@ Three independent locks are tested here:
 
 from typing import Mapping
 
+import numpy as np
 import pytest
 
 from engine.backtest import EngineError, RunSpec, zero_cost_spec
@@ -89,6 +98,130 @@ class TestContextCannotSeeTheFuture:
         _, _, _, ctx = strat.seen[5]
         with pytest.raises(Exception, match="not in this run's universe"):
             ctx.history("NOPE")
+
+
+# -------------------------------------------------------------- lock 1b
+def _walk_base_chain(array):
+    """Every numpy buffer reachable from ``array`` through PUBLIC API.
+
+    ``ndarray.base`` is documented, public numpy: it is the object the array
+    borrows its memory from. Following it out of a pandas view lands you in
+    the parent frame's block — the whole price history, future included.
+    """
+    buffers = []
+    cur = array
+    hops = 0
+    while isinstance(cur, np.ndarray):
+        buffers.append(cur)
+        cur = cur.base
+        hops += 1
+        if hops > 32:  # pragma: no cover - defensive against a cyclic base
+            break
+    return buffers
+
+
+def _public_arrays(hist):
+    """Everything a strategy can get out of a returned frame WITHOUT touching a
+    single underscore. If any of these aliases the parent, the guarantee in
+    ``engine/context.py`` is false."""
+    return {
+        "frame.values": hist.values,
+        "frame.to_numpy()": hist.to_numpy(),
+        "frame.index.values": hist.index.values,
+        "frame['close'].values": hist["close"].values,
+        "frame['close'].to_numpy()": hist["close"].to_numpy(),
+        "frame['open'].values": hist["open"].values,
+        "np.asarray(frame['close'])": np.asarray(hist["close"]),
+    }
+
+
+class ProbeStrategy(Strategy):
+    """Stays flat; on every bar it tries to escape the window it was given."""
+
+    name = "aliasing_probe"
+
+    def __init__(self, columns: int):
+        self.columns = columns
+        #: (excess_elements, bar, path, elements, allowed) — the worst OVERRUN,
+        #: not the biggest buffer: the legitimate window grows with the bar, so
+        #: absolute size proves nothing.
+        self.worst = (0, 0, "none", 0, self.columns)
+        self.leaked_values: set[float] = set()
+
+    def target_weights(self, ctx: BarContext) -> Mapping[str, float]:
+        allowed_elements = (ctx.bar_index + 1) * self.columns
+        for lookback in (1, 5, None):
+            hist = ctx.history(SYMBOL, lookback=lookback)
+            for path, array in _public_arrays(hist).items():
+                for buf in _walk_base_chain(array):
+                    excess = int(buf.size) - allowed_elements
+                    if excess > self.worst[0]:
+                        self.worst = (
+                            excess, ctx.bar_index, path, int(buf.size), allowed_elements
+                        )
+                    if excess > 0 and buf.dtype.kind == "f":
+                        self.leaked_values.update(np.ravel(buf).tolist())
+        return {SYMBOL: 0.0}
+
+
+class TestAliasedBuffersCannotReachTheFuture:
+    """The leak that row-counting misses: the numpy buffer behind the frame."""
+
+    def test_no_public_buffer_reaches_past_the_current_bar(self):
+        n = 60
+        raw = raw_frame(range(100, 100 + n), range(1000, 1000 + n))
+        eng = engine_for(raw, SYMBOL)
+        columns = eng.frames[SYMBOL].shape[1]
+        probe = ProbeStrategy(columns=columns)
+        eng.run(probe)
+
+        excess, bar, path, elements, allowed = probe.worst
+        assert excess <= 0, (
+            "FUTURE-REACHABILITY LEAK: at bar {bar} the context was asked for at "
+            "most {rows} row(s), but walking numpy's public `.base` chain out of "
+            "`{path}` reaches a buffer of {elements} elements - {extra} more than "
+            "the {allowed} ({rows} rows x {columns} columns) the strategy is "
+            "allowed to see. That extra memory is the PARENT frame, which holds "
+            "every bar of the run, so a strategy can read tomorrow's price using "
+            "nothing but public pandas/numpy API. The usual cause is returning "
+            "`frame.iloc[start:stop]` (a VIEW) instead of a deep copy from "
+            "BarContext.history(). Row counts cannot catch this; only following "
+            "the buffer can.".format(
+                bar=bar, rows=bar + 1, path=path, elements=elements,
+                extra=excess, allowed=allowed, columns=columns,
+            )
+        )
+
+    def test_no_future_price_value_is_reachable(self):
+        """Belt and braces: even if a buffer were oversized, it must not
+        CONTAIN a price from after the current bar. Closes are 1000, 1001, ...
+        so equality is unambiguous."""
+        n = 60
+        raw = raw_frame(range(100, 100 + n), range(1000, 1000 + n))
+        eng = engine_for(raw, SYMBOL)
+        probe = ProbeStrategy(columns=eng.frames[SYMBOL].shape[1])
+        eng.run(probe)
+        assert not probe.leaked_values, (
+            "FUTURE-REACHABILITY LEAK: values from outside the granted window are "
+            f"reachable, e.g. {sorted(probe.leaked_values)[:5]}. A strategy reading "
+            "them is trading on bars that had not happened yet."
+        )
+
+    def test_the_returned_window_is_not_a_view_of_the_engines_prices(self):
+        """The same alias, in the other direction: if the frame were a view, a
+        strategy could SCRIBBLE ON the engine's price data."""
+        eng = engine_for(raw_frame(range(100, 140), range(1000, 1040)), SYMBOL)
+        strat = RecordingStrategy()
+        eng.run(strat)
+        _, _, _, ctx = strat.seen[10]
+        before = eng.frames[SYMBOL]["close"].to_numpy(dtype=float).copy()
+        hist = ctx.history(SYMBOL)
+        hist.iloc[:, :] = -1.0
+        after = eng.frames[SYMBOL]["close"].to_numpy(dtype=float)
+        assert (before == after).all(), (
+            "the frame handed to a strategy aliases the engine's prices: mutating "
+            "it corrupted the run's data"
+        )
 
 
 # --------------------------------------------------------------- lock 2

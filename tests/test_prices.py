@@ -97,3 +97,56 @@ class TestLoudFailures:
     def test_empty_frame(self):
         with pytest.raises(PriceError, match="empty"):
             adjusted_bars(raw_frame([100.0], [100.0]).iloc[0:0])
+
+
+class TestNonFiniteValuesCannotSlipThrough:
+    """``NaN <= 0`` is False, so a positivity gate is blind to NaN — and NaN
+    is the dangerous one, because it propagates instead of raising. A NaN open
+    used to reach the engine, turn pre-trade equity into NaN, and make every
+    delta NaN; NaN is neither > 0 nor < 0, so the symbol was classified as
+    neither a buy nor a sell and the bar was skipped with NO fill and NO
+    warning. Every one of these must fail here instead."""
+
+    @pytest.mark.parametrize("column", ["open", "high", "low", "close", "adj_close"])
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+    def test_non_finite_price_raises_and_names_the_bar(self, column, bad):
+        raw = raw_frame([100.0, 100.0, 100.0], [100.0, 100.0, 100.0])
+        raw.iloc[1, raw.columns.get_loc(column)] = bad
+        with pytest.raises(PriceError, match="non-finite") as excinfo:
+            adjusted_bars(raw)
+        message = str(excinfo.value)
+        assert column in message, "the offending COLUMN must be named"
+        assert str(raw.index[1].date()) in message, "the offending BAR must be named"
+
+    def test_non_finite_volume_raises(self):
+        raw = raw_frame([100.0] * 3, [100.0] * 3)
+        raw.iloc[2, raw.columns.get_loc("volume")] = float("nan")
+        with pytest.raises(PriceError, match="non-finite"):
+            adjusted_bars(raw)
+
+    def test_zero_volume_is_still_allowed(self):
+        """Contrast: zero volume is legal at this layer and is priced loudly
+        later, when a fill actually needs an ADV denominator."""
+        raw = raw_frame([100.0] * 3, [100.0] * 3)
+        raw["volume"] = 0.0
+        assert (adjusted_bars(raw)["volume"] == 0.0).all()
+
+    def test_a_nan_open_can_no_longer_silently_skip_a_trade(self):
+        """The end-to-end version of the defect: the engine path every test and
+        the benchmark use (``Backtester(spec, frames=...)``)."""
+        from engine.backtest import Backtester, EngineError, RunSpec
+        from engine.strategy import BuyAndHold
+
+        raw = raw_frame([100.0] * 10, [100.0] * 10)
+        raw.iloc[3, raw.columns.get_loc("open")] = float("nan")
+        with pytest.raises(PriceError, match="non-finite"):
+            adjusted_bars(raw)
+
+        # ...and if a hand-built frame smuggles a NaN past the price layer
+        # entirely, the engine still refuses rather than skipping the bar.
+        frames = {"TEST": adjusted_bars(raw_frame([100.0] * 10, [100.0] * 10))}
+        frames["TEST"] = frames["TEST"].copy()
+        frames["TEST"].iloc[3, frames["TEST"].columns.get_loc("open")] = float("nan")
+        spec = RunSpec(symbols=("TEST",), snapshot="synthetic")
+        with pytest.raises(EngineError, match="non-finite"):
+            Backtester(spec, frames=frames).run(BuyAndHold())

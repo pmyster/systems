@@ -13,7 +13,13 @@ import pandas as pd
 import pytest
 
 from costs.model import CostParams
-from engine.backtest import Backtester, EngineError, RunSpec, load_adjusted_universe
+from engine.backtest import (
+    SUPPRESSED_COLUMNS,
+    Backtester,
+    EngineError,
+    RunSpec,
+    load_adjusted_universe,
+)
 from engine.prices import adjusted_bars
 from engine.strategy import BuyAndHold, Strategy
 from tests.synthetic import engine_for, flat_market, raw_frame
@@ -139,9 +145,14 @@ class TestSizingAndAccounting:
         assert 0.9999 < w <= 1.0
 
     def test_wider_costs_do_not_create_extra_churn(self):
-        """A 100% target is unreachable once costs are paid. Without the
-        rebalance band the engine would re-buy the shortfall every bar and
-        invent turnover — this pins that shut, at any cost level."""
+        """A 100% target is unreachable once costs are paid, so without the
+        band the engine re-buys the shortfall and a HOLD reports itself as
+        many trades. This pins the reported count at 1 for any cost level.
+
+        Scope claim, kept honest: the band protects the trade-count and
+        turnover statistics, not the P&L — with the band off, buy-and-hold on
+        the SPY fixture returns the same CAGR, turnover and costs to six
+        decimals (see the note in ``engine.backtest``)."""
         frames = {SYMBOL: adjusted_bars(flat_market(n=200))}
         counts = []
         for hs in (1.0, 10.0, 50.0):
@@ -158,6 +169,91 @@ class TestSizingAndAccounting:
         result = eng.run(ConstantStrategy({SYMBOL: 1.0}))
         assert result.trade_count == 1
         assert result.dust_skipped > 0  # visible, not hidden
+
+
+class TestTheBandCannotOverrideIntentSilently:
+    """``dust_skipped`` alone increments on ~every bar of a plain hold, so it
+    can neither prove nor disprove that anything real was suppressed. These
+    tests pin the two buckets apart and require the material one to be loud."""
+
+    def _wide_band_engine(self, n=40, min_trade_bps=500.0):
+        frames = {SYMBOL: adjusted_bars(flat_market(n=n))}
+        spec = RunSpec(symbols=(SYMBOL,), snapshot="synthetic", min_trade_bps=min_trade_bps)
+        return Backtester(spec, frames=frames)
+
+    def test_a_plain_hold_reports_dust_and_zero_suppression(self):
+        """The base case that made the old counter useless: thousands of
+        sub-cent skips, not one of them a real trade."""
+        eng = engine_for(flat_market(n=200), SYMBOL)
+        result = eng.run(ConstantStrategy({SYMBOL: 1.0}))
+        assert result.dust_skipped > 100
+        assert result.suppressed_trades == 0
+        assert result.largest_suppressed == {}
+        assert result.dust_only_skipped == result.dust_skipped
+
+    def test_a_suppressed_rebalance_is_counted_named_and_warned_about(self):
+        """The demonstrated defect: 50% -> 53% under a 500 bp band vanished
+        with zero fills and no warning."""
+        def fn(ctx):
+            return {SYMBOL: 0.50 if ctx.bar_index < 20 else 0.53}
+
+        result = self._wide_band_engine().run(CallableStrategy(fn))
+
+        # the rebalance genuinely did not happen...
+        assert result.weights[SYMBOL].iloc[-1] == pytest.approx(0.50, abs=1e-3)
+        # ...and that is now impossible to miss.
+        assert result.suppressed_trades > 0
+        worst = result.largest_suppressed
+        assert worst["symbol"] == SYMBOL
+        assert worst["target_weight"] == pytest.approx(0.53)
+        assert worst["current_weight"] == pytest.approx(0.50, abs=1e-3)
+        assert worst["skipped_weight_bps"] == pytest.approx(300.0, rel=0.05)
+        assert worst["reason"] == "rebalance_band"
+        assert any("SUPPRESSED" in w for w in result.warnings)
+        assert any("min_trade_bps" in w for w in result.warnings)
+
+    def test_dust_and_suppression_are_separate_buckets(self):
+        """Both fire in the same run and neither hides the other."""
+        def fn(ctx):
+            return {SYMBOL: 0.50 if ctx.bar_index < 20 else 0.53}
+
+        result = self._wide_band_engine(n=60).run(CallableStrategy(fn))
+        assert result.suppressed_trades > 0
+        assert result.dust_only_skipped > 0
+        assert result.dust_skipped == result.suppressed_trades + result.dust_only_skipped
+
+    def test_the_suppression_log_is_a_full_record_not_just_a_count(self):
+        def fn(ctx):
+            return {SYMBOL: 0.50 if ctx.bar_index < 20 else 0.53}
+
+        result = self._wide_band_engine().run(CallableStrategy(fn))
+        log = result.suppressed
+        assert list(log.columns) == list(SUPPRESSED_COLUMNS)
+        assert (log["symbol"] == SYMBOL).all()
+        assert (log["skipped_notional"] > 0).all()
+        assert (log["band_notional"] >= log["skipped_notional"]).all()
+        assert log["bar_index"].is_monotonic_increasing  # deterministic order
+
+    def test_materiality_floor_must_be_positive(self):
+        with pytest.raises(EngineError, match="material_weight_bps"):
+            RunSpec(symbols=(SYMBOL,), snapshot="synthetic", material_weight_bps=0.0)
+
+    def test_raising_the_materiality_floor_reclassifies_as_dust(self):
+        """The floor is a knob, not a hardcoded snapshot: set it above the
+        skipped size and the same skip is honestly called dust again."""
+        def fn(ctx):
+            return {SYMBOL: 0.50 if ctx.bar_index < 20 else 0.53}
+
+        frames = {SYMBOL: adjusted_bars(flat_market(n=40))}
+        loud = RunSpec(symbols=(SYMBOL,), snapshot="synthetic", min_trade_bps=500.0)
+        quiet = RunSpec(
+            symbols=(SYMBOL,), snapshot="synthetic", min_trade_bps=500.0,
+            material_weight_bps=1_000.0,
+        )
+        assert Backtester(loud, frames=frames).run(CallableStrategy(fn)).suppressed_trades > 0
+        quiet_result = Backtester(quiet, frames=frames).run(CallableStrategy(fn))
+        assert quiet_result.suppressed_trades == 0
+        assert quiet_result.dust_skipped > 0  # still counted, just not material
 
     def test_a_zero_target_always_liquidates_in_full(self):
         """The band must never strand a position: going flat is exempt."""

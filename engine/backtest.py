@@ -62,13 +62,49 @@ ACCOUNTING CONVENTIONS (all deliberate, all documented)
   * **Rebalance band**: a rebalance smaller than
     ``max(min_trade_notional, min_trade_bps * equity)`` is skipped and counted
     (``dust_skipped``). Without it a fully-invested target is unreachable — the
-    costs of getting to 100% leave you at 99.99%, and a naive engine buys the
-    remainder again every single bar, inventing turnover that no real account
-    would pay. The band is a fraction of EQUITY, not a fixed dollar amount, so
+    costs of getting to 100% leave you at 99.99% — and the engine re-buys that
+    shortfall whenever it grows past a cent, so a *hold* reports itself as a
+    series of trades.
+
+    WHAT THE BAND IS AND IS NOT WORTH (measured, not asserted). On the SPY
+    fixture (2,651 bars), buy-and-hold with the band OFF
+    (``min_trade_bps=0, min_trade_notional=0``) executes 50 fills instead of 1.
+    Everything else is unchanged to six decimals: net CAGR 0.151034 either way,
+    turnover 0.043425 either way, total costs $14.9983 either way, final equity
+    differing by less than a cent on $440k. So the band buys HONEST TRADE-COUNT
+    AND TURNOVER REPORTING — a hold that reports 50 trades makes trade count
+    meaningless as a metric and pollutes the evaluation gauntlet's turnover
+    inputs — and essentially nothing in P&L. Stating it that way on purpose:
+    an accurate small claim beats an impressive wrong one.
+
+    The band is a fraction of EQUITY, not a fixed dollar amount, so
     it does not silently change meaning as the account grows. Tradeoff, stated:
     actual weights may sit up to ``min_trade_bps`` away from target.
     **Exits are exempt** — a target of exactly zero always liquidates in full,
     so no position can ever be stranded below the band.
+  * **The band CANNOT override intent invisibly.** A band is a licence to
+    ignore what the strategy asked for, so every skip is classified and the
+    material ones are surfaced, never just tallied:
+
+      - *residual dust* — the skipped notional is below
+        ``material_weight_bps`` of equity (default 1 bp). This is the rounding
+        residue that motivated the band in the first place; on plain
+        buy-and-hold it fires on essentially every bar at sub-cent size.
+      - *suppressed trade* — the skipped notional is at or above that
+        materiality floor. The strategy asked for a rebalance that MATTERS and
+        the engine declined. Each one is recorded in ``BacktestResult.
+        suppressed`` (symbol, bar, target vs actual weight, size in bps), the
+        largest is exposed as ``largest_suppressed``, and the run carries a
+        warning that the report prints.
+
+    The two counters are separate on purpose: ``dust_skipped`` conflated them
+    before, and a counter that increments 2,649 times out of 2,651 bars on
+    buy-and-hold cannot detect anything. Note the materiality floor is
+    deliberately NOT the band: judging the band by itself would make a band of
+    any width look reasonable, which is exactly the failure being fixed. With
+    the default settings the band (1 bp) sits at the floor (1 bp), so nothing
+    is ever classified as suppressed; widen the band and every material trade
+    it eats shows up by name.
   * **Terminal position**: the equity curve is mark-to-market, so the exit
     cost of a still-open final position is NOT charged (you still hold it).
     The engine reports what that exit would cost
@@ -135,6 +171,24 @@ AFFORD_TOL = 1e-7
 AFFORD_MAX_ITERS = 6
 WEIGHT_TOL = 1e-9
 
+#: Columns of ``BacktestResult.suppressed`` — the log of intended trades the
+#: rebalance band declined to execute. Stable order so the frame (and anything
+#: serialized from it) is deterministic.
+SUPPRESSED_COLUMNS = (
+    "date",
+    "bar_index",
+    "signal_bar_index",
+    "symbol",
+    "target_weight",
+    "current_weight",
+    "skipped_notional",
+    "skipped_weight_bps",
+    "band_notional",
+    "materiality_notional",
+    "equity_pre",
+    "reason",
+)
+
 
 class EngineError(RuntimeError):
     """Any backtest failure. Loud, actionable, never swallowed."""
@@ -157,6 +211,12 @@ class RunSpec:
     #: rebalance band as bps of equity (1.0 bp on $100k = $10). See the module
     #: docstring: without it a 100% target churns forever against its own costs.
     min_trade_bps: float = 1.0
+    #: MATERIALITY FLOOR, in bps of equity, for calling a band-skipped trade a
+    #: SUPPRESSED TRADE rather than residual dust. Independent of the band by
+    #: design — a band judged against itself can never look too wide. Anything
+    #: at or above this is logged by name and warned about; below it is the
+    #: sub-cent rounding residue the band exists to absorb.
+    material_weight_bps: float = 1.0
     adv_window: int = ADV_WINDOW
     default_cost_params: CostParams = field(default_factory=CostParams)
     #: per-symbol cost overrides, e.g. (("XLE", CostParams(half_spread_bps=3.0)),)
@@ -179,6 +239,12 @@ class RunSpec:
             raise EngineError("min_trade_notional must be >= 0")
         if self.min_trade_bps < 0:
             raise EngineError("min_trade_bps must be >= 0")
+        if self.material_weight_bps <= 0:
+            raise EngineError(
+                f"material_weight_bps must be > 0, got {self.material_weight_bps}. "
+                f"A floor of zero would classify every rounding residue as a "
+                f"suppressed trade and drown the signal it exists to raise."
+            )
         if self.price_basis != "adjusted":
             raise EngineError(
                 f"price_basis='{self.price_basis}' is not supported. Backtests run on "
@@ -202,7 +268,25 @@ class RunSpec:
         return d
 
     def fingerprint(self) -> str:
-        """Stable hash of the configuration — the trial-registry key (rule 6)."""
+        """Stable hash of the configuration — the trial-registry key (rule 6).
+
+        TODO(milestone 3 — trial registry): THIS IS NOT A TRIAL KEY YET, and
+        must not be used as one. It hashes the RunSpec only, so it is blind to
+        the strategy and to the overlays: ``BuyAndHold`` and a permanently-flat
+        strategy over the same universe fingerprint IDENTICALLY. A registry
+        keyed on this would collapse distinct configurations into one row and
+        UNDER-COUNT the trials, which is precisely the input the
+        multiple-testing corrections depend on (golden rule 6: "corrections use
+        the total count, including abandoned runs"). Under-counting inflates
+        Deflated Sharpe and the Reality Check.
+
+        The milestone-3 fix is to fold ``strategy.describe()`` and the ordered
+        overlay names into the registry key alongside this spec hash. That
+        belongs with the registry, not here — the registry does not exist yet,
+        and building half of it now would leave a key format nobody can
+        migrate. Deliberately left as a documented gap rather than a silent
+        one.
+        """
         blob = json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
@@ -222,13 +306,37 @@ class BacktestResult:
     targets: pd.DataFrame  # weights DECIDED at each bar's close (executed next bar)
     fills: pd.DataFrame
     warnings: tuple[str, ...]
+    #: EVERY skip by the rebalance band, material or not. Historically the only
+    #: counter, and useless on its own: on buy-and-hold it fires on ~all bars.
     dust_skipped: int
+    #: the subset that were REAL intended trades (>= ``material_weight_bps`` of
+    #: equity), one row each. Empty frame when the band only ate rounding dust.
+    suppressed: pd.DataFrame
     unexecuted_final_target: dict
     terminal_liquidation_cost: float
 
     @property
     def trade_count(self) -> int:
         return int(len(self.fills))
+
+    @property
+    def suppressed_trades(self) -> int:
+        """How many trades the strategy asked for that the engine declined."""
+        return int(len(self.suppressed))
+
+    @property
+    def largest_suppressed(self) -> dict:
+        """The biggest declined trade, or ``{}`` if none. The single number a
+        strategy author needs to know whether the band changed their intent."""
+        if not len(self.suppressed):
+            return {}
+        row = self.suppressed.loc[self.suppressed["skipped_weight_bps"].idxmax()]
+        return {k: row[k] for k in SUPPRESSED_COLUMNS}
+
+    @property
+    def dust_only_skipped(self) -> int:
+        """Skips that were immaterial rounding residue."""
+        return int(self.dust_skipped - self.suppressed_trades)
 
     @property
     def total_costs(self) -> float:
@@ -331,6 +439,7 @@ class Backtester:
         weight_curve = {s: np.zeros(n, dtype=float) for s in symbols}
         target_curve = {s: np.zeros(n, dtype=float) for s in symbols}
         fill_records: list[dict] = []
+        suppressed_records: list[dict] = []
 
         strategy.on_start(symbols)
 
@@ -338,7 +447,8 @@ class Backtester:
             # --- 1. execute what was decided at the previous close ---------
             if pending is not None:
                 cash, n_dust = self._execute(
-                    i, pending, cash, shares, opens, advs, fill_records, warnings
+                    i, pending, cash, shares, opens, advs, fill_records,
+                    warnings, suppressed_records,
                 )
                 dust_skipped += n_dust
 
@@ -390,6 +500,26 @@ class Backtester:
                 f"cost to exit it."
             )
 
+        # The band declining a MATERIAL trade is the engine overriding the
+        # strategy. That is never a silent event (golden rule: unknown/refused
+        # data must be visible), so it gets a warning naming the worst case.
+        suppressed = pd.DataFrame(suppressed_records, columns=list(SUPPRESSED_COLUMNS))
+        if len(suppressed):
+            worst = suppressed.loc[suppressed["skipped_weight_bps"].idxmax()]
+            warnings.append(
+                f"REBALANCE BAND SUPPRESSED {len(suppressed)} INTENDED TRADE(S): the "
+                f"strategy asked for a rebalance of at least "
+                f"{spec.material_weight_bps:g} bp of equity and the engine did not "
+                f"execute it. Largest: {worst['symbol']} on "
+                f"{pd.Timestamp(worst['date']).date()} (bar {int(worst['bar_index'])}), "
+                f"target weight {worst['target_weight']:.6f} vs actual "
+                f"{worst['current_weight']:.6f} — ${worst['skipped_notional']:,.2f} "
+                f"({worst['skipped_weight_bps']:.1f} bp) skipped against a band of "
+                f"${worst['band_notional']:,.2f} (min_trade_bps="
+                f"{spec.min_trade_bps:g}). Lower min_trade_bps if you meant those "
+                f"trades to happen."
+            )
+
         fills = pd.DataFrame(fill_records, columns=list(FILL_COLUMNS))
         return BacktestResult(
             spec=spec,
@@ -404,6 +534,7 @@ class Backtester:
             fills=fills,
             warnings=tuple(warnings),
             dust_skipped=dust_skipped,
+            suppressed=suppressed,
             unexecuted_final_target=unexecuted,
             terminal_liquidation_cost=terminal_liq,
         )
@@ -501,16 +632,53 @@ class Backtester:
         advs: Mapping[str, np.ndarray],
         fill_records: list[dict],
         warnings: list[str],
+        suppressed_records: list[dict],
     ) -> tuple[float, int]:
-        """Execute ``targets`` at bar ``i``'s OPEN. Returns (cash, dust_skipped)."""
+        """Execute ``targets`` at bar ``i``'s OPEN. Returns (cash, n_skipped).
+
+        Every skip is ALSO classified: material ones are appended to
+        ``suppressed_records`` so the run can report that it overrode the
+        strategy. See the module docstring, "The band CANNOT override intent
+        invisibly".
+        """
         if i == 0:  # pragma: no cover - structurally unreachable
             raise EngineError("bar 0 can never execute: no signal precedes it")
         spec = self.spec
         symbols = tuple(spec.symbols)
         prices = {s: opens[s][i] for s in symbols}
-        equity_pre = cash + sum(shares[s] * prices[s] for s in symbols)
+        if not np.isfinite(equity_pre := cash + sum(shares[s] * prices[s] for s in symbols)):
+            raise EngineError(
+                f"bar {i} ({self.index[i].date()}): pre-trade equity is {equity_pre!r} — "
+                f"a price is non-finite ({ {s: prices[s] for s in symbols} }). Every "
+                f"target delta would come out NaN and every symbol would be silently "
+                f"classified as neither a buy nor a sell, skipping the bar with no "
+                f"fill and no warning. Refusing to trade on unusable prices."
+            )
 
         band = max(spec.min_trade_notional, spec.min_trade_bps / 1e4 * equity_pre)
+        materiality = spec.material_weight_bps / 1e4 * equity_pre
+
+        def record_skip(symbol: str, delta: float, reason: str) -> None:
+            """Bucket a skipped delta. Dust is counted; material is NAMED."""
+            notional = abs(delta) * prices[symbol]
+            if notional < materiality:
+                return  # residual dust: counted in ``dust``, nothing to report
+            suppressed_records.append(
+                {
+                    "date": self.index[i],
+                    "bar_index": i,
+                    "signal_bar_index": i - 1,
+                    "symbol": symbol,
+                    "target_weight": float(targets[symbol]),
+                    "current_weight": float(shares[symbol] * prices[symbol] / equity_pre),
+                    "skipped_notional": float(notional),
+                    "skipped_weight_bps": float(notional / equity_pre * 1e4),
+                    "band_notional": float(band),
+                    "materiality_notional": float(materiality),
+                    "equity_pre": float(equity_pre),
+                    "reason": reason,
+                }
+            )
 
         deltas: dict[str, float] = {}
         dust = 0
@@ -524,6 +692,7 @@ class Backtester:
             full_exit = targets[s] == 0.0 and shares[s] > 0.0
             if not full_exit and abs(delta) * prices[s] < band:
                 dust += 1
+                record_skip(s, delta, "rebalance_band")
                 continue
             deltas[s] = delta
 
@@ -567,6 +736,7 @@ class Backtester:
                 qty = base[s] * scale
                 if qty * prices[s] < spec.min_trade_notional:
                     dust += 1
+                    record_skip(s, qty, "min_trade_notional")
                     continue
                 cost = self._charge(i, s, side=1, qty=qty, price=prices[s], advs=advs,
                                     fill_records=fill_records)

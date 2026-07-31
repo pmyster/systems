@@ -15,10 +15,35 @@ a bar. The engine executes those weights at bar ``i+1``'s OPEN — the canonical
 convention declared in ``costs.model``. So the strategy can neither *see* the
 future nor *transact* on the bar that generated its signal.
 
-Scope of the guarantee: it is an API-level guarantee. A determined strategy
-could reach into private attributes; the point is that nothing in the public
-surface leaks the future, so honest code cannot cheat by accident — which is
-the failure mode that actually happens.
+SCOPE OF THE GUARANTEE — STATED HONESTLY
+----------------------------------------
+This is an API-level guarantee, and it is worth being precise about where it
+ends, because an overclaim here is worse than no claim at all.
+
+What IS guaranteed: no public accessor on this object returns, or *aliases*,
+data past bar ``i``. That second word carries real weight. ``history()``
+returns a DEEP COPY of the requested window, not a pandas view of the parent
+frame. An un-copied ``frame.iloc[start:stop]`` shares the parent's numpy
+buffer, and that buffer is reachable through entirely public API —
+``hist["close"].values.base`` walks straight to the full column, future bars
+included, using no private attributes at all. An adversarial verifier used
+exactly that path to build a strategy returning +63,231% against
+buy-and-hold's +341% on the SPY fixture. It also came back WRITABLE, so the
+same alias let a strategy corrupt the engine's price data. Hence the copy, and
+hence ``TestAliasedBuffersCannotReachTheFuture`` in
+``tests/test_no_lookahead.py``, which pins it shut.
+
+What is NOT guaranteed, and cannot be in Python:
+  * private attributes (``ctx._frames``) are reachable by anyone who types an
+    underscore. Python has no enforced privacy;
+  * a strategy can simply re-read the snapshot off disk (``data.loader``) or
+    import the frames itself. Nothing in this process can stop that, and we do
+    not pretend otherwise.
+
+So the honest claim is: **accidental** lookahead is structurally impossible,
+and that is the failure mode that actually happens in research code.
+Deliberate cheating is out of scope for the engine and is caught, if at all,
+by review and by the milestone-3 evaluation gauntlet.
 """
 
 from __future__ import annotations
@@ -141,13 +166,28 @@ class BarContext:
 
         ``lookback`` trims to the most recent N bars. The frame ALWAYS ends on
         this bar; there is no argument that can extend it forward.
+
+        THE RETURNED FRAME IS A DEEP COPY, AND THAT IS LOAD-BEARING.
+        ``frame.iloc[start:stop]`` is a pandas *view*: its numpy buffer is
+        still the parent's, so ``returned["close"].values.base`` reaches the
+        whole column — every future bar — through 100% public API. The copy
+        severs that alias (and, as a bonus, means a strategy cannot scribble
+        on the engine's prices through the same handle). Copying the index too
+        is deliberate: a shared DatetimeIndex buffer leaks future *dates*,
+        which is less exploitable but still information from after ``i``.
         """
+        if lookback is not None and int(lookback) <= 0:
+            raise ContextError(f"lookback must be positive, got {lookback}")
         frame = self._frame(symbol)
         stop = self._i + 1
         start = 0 if lookback is None else max(0, stop - int(lookback))
-        if lookback is not None and lookback <= 0:
-            raise ContextError(f"lookback must be positive, got {lookback}")
-        return frame.iloc[start:stop]
+        window = frame.iloc[start:stop].copy(deep=True)
+        # ``copy(deep=True)`` copies the block values; the index is rebuilt
+        # from a copied numpy buffer because pandas is free to keep sharing an
+        # Index object, and a shared index buffer is the same class of alias.
+        idx = frame.index[start:stop]
+        window.index = pd.Index(idx.to_numpy().copy(), name=idx.name)
+        return window
 
     def bar(self, symbol: str) -> Bar:
         """This bar in full — legal, because we are standing on its close."""

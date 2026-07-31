@@ -87,6 +87,59 @@ class TestMandatedMetricSet:
         assert report.spec_fingerprint
 
 
+class Rebalancer(ConstantStrategy):
+    """Holds 50%, then asks for 53%. Under a wide band that ask is refused."""
+
+    name = "rebalancer"
+
+    def target_weights(self, ctx):
+        return {SYMBOL: 0.50 if ctx.bar_index < 100 else 0.53}
+
+
+@pytest.fixture(scope="module")
+def suppressed_report(frames):
+    """A 50% -> 53% rebalance under a 500 bp band: fully suppressed."""
+    spec = RunSpec(symbols=(SYMBOL,), snapshot="fixture", min_trade_bps=500.0)
+    return run_and_report(spec, Rebalancer({SYMBOL: 0.5}), frames=frames)
+
+
+class TestSuppressedTradesReachTheReport:
+    """A strategy author must be able to SEE that the engine declined to
+    execute what they asked for. A counter buried in the result object that no
+    report ever reads is not visibility."""
+
+    def test_the_report_carries_the_suppression_counts(self, suppressed_report):
+        report, result, _ = suppressed_report
+        assert result.suppressed_trades > 0
+        assert report.suppressed_trades == result.suppressed_trades
+        assert report.suppression.largest_suppressed_bps > 0
+        assert report.suppression.largest_suppressed_symbol == SYMBOL
+        assert report.suppression.largest_target_weight == pytest.approx(0.53)
+
+    def test_the_rendered_table_says_so_out_loud(self, suppressed_report):
+        report, _, _ = suppressed_report
+        text = format_report(report)
+        assert "trades SUPPRESSED" in text
+        assert "DECLINED" in text
+        assert "wanted weight" in text
+        assert "SUPPRESSED" in text.upper()
+
+    def test_it_survives_serialization(self, suppressed_report):
+        report, _, _ = suppressed_report
+        d = report.to_dict()
+        assert d["suppression"]["suppressed_trades"] > 0
+        assert "benchmark_suppression" in d
+        assert "suppression" in report.to_json()
+
+    def test_a_clean_run_says_nothing_was_overridden(self, flat_report):
+        report, _, _ = flat_report
+        assert report.suppressed_trades == 0
+        assert report.benchmark_suppression.suppressed_trades == 0
+        text = format_report(report)
+        assert "trades SUPPRESSED" in text  # the row is ALWAYS shown...
+        assert "rounding dust" in text  # ...and states the benign verdict
+
+
 class TestBenchmarkCannotBeOmitted:
     def test_report_construction_requires_a_benchmark_result(self):
         import inspect

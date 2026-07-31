@@ -83,11 +83,25 @@ in the module that owns it):
   `min(previous, proposed)`; an overlay that tries to add exposure is clamped
   and the attempt is recorded in the report.
 - **Rebalance band.** Trades below `max(min_trade_notional, min_trade_bps *
-  equity)` are skipped and counted; a target of exactly zero always liquidates
-  in full.
+  equity)` are skipped; a target of exactly zero always liquidates in full.
+  Skips are split into *residual dust* and **suppressed trades** (a skip worth
+  at least `material_weight_bps` of equity — i.e. a rebalance the strategy
+  genuinely wanted). Suppressed trades are logged per-bar, warned about, and
+  printed in the report: the band can hold a strategy still, but it can never
+  override it invisibly.
+- **Non-finite data fails loudly.** `NaN <= 0` is `False`, so `engine/prices.py`
+  checks finiteness explicitly and names the offending bars. A NaN price used
+  to propagate into the engine and make a bar silently unfillable.
+- **`BarContext.history()` returns a deep copy.** A pandas slice is a view, and
+  its numpy buffer is reachable through public API (`.values.base`) — which
+  reaches the whole frame, future bars included. The copy severs that.
 - **Reproducible.** Same spec + snapshot + strategy => byte-identical output.
 
 Not built yet, deliberately: strategy sleeves (milestone 5+) and the
 evaluation gauntlet / trial registry (milestone 3). The spec's build order
-puts the gauntlet before any strategy; `RunSpec.fingerprint()` is the hook the
-registry will key on.
+puts the gauntlet before any strategy. `RunSpec.fingerprint()` is a *partial*
+hook for that registry and is marked as such in the code: it hashes the spec
+only, so two runs with different strategies fingerprint identically. Folding
+`strategy.describe()` and the overlay names into the key is milestone-3 work,
+because under-counting distinct trials is exactly what breaks the
+multiple-testing corrections (golden rule 6).

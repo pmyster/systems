@@ -19,7 +19,7 @@ byte-identical, which is what ``tests/test_determinism.py`` asserts.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Mapping, Sequence
 
 import pandas as pd
@@ -29,6 +29,44 @@ from engine.strategy import BuyAndHold, ExposureOverlay, Strategy
 from reports.metrics import PerformanceMetrics, metrics_from_result
 
 FILL_CONVENTION = "signal on bar t's close -> fill at bar t+1's open"
+
+
+@dataclass(frozen=True)
+class SuppressionSummary:
+    """What the rebalance band declined to execute, for one run.
+
+    The band is a licence to ignore the strategy, so the report states how
+    often it was used and how big the biggest override was. ``dust`` is the
+    sub-materiality rounding residue the band exists to absorb (expected to be
+    large and boring); ``suppressed_trades`` is the count of REAL intended
+    trades that never happened (expected to be zero, and alarming if not).
+    """
+
+    dust: int
+    suppressed_trades: int
+    largest_suppressed_bps: float
+    largest_suppressed_notional: float
+    largest_suppressed_symbol: str
+    largest_suppressed_date: str
+    largest_target_weight: float
+    largest_actual_weight: float
+
+    @classmethod
+    def from_result(cls, result) -> "SuppressionSummary":
+        worst = result.largest_suppressed
+        return cls(
+            dust=int(result.dust_only_skipped),
+            suppressed_trades=int(result.suppressed_trades),
+            largest_suppressed_bps=float(worst["skipped_weight_bps"]) if worst else 0.0,
+            largest_suppressed_notional=float(worst["skipped_notional"]) if worst else 0.0,
+            largest_suppressed_symbol=str(worst["symbol"]) if worst else "",
+            largest_suppressed_date=str(pd.Timestamp(worst["date"]).date()) if worst else "",
+            largest_target_weight=float(worst["target_weight"]) if worst else 0.0,
+            largest_actual_weight=float(worst["current_weight"]) if worst else 0.0,
+        )
+
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
 @dataclass(frozen=True)
@@ -47,6 +85,14 @@ class Report:
     benchmark_config: dict
     overlay_names: tuple[str, ...]
     engine_warnings: tuple[str, ...]
+    #: what the engine refused to execute — see ``SuppressionSummary``
+    suppression: SuppressionSummary
+    benchmark_suppression: SuppressionSummary
+
+    @property
+    def suppressed_trades(self) -> int:
+        """Shorthand for the number a strategy author actually looks for."""
+        return self.suppression.suppressed_trades
 
     def to_dict(self) -> dict:
         return {
@@ -62,6 +108,8 @@ class Report:
             "benchmark_config": self.benchmark_config,
             "overlay_names": list(self.overlay_names),
             "engine_warnings": list(self.engine_warnings),
+            "suppression": self.suppression.to_dict(),
+            "benchmark_suppression": self.benchmark_suppression.to_dict(),
         }
 
     def to_json(self) -> str:
@@ -103,6 +151,8 @@ def build_report(
         engine_warnings=tuple(result.warnings) + tuple(
             f"[benchmark] {w}" for w in benchmark_result.warnings
         ),
+        suppression=SuppressionSummary.from_result(result),
+        benchmark_suppression=SuppressionSummary.from_result(benchmark_result),
     )
 
 
@@ -190,6 +240,36 @@ def format_report(report: Report) -> str:
         elif kind == "int":
             diff = f"{int(sv) - int(bv):+,d}"
         lines.append(f"{title:<{width}} {_fmt(sv, kind):>16} {_fmt(bv, kind):>16} {diff:>14}")
+
+    # --- what the engine DECLINED to do (never only in a counter) ----------
+    sup, bsup = report.suppression, report.benchmark_suppression
+    lines.append("-" * (width + 50))
+    lines.append(
+        f"{'trades SUPPRESSED':<{width}} {sup.suppressed_trades:>16,d} "
+        f"{bsup.suppressed_trades:>16,d} "
+        f"{sup.suppressed_trades - bsup.suppressed_trades:>+14,d}"
+    )
+    lines.append(
+        f"{'  (dust skipped)':<{width}} {sup.dust:>16,d} {bsup.dust:>16,d} "
+        f"{sup.dust - bsup.dust:>+14,d}"
+    )
+    if sup.suppressed_trades or bsup.suppressed_trades:
+        for label, x in (("strategy", sup), ("buy_and_hold", bsup)):
+            if not x.suppressed_trades:
+                continue
+            lines.append(
+                f"  !! {label}: the rebalance band DECLINED {x.suppressed_trades} "
+                f"intended trade(s). Largest: {x.largest_suppressed_symbol} on "
+                f"{x.largest_suppressed_date} — wanted weight "
+                f"{x.largest_target_weight:.4f}, held {x.largest_actual_weight:.4f} "
+                f"({x.largest_suppressed_bps:.1f} bp / "
+                f"{x.largest_suppressed_notional:,.2f} not executed)."
+            )
+    else:
+        lines.append(
+            "  (the band only absorbed sub-materiality rounding dust; no intended "
+            "trade was overridden)"
+        )
 
     notes = list(s.warnings) + [f"[benchmark] {w}" for w in b.warnings] + list(report.engine_warnings)
     if notes:

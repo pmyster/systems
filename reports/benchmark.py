@@ -111,6 +111,16 @@ def explain_buy_and_hold_delta(reference: BuyAndHoldReference, result) -> dict:
     ``residual`` is what the identity fails to explain. It must be ~0 (float
     noise). Anything else means the engine did something the fill log does not
     account for, and the test that calls this fails.
+
+    The single-fill requirement below is a REPORTING invariant, not a P&L one,
+    and the difference matters. With the rebalance band disabled the same run
+    produces 50 fills on the SPY fixture, yet net CAGR, turnover and total
+    costs are identical to six decimals and final equity moves by under a cent
+    on $440k. Requiring one fill is what makes "trade count" mean something —
+    a buy-and-hold that reports 50 trades corrupts every downstream turnover
+    and trade-frequency statistic — and it makes this decomposition exact
+    (one fill, one entry cost). It is not a performance fix, and it is not
+    claimed as one.
     """
     fills = result.fills
     if len(fills) != 1:
