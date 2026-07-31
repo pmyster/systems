@@ -1,0 +1,17 @@
+{
+  "snapshot_id": "fixture",
+  "created_utc": "2026-07-21T22:22:25+00:00",
+  "files": {
+    "SPY.csv": {
+      "rows": 2651
+    },
+    "QQQ.csv": {
+      "rows": 300
+    },
+    "BAMLH0A0HYM2.csv": {
+      "rows": 793
+    }
+  },
+  "purpose": "committed test fixture: real data carved from snapshot 2026-07-21 so the suite runs from a fresh clone with no network",
+  "provenance": "yfinance auto_adjust=False + FRED fredgraph.csv, downloaded 2026-07-21"
+}
