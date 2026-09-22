@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pocket Reader</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=Fraunces:opsz,wght@9..144,600&display=swap">
+<style>
+/* ============================================================
+   1. TOKENS — every colour and size the page uses, in one place.
+   Change a value here and the whole page follows.
+   ============================================================ */
+:root {
+  --bg: #F4F6F3;          /* page ground: a cool paper, not cream */
+  --surface: #FFFFFF;     /* panels and the reading sheet */
+  --ink: #17201B;         /* body text */
+  --muted: #5F6C64;       /* secondary text, labels */
+  --line: #D6DDD8;        /* hairlines */
+  --accent: #1E6E5A;      /* evergreen: buttons, active states */
+  --accent-ink: #FFFFFF;  /* text on top of the accent */
+  --accent-soft: #DCEBE3; /* tinted fills */
+  --now: #CBE7D6;         /* the sentence being spoken right now */
+  --shadow: 0 10px 30px rgba(23, 32, 27, 0.14);
+  --radius: 14px;
+  --serif: "Literata", Georgia, "Times New Roman", serif;
+  --display: "Fraunces", "Literata", Georgia, serif;
+  --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101513; --surface: #182019; --ink: #E7ECE8; --muted: #97A59D;
+    --line: #2B3630; --accent: #63C7A4; --accent-ink: #0F1A15;
+    --accent-soft: #1F3A30; --now: #274A3B;
+    --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101513; --surface: #182019; --ink: #E7ECE8; --muted: #97A59D;
+  --line: #2B3630; --accent: #63C7A4; --accent-ink: #0F1A15;
+  --accent-soft: #1F3A30; --now: #274A3B;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+
+/* ============================================================
+   2. LAYOUT — one screen tall: header, scrolling sheet, play bar.
+   ============================================================ */
+html { height: 100%; box-sizing: border-box; }
+*, *::before, *::after { box-sizing: inherit; }
+[hidden] { display: none !important; }
+body {
+  height: 100%; margin: 0; padding-inline: 16px;
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--bg); color: var(--ink); font-family: var(--ui);
+  -webkit-text-size-adjust: 100%;
+}
+header {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding-block: 12px 4px;
+}
+.brand { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.brand h1 {
+  font-family: var(--display); font-size: 1.35rem; font-weight: 600; margin: 0;
+  letter-spacing: -0.01em; white-space: nowrap;
+}
+.brand .count {
+  font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tools { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* progress line under the header */
+.progress { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.progress > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 200ms; }
+@media (prefers-reduced-motion: reduce) { .progress > i { transition: none; } }
+
+/* the reading sheet */
+main {
+  flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 20px 18px 40vh; /* bottom room so the last line can scroll to mid-screen */
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) { main { scroll-behavior: auto; } }
+.sheet {
+  max-width: 34em; margin-inline: auto;
+  font-family: var(--serif); font-size: var(--reading-size, 19px); line-height: 1.6;
+}
+.sheet p { margin: 0 0 1em; text-wrap: pretty; }
+.sheet h2 { font-family: var(--display); font-size: 1.5em; line-height: 1.2; margin: 1em 0 0.4em; text-wrap: balance; }
+.s { border-radius: 4px; padding: 0 2px; margin: 0 -2px; cursor: pointer; transition: background 150ms; }
+.s.now { background: var(--now); }
+.s.done { color: var(--muted); }
+.empty { color: var(--muted); font-family: var(--ui); text-align: center; padding: 3em 0; }
+
+/* ============================================================
+   3. CONTROLS — floating play bar, always reachable by thumb.
+   ============================================================ */
+.bar {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+  padding: 8px 10px; box-shadow: var(--shadow);
+}
+button {
+  font: inherit; color: var(--ink); background: transparent; border: 1px solid transparent;
+  border-radius: 999px; padding: 8px 12px; cursor: pointer; touch-action: manipulation;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; line-height: 1;
+}
+button:hover { background: var(--accent-soft); }
+button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+button.icon { width: 42px; height: 42px; padding: 0; font-size: 1.1rem; }
+button.play {
+  width: 54px; height: 54px; padding: 0; font-size: 1.3rem;
+  background: var(--accent); color: var(--accent-ink);
+}
+button.play:hover { filter: brightness(1.05); }
+button.chip {
+  border-color: var(--line); padding: 6px 10px; font-size: 0.85rem; background: var(--surface);
+}
+button.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.spacer { flex: 1; }
+.rate {
+  display: flex; align-items: center; gap: 4px; font-size: 0.8rem; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.rate output { min-width: 3.2em; text-align: center; color: var(--ink); }
+.eta { font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+svg { width: 1em; height: 1em; fill: currentColor; display: block; }
+
+/* ============================================================
+   4. PANELS — the text drawer and the settings drawer.
+   ============================================================ */
+.panel {
+  position: fixed; inset: auto 0 0 0; z-index: 10;
+  background: var(--surface); border-top: 1px solid var(--line);
+  border-radius: 20px 20px 0 0; box-shadow: var(--shadow);
+  padding: 14px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  max-height: 85%; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.scrim { position: fixed; inset: 0; z-index: 9; background: rgba(0,0,0,0.35); }
+.panel h2 { font-family: var(--display); font-size: 1.15rem; font-weight: 600; margin: 0; }
+.panel .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.panel .head { display: flex; justify-content: space-between; align-items: center; }
+textarea {
+  width: 100%; min-height: 34vh; resize: vertical; font: 16px/1.5 var(--serif);
+  color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px;
+}
+label.field { display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; color: var(--muted); flex: 1; min-width: 0; }
+select, input[type="range"] { width: 100%; font: inherit; color: var(--ink); }
+select { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+input[type="range"] { accent-color: var(--accent); }
+.hint { font-size: 0.8rem; color: var(--muted); margin: 0; line-height: 1.45; }
+.primary { background: var(--accent); color: var(--accent-ink); font-weight: 600; padding: 10px 16px; }
+.primary:hover { filter: brightness(1.05); background: var(--accent); }
+.file { position: relative; overflow: hidden; }
+.file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.status { font-size: 0.8rem; color: var(--muted); min-height: 1.2em; }
+.warn { color: #B4531F; }
+:root[data-theme="dark"] .warn { color: #F0A070; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .warn { color: #F0A070; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>Pocket Reader</h1>
+    <span class="count" id="count" aria-label="Sentence position">no text yet</span>
+  </div>
+  <div class="tools">
+    <button class="chip" id="openText" type="button">Text</button>
+    <button class="chip" id="openSettings" type="button" aria-label="Voice and size settings">Voice</button>
+  </div>
+</header>
+<div class="progress" aria-hidden="true"><i id="progress"></i></div>
+
+<main id="main">
+  <article class="sheet" id="sheet"></article>
+</main>
+
+<div class="bar" role="toolbar" aria-label="Playback">
+  <button class="icon" id="prev" type="button" aria-label="Previous sentence">
+    <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+  </button>
+  <button class="play" id="play" type="button" aria-label="Play">
+    <svg viewBox="0 0 24 24" id="playIcon"><path d="M8 5v14l11-7z"/></svg>
+  </button>
+  <button class="icon" id="next" type="button" aria-label="Next sentence">
+    <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6zM16 6h2v12h-2z"/></svg>
+  </button>
+  <div class="spacer"></div>
+  <div class="rate">
+    <button class="icon" id="slower" type="button" aria-label="Slower">−</button>
+    <output id="rateOut" for="rate">1.0×</output>
+    <button class="icon" id="faster" type="button" aria-label="Faster">+</button>
+  </div>
+  <span class="eta" id="eta"></span>
+</div>
+
+<!-- Text drawer -->
+<div class="scrim" id="scrimText" hidden></div>
+<section class="panel" id="panelText" hidden aria-label="Load text">
+  <div class="head"><h2>What should I read?</h2><button class="chip" id="closeText" type="button">Close</button></div>
+  <textarea id="input" placeholder="Paste anything here: an article, notes, an email, a chapter…" spellcheck="false"></textarea>
+  <div class="row">
+    <button class="chip" id="paste" type="button">Paste from clipboard</button>
+    <button class="chip file" type="button">Open .txt file<input type="file" id="file" accept=".txt,.md,.text,text/plain"></button>
+    <button class="chip" id="sample" type="button">Use the sample</button>
+    <div class="spacer"></div>
+    <button class="primary" id="load" type="button">Read this</button>
+  </div>
+  <div class="status" id="textStatus"></div>
+</section>
+
+<!-- Voice drawer -->
+<div class="scrim" id="scrimSettings" hidden></div>
+<section class="panel" id="panelSettings" hidden aria-label="Voice and text size">
+  <div class="head"><h2>Voice &amp; size</h2><button class="chip" id="closeSettings" type="button">Close</button></div>
+  <label class="field">Voice
+    <select id="voice"><option value="">Device default</option></select>
+  </label>
+  <div class="row">
+    <label class="field">Speed <input type="range" id="rate" min="0.5" max="2" step="0.1" value="1"></label>
+    <label class="field">Text size <input type="range" id="size" min="15" max="30" step="1" value="19"></label>
+  </div>
+  <div class="row">
+    <button class="chip" id="testVoice" type="button">Test this voice</button>
+    <button class="chip" id="restart" type="button">Start from the top</button>
+  </div>
+  <p class="hint">Voices come from your phone, not from this page. iPhone: Settings → Accessibility → Spoken Content → Voices to download better ones. Android: Settings → Accessibility → Text-to-speech output.</p>
+  <div class="status" id="voiceStatus"></div>
+</section>
+
+<script>
+/* ============================================================
+   THE PROGRAM. Read top to bottom. Three ideas:
+     1. STATE  — the few facts the app remembers (what text, where we are, is it playing).
+     2. RENDER — turn state into what you see on screen.
+     3. EVENTS — buttons and the speech engine change state, then we re-render.
+   ============================================================ */
+
+/* ---------- 0. The sample text (also the instructions) ---------- */
+const SAMPLE = `Pocket Reader
+This page turns any text into spoken words using the voice that is already built into your phone. Nothing is uploaded anywhere. The text stays on your device.
+
+Tap the green button to start. Tap any sentence to jump straight to it. The sentence being spoken is highlighted so you can follow along, and the page scrolls to keep it in view.
+
+Use the plus and minus buttons to change the reading speed. One point zero is normal talking pace. Most people settle between one point two and one point five once they get used to it.
+
+Tap Text at the top to paste something new, open a text file, or come back to this sample. Tap Voice to pick a different voice or make the letters bigger.
+
+If you leave and come back, the reader remembers your text and where you stopped. That memory lives only in this browser on this phone.
+
+That is the whole machine. A splitter that cuts text into sentences, a loop that hands each sentence to the phone's speech engine, and a highlighter that keeps your eyes and ears in the same place.`;
+
+/* ---------- 1. STATE ---------- */
+const state = {
+  text: "",        // the raw text the person gave us
+  sentences: [],   // [{text, para}] after splitting
+  index: 0,        // which sentence is current
+  playing: false,  // are we speaking right now?
+  rate: 1,         // speed multiplier for the voice
+  size: 19,        // reading font size in px
+  voiceName: "",   // preferred voice, by name
+};
+let token = 0;     // increments on every play/stop so stale speech callbacks are ignored
+let wakeLock = null;
+
+const $ = (id) => document.getElementById(id);
+const synth = window.speechSynthesis;
+const canSpeak = !!synth && "SpeechSynthesisUtterance" in window;
+
+/* ---------- Persistence (per-phone convenience only) ---------- */
+function save() {
+  try {
+    localStorage.setItem("pocket-reader", JSON.stringify({
+      text: state.text, index: state.index, rate: state.rate, size: state.size, voiceName: state.voiceName,
+    }));
+  } catch (e) { /* private mode or blocked storage: fine, we just don't remember */ }
+}
+function restore() {
+  try {
+    const raw = localStorage.getItem("pocket-reader");
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) { return null; }
+}
+
+/* ---------- 2a. Splitting text into sentences ----------
+   Why sentences? Phones stop speaking long passages mid-way (a known bug),
+   and sentence-sized pieces let us highlight and jump around. */
+function splitSentences(text) {
+  const out = [];
+  const paragraphs = text.replace(/\r\n?/g, "\n").split(/\n\s*\n|\n/);
+  paragraphs.forEach((para, p) => {
+    const trimmed = para.trim();
+    if (!trimmed) return;
+    // Greedy: run of non-terminators, then optional terminators + closing quotes.
+    const parts = trimmed.match(/[^.!?…]+(?:[.!?…]+["'”’)\]]*)?|[.!?…]+/g) || [trimmed];
+    parts.forEach((s) => {
+      const t = s.trim();
+      if (t) out.push({ text: t, para: p, heading: p === 0 && trimmed.length < 60 && !/[.!?]$/.test(trimmed) });
+    });
+  });
+  return out;
+}
+
+/* ---------- 2b. RENDER ---------- */
+function render() {
+  const sheet = $("sheet");
+  sheet.innerHTML = "";
+  if (!state.sentences.length) {
+    sheet.innerHTML = '<p class="empty">Tap <b>Text</b> above and give me something to read.</p>';
+  } else {
+    let currentPara = -1, p = null;
+    state.sentences.forEach((s, i) => {
+      if (s.para !== currentPara) {
+        currentPara = s.para;
+        p = document.createElement(s.heading ? "h2" : "p");
+        sheet.appendChild(p);
+      }
+      const span = document.createElement("span");
+      span.className = "s";
+      span.dataset.i = i;
+      span.textContent = s.text;
+      p.appendChild(span);
+      p.appendChild(document.createTextNode(" "));
+    });
+  }
+  document.documentElement.style.setProperty("--reading-size", state.size + "px");
+  $("size").value = state.size;
+  $("rate").value = state.rate;
+  $("rateOut").textContent = state.rate.toFixed(1) + "×";
+  renderPosition();
+}
+
+function renderPosition() {
+  const n = state.sentences.length;
+  document.querySelectorAll(".s").forEach((el) => {
+    const i = Number(el.dataset.i);
+    el.classList.toggle("now", i === state.index && n > 0);
+    el.classList.toggle("done", i < state.index);
+  });
+  $("progress").style.width = n ? ((state.index / n) * 100).toFixed(1) + "%" : "0%";
+  $("count").textContent = n ? `${Math.min(state.index + 1, n)} / ${n}` : "no text yet";
+  $("eta").textContent = n ? etaText() : "";
+  $("play").setAttribute("aria-label", state.playing ? "Pause" : "Play");
+  $("playIcon").innerHTML = state.playing
+    ? '<path d="M6 5h4v14H6zm8 0h4v14h-4z"/>'
+    : '<path d="M8 5v14l11-7z"/>';
+  const now = document.querySelector(".s.now");
+  if (now && state.playing) now.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+function etaText() {
+  // A speech voice at 1.0× runs near 160 words per minute. Good enough for a countdown.
+  const words = state.sentences.slice(state.index).reduce((a, s) => a + s.text.split(/\s+/).length, 0);
+  const minutes = words / (160 * state.rate);
+  if (minutes < 1) return "under a minute left";
+  return `${Math.round(minutes)} min left`;
+}
+
+/* ---------- 2c. Voices ---------- */
+function loadVoices() {
+  if (!canSpeak) return;
+  const voices = synth.getVoices();
+  if (!voices.length) return;
+  const sel = $("voice");
+  const lang = (navigator.language || "en").toLowerCase();
+  const sorted = voices.slice().sort((a, b) => {
+    const am = a.lang.toLowerCase().startsWith(lang.slice(0, 2)) ? 0 : 1;
+    const bm = b.lang.toLowerCase().startsWith(lang.slice(0, 2)) ? 0 : 1;
+    return am - bm || a.name.localeCompare(b.name);
+  });
+  sel.innerHTML = '<option value="">Device default</option>';
+  sorted.forEach((v) => {
+    const o = document.createElement("option");
+    o.value = v.name;
+    o.textContent = `${v.name} (${v.lang})${v.localService ? "" : " · online"}`;
+    sel.appendChild(o);
+  });
+  sel.value = state.voiceName && voices.some((v) => v.name === state.voiceName) ? state.voiceName : "";
+  $("voiceStatus").textContent = `${voices.length} voices available on this device.`;
+}
+function pickVoice() {
+  if (!state.voiceName) return null;
+  return synth.getVoices().find((v) => v.name === state.voiceName) || null;
+}
+
+/* ---------- 3. SPEAKING — the loop ----------
+   speakCurrent() says one sentence. When the phone reports it finished,
+   we move to the next one and call speakCurrent() again. That's the loop. */
+function speakCurrent() {
+  if (!state.playing) return;
+  if (state.index >= state.sentences.length) { stop(true); return; }
+  const myToken = ++token;
+  const u = new SpeechSynthesisUtterance(state.sentences[state.index].text);
+  u.rate = state.rate;
+  const v = pickVoice();
+  if (v) { u.voice = v; u.lang = v.lang; }
+  u.onend = () => {
+    if (myToken !== token || !state.playing) return; // an old utterance; ignore it
+    state.index += 1;
+    save();
+    renderPosition();
+    speakCurrent();
+  };
+  u.onerror = (e) => {
+    if (myToken !== token) return;
+    if (e.error === "interrupted" || e.error === "canceled") return; // we caused it
+    $("textStatus").textContent = "The phone's speech engine reported: " + e.error;
+    stop(false);
+  };
+  synth.speak(u);
+}
+
+async function play() {
+  if (!canSpeak) { $("count").textContent = "This browser has no speech engine."; return; }
+  if (!state.sentences.length) { openPanel("Text"); return; }
+  if (state.index >= state.sentences.length) state.index = 0;
+  state.playing = true;
+  synth.cancel();            // clear anything queued from before
+  renderPosition();
+  speakCurrent();
+  try { wakeLock = await navigator.wakeLock?.request("screen"); } catch (e) { /* not supported; fine */ }
+}
+
+function stop(finished) {
+  state.playing = false;
+  token++;                   // invalidate callbacks from the utterance we're about to cancel
+  if (canSpeak) synth.cancel();
+  if (finished) state.index = state.sentences.length ? state.sentences.length - 1 : 0;
+  save();
+  renderPosition();
+  try { wakeLock?.release(); } catch (e) { /* ignore */ }
+  wakeLock = null;
+}
+
+function jumpTo(i) {
+  state.index = Math.max(0, Math.min(i, Math.max(state.sentences.length - 1, 0)));
+  save();
+  if (state.playing) { token++; synth.cancel(); renderPosition(); speakCurrent(); }
+  else renderPosition();
+}
+
+function setRate(r) {
+  state.rate = Math.round(Math.max(0.5, Math.min(2, r)) * 10) / 10;
+  $("rate").value = state.rate;
+  $("rateOut").textContent = state.rate.toFixed(1) + "×";
+  save();
+  if (state.playing) { token++; synth.cancel(); speakCurrent(); } // restart current sentence at the new speed
+  else renderPosition();
+}
+
+function setText(text, statusMsg) {
+  stop(false);
+  state.text = text;
+  state.sentences = splitSentences(text);
+  state.index = 0;
+  save();
+  render();
+  $("main").scrollTop = 0;
+  if (statusMsg) $("textStatus").textContent = statusMsg;
+}
+
+/* ---------- Panels ---------- */
+function openPanel(name) { $("panel" + name).hidden = false; $("scrim" + name).hidden = false; }
+function closePanel(name) { $("panel" + name).hidden = true; $("scrim" + name).hidden = true; }
+
+/* ---------- 4. EVENTS — wiring buttons to the functions above ---------- */
+$("play").addEventListener("click", () => (state.playing ? stop(false) : play()));
+$("prev").addEventListener("click", () => jumpTo(state.index - 1));
+$("next").addEventListener("click", () => jumpTo(state.index + 1));
+$("slower").addEventListener("click", () => setRate(state.rate - 0.1));
+$("faster").addEventListener("click", () => setRate(state.rate + 0.1));
+$("rate").addEventListener("input", (e) => setRate(Number(e.target.value)));
+$("size").addEventListener("input", (e) => {
+  state.size = Number(e.target.value);
+  document.documentElement.style.setProperty("--reading-size", state.size + "px");
+  save();
+});
+$("sheet").addEventListener("click", (e) => {
+  const s = e.target.closest(".s");
+  if (!s) return;
+  jumpTo(Number(s.dataset.i));
+  if (!state.playing) play();
+});
+
+$("openText").addEventListener("click", () => { $("input").value = state.text; openPanel("Text"); });
+$("closeText").addEventListener("click", () => closePanel("Text"));
+$("scrimText").addEventListener("click", () => closePanel("Text"));
+$("openSettings").addEventListener("click", () => { loadVoices(); openPanel("Settings"); });
+$("closeSettings").addEventListener("click", () => closePanel("Settings"));
+$("scrimSettings").addEventListener("click", () => closePanel("Settings"));
+
+$("load").addEventListener("click", () => {
+  const t = $("input").value.trim();
+  if (!t) { $("textStatus").textContent = "Nothing to read yet. Paste some text first."; return; }
+  setText(t);
+  closePanel("Text");
+});
+$("sample").addEventListener("click", () => { $("input").value = SAMPLE; setText(SAMPLE, "Sample loaded."); });
+$("paste").addEventListener("click", async () => {
+  try {
+    const t = await navigator.clipboard.readText();
+    if (!t) { $("textStatus").textContent = "Clipboard is empty."; return; }
+    $("input").value = t;
+    $("textStatus").textContent = "Pasted. Tap “Read this”.";
+  } catch (e) {
+    $("textStatus").textContent = "This browser won't hand over the clipboard. Long-press the box and paste instead.";
+  }
+});
+$("file").addEventListener("change", (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => { $("input").value = String(r.result); $("textStatus").textContent = `Opened ${f.name}. Tap “Read this”.`; };
+  r.onerror = () => { $("textStatus").textContent = "Couldn't read that file."; };
+  r.readAsText(f);
+});
+
+$("voice").addEventListener("change", (e) => { state.voiceName = e.target.value; save(); if (state.playing) { token++; synth.cancel(); speakCurrent(); } });
+$("testVoice").addEventListener("click", () => {
+  if (!canSpeak) return;
+  synth.cancel(); token++;
+  const u = new SpeechSynthesisUtterance("This is how I sound at this speed.");
+  u.rate = state.rate; const v = pickVoice(); if (v) { u.voice = v; u.lang = v.lang; }
+  const wasPlaying = state.playing; state.playing = false; renderPosition();
+  u.onend = () => { if (wasPlaying) play(); };
+  synth.speak(u);
+});
+$("restart").addEventListener("click", () => { jumpTo(0); closePanel("Settings"); $("main").scrollTop = 0; });
+
+// Space bar toggles play when you're not typing (handy on a laptop).
+document.addEventListener("keydown", (e) => {
+  if (e.code === "Space" && !["TEXTAREA", "INPUT", "SELECT"].includes(e.target.tagName)) {
+    e.preventDefault(); state.playing ? stop(false) : play();
+  }
+});
+// Phones stop speech when the page is hidden; keep our state honest.
+document.addEventListener("visibilitychange", () => { if (document.hidden && state.playing) stop(false); });
+if (canSpeak) synth.addEventListener?.("voiceschanged", loadVoices);
+
+/* ---------- 5. BOOT ---------- */
+function start(hot) {
+  const saved = restore();
+  const src = hot && hot.text ? hot : saved;
+  if (src) {
+    state.rate = Number(src.rate) || 1;
+    state.size = Number(src.size) || 19;
+    state.voiceName = src.voiceName || "";
+  }
+  state.text = (src && src.text) || SAMPLE;
+  state.sentences = splitSentences(state.text);
+  state.index = Math.min(Number(src && src.index) || 0, Math.max(state.sentences.length - 1, 0));
+  render();
+  loadVoices();
+  if (!canSpeak) $("count").textContent = "No speech engine in this browser.";
+  window.claude?.hot?.snapshot?.(() => ({ text: state.text, index: state.index, rate: state.rate, size: state.size, voiceName: state.voiceName }));
+}
+window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? null);
+</script>
+</body>
+</html>
