@@ -3,6 +3,21 @@
 Principle: every lesson = one new idea + why it works + something to play + a self-check.
 History only appears when it explains *why* a rule exists.
 
+## Part 0 — Know Your Instrument (before playing a note)
+0.1 Types of piano: grand (concert, parlor, baby), upright (studio, console, spinet),
+    digital, hybrid — and what each is good and bad at for a learner
+0.2 How a piano makes sound: key → action → hammer → string → bridge → soundboard
+0.3 Materials and why they were chosen: spruce soundboard, maple rim, cast-iron plate,
+    steel and copper-wound strings, wool-felt hammers, key tops (plastic vs. historic ivory)
+0.4 The pedals: damper/sustain (right), una corda/soft (left), sostenuto (middle),
+    and the upright "practice/mute" middle pedal — what each does mechanically
+0.5 The lid, music desk and fallboard: grand lid heights (full stick, short stick, closed),
+    how lid position changes volume and tone, upright lid and front panel
+0.6 Layout of the instrument: 88 keys (52 white, 36 black), range from A0 to C8,
+    bench height and distance, where to sit
+0.7 Choosing and caring for a piano: tuning, humidity, digital-piano features that matter
+    (weighted keys, full 88 keys, a real sustain pedal)
+
 ## Part 1 — Sound and the Keyboard (no notation yet)
 1. What a note is: pitch, vibration, higher/lower
 2. The keyboard map: groups of 2 and 3 black keys, finding C
@@ -58,6 +73,12 @@ History only appears when it explains *why* a rule exists.
 38. All 12 major and minor keys
 39. Sight-reading routine
 40. A graded repertoire path from here onward
+
+## Images and sources policy
+- Only freely licensed images: public domain, CC0, CC BY, or CC BY-SA
+  (Wikimedia Commons is the main source). No "found on Google" images.
+- Every image is logged in `sources/CREDITS.md` with title, author, licence, and link.
+- Where no suitable free photo exists, we draw our own diagram (we then own it outright).
 
 ## Every lesson contains
 - Concept (short, plain language)
