@@ -169,7 +169,7 @@ session musicians work this way (the "Nashville Number System").
 
 ---
 
-## 8. The 5-minute "rep" format
+## 8. The 5-minute "rep" format (sessions: 5 or 10 minutes)
 
 Every unit is one **rep** of about 5 minutes:
 
@@ -180,7 +180,7 @@ Every unit is one **rep** of about 5 minutes:
 | 3:30–4:30 | **Make it**: create something tiny | Make up a 2-chord loop. |
 | 4:30–5:00 | **Check it**: pass/fail test | Can you find a major chord from any key in under 5 seconds? |
 
-**A daily session = 3–6 reps** (15–30 minutes), mixed:
+**A session = 1 rep (5 min) or 2 reps (10 min).** Several sessions spread across the day, mixed:
 1 new rep + 2 review reps (spaced, older material) + 1 "play for fun" rep.
 
 **Mastery gates replace page-turning.** You don't move on until you pass the check.
