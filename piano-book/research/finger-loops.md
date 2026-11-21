@@ -136,8 +136,47 @@ Attach a loop to something you already do:
 
 ---
 
-## 8. Open design questions
+## 8. Loop lifecycle and the 🔁 CARRY marker (decided)
 
-- Should loops be one per lesson, or a separate "loop library" at the back of the book?
+Loops live **inside the sessions**. Each loop moves through three stages:
+
+| Stage | Where | What happens | Gate to the next stage |
+|---|---|---|---|
+| **1. Learn** | In session | Do the loop once or twice, following the lesson | **In-session goal** (e.g. 3 clean runs at 60 BPM) |
+| **2. 🔁 CARRY** | Out of session, daily | Marker appears: *practise this between sessions until the carry goal is met* | **Carry goal**, checked at the start of a session |
+| **3. ✅ LOCKED** | Review rotation | Skill is owned. It comes back occasionally in review reps so it doesn't fade | None |
+
+### Making "the feel" testable
+
+"It feels right" is real but vague, so each carry goal turns *feel* into checks anyone
+can run. A loop is LOCKED when it passes **all four**:
+
+1. **Cold start:** correct on the *first* try of the day, with no warm-up.
+2. **Eyes closed:** you can do it without looking at your hands.
+3. **Talk test:** you can do it while counting aloud or holding a simple conversation.
+   (If your attention is free, the movement is automatic. This is the "feel".)
+4. **Relaxed:** passes the tension scan (shoulders down, wrist soft, no squeezing),
+   checked on a phone video.
+
+Plus the loop's own number target (e.g. clean at 80 BPM on the tempo ladder).
+
+### Rules for moving on
+
+- A lesson that **depends on** a carried loop can't start until that loop is LOCKED.
+  *Example:* scales need the thumb-crossing loop (C1) LOCKED first.
+- **At most 3 loops in CARRY at once.** If you have 3, new lessons pause and sessions
+  focus on locking one. This keeps the out-of-session work small enough to actually do.
+- Lessons that don't depend on a carried loop can keep going, so you're never stuck
+  waiting on one slow skill.
+
+### In the book
+
+- The 🔁 CARRY marker appears beside the loop, with its carry goal in a box.
+- A **Carry tracker** page (printable) lists active loops, the date each started, and
+  the four checks to tick off.
+- In the PDF the marker will be our own drawn icon, not an emoji, so it prints reliably.
+
+## 9. Open design questions
+
 - Should each loop have a QR code linking to a short demo video (which we'd need to film)?
 - A one-page printable "loop card" per family, to stick on the fridge or desk?
